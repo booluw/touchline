@@ -146,6 +146,12 @@ These decisions are deliberately open in the source specifications. Engineering 
 | **OPD-09** | V1/V2 Ownership Rules | S10, S12, S13 | Define minimum manager reputation required to create custom competitions or purchase club equity. |
 | **OPD-10** | Monetization Packaging | S16-02 | Pricing tiers for premium analytical dashboards and cosmetic cosmetics, enforcing 0% pay-to-win. |
 
+### Resolved OPD entries
+
+| Decision ID | Resolution | Resolved by |
+|---|---|---|
+| **OPD-11** (topics doc `world.nationality_pool`) | The weighted nationality distribution pool lives in the `ref` schema — `ref.nationalities.generation_weight` plus `ref.name_pool` — not `world.nationality_pool`. Nationality/name data is identical across parallel worlds, so it is non-world-scoped by design (migrations `0002_ref`, `backend/migrations/README.md`). Tech plan §7 and the Phase-0 handoff notes used the name `world.nationality_pool`; that wording is superseded. `pkg/playergen` consumes the same weights regardless of table name (S01-04). | S01-01 |
+
 ---
 
 ## Product Metrics & Stage Gates

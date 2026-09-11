@@ -17,6 +17,14 @@ services:
       timeout: 3s
       retries: 5
 
+  # One-shot: applies pending migrations against Neon before apps boot.
+  migrations:
+    image: migrate/migrate:v4.18.1
+    command: ["-database", "${DATABASE_URL:?Neon DATABASE_URL required}", "-path", "/migrations", "up"]
+    volumes:
+      - ./backend/migrations:/migrations
+    restart: "no"
+
   api:
     build:
       context: .
@@ -35,6 +43,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
   scheduler:
     build:
@@ -48,6 +58,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
   worker:
     build:
@@ -61,6 +73,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
   frontend:
     build:

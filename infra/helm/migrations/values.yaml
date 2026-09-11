@@ -1,0 +1,25 @@
+image:
+  repository: migrate/migrate
+  tag: v4.18.1
+  pullPolicy: IfNotPresent
+
+# DATABASE_URL is injected from an existing Kubernetes secret (created
+# out-of-band; the application charts expect the same secret).
+databaseUrlSecret:
+  name: touchline-db
+  key: DATABASE_URL
+
+# Directory inside the container where the migration SQL is mounted.
+migrationPath: /migrations
+
+job:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

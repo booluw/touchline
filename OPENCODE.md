@@ -101,7 +101,7 @@ README.md, .gitignore, OPENCODE.md
 
 ## What is NOT built yet (Phase 0 backlog — next steps for an agent)
 
-1. **DB migrations** (golang-migrate, one set per schema). Define `world.events` first (used by eventbus), plus `world.nationality_pool`, `world.world_config` (tick cadences), `world.news_stories`.
+1. **DB migrations** (golang-migrate, one set per schema). Done in `backend/migrations/0000–0014` (see its README). The weighted nationality pool is `ref.nationalities.generation_weight` + `ref.name_pool` (global, non-world-scoped — see resolved decision OPD-11 in `docs/product_manager.md`); `world.events`, `world.world_config` (tick cadences), and `world.news_stories` are defined under `world`. Migrations execute via a Helm pre-install/pre-upgrade hook (`infra/helm/migrations`), a `docker compose` migration service, and a CI gate.
 2. **Wire river properly**: `pkg/eventbus` currently inserts into `world.events` directly; still needs real river round-trip (publish→queue→worker). Add river dep back to go.mod when implemented (tidy currently strips unused deps — expected).
 3. **Gin API wiring** (`cmd/api`): real router, auth middleware, `/api/auth/login|refresh`, `/api/dashboard`, health.
 4. **Scheduler**: `robfig/cron`, read cadences from `world_config`, emit `WORLD_TICK` events.

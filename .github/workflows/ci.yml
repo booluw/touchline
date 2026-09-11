@@ -62,6 +62,41 @@ jobs:
       - name: Typecheck
         run: npm run typecheck --if-present
 
+  migrations:
+    name: Migrations up/down/re-up
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: touchline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Install golang-migrate
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+      - name: Migrate up
+        run: migrate -database "$DATABASE_URL" -path backend/migrations up
+      - name: Migrate down -all
+        run: migrate -database "$DATABASE_URL" -path backend/migrations down -all
+      - name: Migrate re-up
+        run: migrate -database "$DATABASE_URL" -path backend/migrations up
+      - name: Verify version
+        run: migrate -database "$DATABASE_URL" -path backend/migrations version
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
+
   build-images:
     name: Build + push images
     runs-on: ubuntu-latest

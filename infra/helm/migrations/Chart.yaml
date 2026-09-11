@@ -1,0 +1,6 @@
+apiVersion: v2
+name: touchline-migrations
+description: Touchline DB migrations — golang-migrate Job run as a Helm pre-install/pre-upgrade hook
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
