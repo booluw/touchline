@@ -39,7 +39,8 @@ processes read the same vars from the environment; for bare `go run` use
 | `API_PORT` | No | `8080` | API listen port. |
 | `SCHEDULER_PORT` | No | `8081` | Scheduler health listener. |
 | `WORKER_PORT` | No | `8082` | Worker health listener. |
-| `ENV` | No | `development` | Environment tag. |
+| `ENV` | No | `development` | Environment tag. Any non-`development` value makes the API set `Secure` on auth cookies. |
+| `APP_ORIGIN` | No | `http://localhost:3000` | Exact browser origin allowed by CORS and credentialed cookie requests. |
 | `NUXT_PUBLIC_API_BASE` | No | `http://localhost:8080` | Baked into the frontend client bundle at build time (compose build arg). |
 
 Secrets are never committed: `.gitignore` excludes `.env*` while keeping
@@ -101,6 +102,24 @@ cd backend
 migrate -database "$DATABASE_URL" -path migrations up
 ```
 
+Bare `go run` processes need `JWT_SECRET` set — the API fails fast without it
+(compose supplies a dev default). The auth flow also wants `APP_ORIGIN` and
+`ENV=development` (controls CORS + cookie `Secure`):
+
+```bash
+cd backend
+set -a; source ../.env; set +a
+go run ./cmd/api   # POST /api/auth/{login,refresh}, GET /api/dashboard
+```
+
+Create a dev account (world must already exist, e.g.
+`INSERT INTO world.worlds (name, status) VALUES ('Sandbox','active')`):
+
+```bash
+cd backend
+go run ./cmd/user-create -email you@example.com -password 'hunter2' -world-id <uuid>
+```
+
 Reference data without compose:
 
 ```bash
@@ -110,14 +129,35 @@ go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names
 
 ### Integration tests
 
-`pkg/eventbus` integration tests (tag `integration`) need a real Postgres.
-Point them at any reachable instance with `TEST_DATABASE_URL`
-(migrations are applied automatically by the test); without it they fall back
-to testcontainers, which requires Docker:
+Integration tests (tag `integration`) live in `pkg/eventbus`, `internal/auth`,
+and `cmd/api`, sharing a harness in `internal/testdb` that migrates and
+truncates a real Postgres. Point them at any reachable instance with
+`TEST_DATABASE_URL` (without it they fall back to testcontainers, which
+requires Docker):
 
 ```bash
-TEST_DATABASE_URL="$DATABASE_URL" go test -tags integration ./pkg/eventbus/...
+TEST_DATABASE_URL="$DATABASE_URL" go test -p 1 -tags integration -race \
+  ./pkg/eventbus/... ./internal/auth/... ./cmd/api/...
 ```
+
+`-p 1` serializes packages: each test truncates the shared database, so
+concurrent packages would wipe each other's fixtures mid-test.
+
+### Auth session flow
+
+- `POST /api/auth/login` — verifies credentials, resolves the manager's world,
+  and sets `access_token` (Path `/`) + `refresh_token` (Path `/api/auth`)
+  httpOnly cookies. A jobless account spanning multiple worlds returns
+  `{"status":"worlds","worlds":[...]}` with **no** cookies; re-post with
+  `world_id` to pick.
+- `POST /api/auth/refresh` — rotates the refresh-token session in
+  `auth.sessions` (tokens stored hashed only) and sets a fresh cookie pair.
+- `GET /api/dashboard` — protected demo route; returns the empty
+  `{urgent,important,interesting}` shape until S07-01.
+
+One account can hold one manager row per world (`uq_managers_user_world`) and
+at most one *job* across all worlds (`uq_manager_one_job_per_user`); the JWT
+carries no `world_id` — the world is derived from the manager row. See OPD-15.
 
 ## CI
 

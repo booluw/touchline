@@ -15,11 +15,14 @@ export interface DashboardData {
 }
 
 export function useDashboard() {
-  const { public: { apiBase } } = useRuntimeConfig()
+  const { authedFetch } = useAuth()
 
   async function fetchDashboard(): Promise<DashboardData> {
-    const { data } = await useFetch<DashboardData>(`${apiBase}/api/dashboard`)
-    return data.value ?? { urgent: [], important: [], interesting: [] }
+    const res = await authedFetch('/api/dashboard')
+    if (!res.ok) {
+      return { urgent: [], important: [], interesting: [] }
+    }
+    return (await res.json()) as DashboardData
   }
 
   return { fetchDashboard }

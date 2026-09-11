@@ -1,0 +1,168 @@
+//go:build integration
+
+// Package testdb provides the shared integration-test harness: a Postgres
+// pool with migrations applied, plus fixtures for auth/session tests. Mirrors
+// the harness established in pkg/eventbus (TEST_DATABASE_URL or testcontainers).
+package testdb
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
+	"golang.org/x/crypto/bcrypt"
+)
+
+// New returns a pooled, migrated, truncated database for integration tests.
+func New(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		req := testcontainers.ContainerRequest{
+			Image:        "postgres:16",
+			ExposedPorts: []string{"5432/tcp"},
+			Env: map[string]string{
+				"POSTGRES_USER":     "touchline",
+				"POSTGRES_PASSWORD": "touchline",
+				"POSTGRES_DB":       "touchline",
+			},
+			WaitingFor: wait.ForLog("database system is ready to accept connections"),
+		}
+		container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+			ContainerRequest: req,
+			Started:          true,
+		})
+		if err != nil {
+			t.Fatalf("start postgres container: %v", err)
+		}
+		t.Cleanup(func() { _ = container.Terminate(context.Background()) })
+
+		host, err := container.Host(ctx)
+		if err != nil {
+			t.Fatalf("container host: %v", err)
+		}
+		port, err := container.MappedPort(ctx, "5432/tcp")
+		if err != nil {
+			t.Fatalf("container port: %v", err)
+		}
+		dbURL = fmt.Sprintf("postgres://touchline:touchline@%s:%s/touchline?sslmode=disable", host, port.Port())
+	}
+
+	m, err := migrate.New("file://../../migrations", dbURL)
+	if err != nil {
+		t.Fatalf("init migrations: %v", err)
+	}
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	_, _ = m.Close()
+
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	if _, err := pool.Exec(context.Background(),
+		`TRUNCATE TABLE river.river_job, world.events, world.worlds,
+		 manager.managers, manager.manager_history, manager.job_security_snapshots,
+		 manager.manager_reputation_events, club.clubs, club.club_dna,
+		 auth.sessions, auth.users RESTART IDENTITY CASCADE`); err != nil {
+		t.Fatalf("reset test tables: %v", err)
+	}
+	return pool
+}
+
+// CreateWorld inserts a world row and returns its id.
+func CreateWorld(t *testing.T, pool *pgxpool.Pool, name string) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO world.worlds (name, status) VALUES ($1, 'active') RETURNING id`, name).Scan(&id); err != nil {
+		t.Fatalf("create world: %v", err)
+	}
+	return id
+}
+
+// Join describes one manager row for a user account.
+type Join struct {
+	WorldID  uuid.UUID
+	Status   string // manager.managers.status; default 'unemployed'
+	Employed bool   // sets status='active' + a current club
+}
+
+// CreateUser inserts an account plus one manager row per join and returns the
+// account id. Employment is represented by a minimal club row.
+func CreateUser(t *testing.T, pool *pgxpool.Pool, email, password string, joins []Join) uuid.UUID {
+	t.Helper()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+
+	ctx := context.Background()
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO auth.users (email, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id`,
+		email, string(hash), email).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	for i, j := range joins {
+		status := j.Status
+		if status == "" {
+			status = "unemployed"
+		}
+		if j.Employed {
+			status = "active"
+		}
+
+		var clubID *uuid.UUID
+		if j.Employed {
+			id, err := createClub(ctx, pool, j.WorldID, fmt.Sprintf("club-%s-%d", email, i))
+			if err != nil {
+				t.Fatalf("create club: %v", err)
+			}
+			clubID = &id
+		}
+
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO manager.managers (world_id, user_id, current_club_id, status)
+			VALUES ($1, $2, $3, $4)`, j.WorldID, userID, clubID, status); err != nil {
+			t.Fatalf("create manager: %v", err)
+		}
+	}
+	return userID
+}
+
+func createClub(ctx context.Context, pool *pgxpool.Pool, worldID uuid.UUID, name string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := pool.QueryRow(ctx, `
+		INSERT INTO club.clubs (world_id, name, short_name, country)
+		VALUES ($1, $2, $2, 'testland') RETURNING id`, worldID, name).Scan(&id)
+	return id, err
+}
+
+// CreateClub inserts a minimal club row and returns its id.
+func CreateClub(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) uuid.UUID {
+	t.Helper()
+	id, err := createClub(context.Background(), pool, worldID, "fixture-club")
+	if err != nil {
+		t.Fatalf("create club: %v", err)
+	}
+	return id
+}

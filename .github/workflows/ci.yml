@@ -43,7 +43,7 @@ jobs:
         run: go test -race ./...
 
   eventbus-integration:
-    name: Eventbus integration tests
+    name: Integration tests (eventbus, auth, api)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -71,8 +71,10 @@ jobs:
         run: |
           go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
           migrate -database "$TEST_DATABASE_URL" -path migrations up
-      - name: Eventbus integration tests
-        run: go test -tags integration -race ./pkg/eventbus/...
+      - name: Integration tests
+        # -p 1 serializes packages: the harness truncates a shared database,
+        # so concurrent packages would wipe each other's fixtures mid-test.
+        run: go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./cmd/api/...
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
 

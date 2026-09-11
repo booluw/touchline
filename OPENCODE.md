@@ -56,7 +56,7 @@ Both are the source of truth. Do not invent systems absent from these docs.
 ## Which world/manager model (plan §18 resolutions)
 
 - **Multiple parallel worlds from day one.** Every schema carries `world_id` from first migration. Scheduler is world-scoped.
-- **One manager, one club at a time** platform-wide. To take another job: resign/by sack. `manager_reputation` = global append-only *history log* (display only); any reputation *score* used in hiring logic is computed **world_id-scoped**.
+- **One account, many worlds.** Membership is one `manager.managers` row per (user, world); a user holds at most **one job platform-wide** (`uq_manager_one_job_per_user`), and at most one row per (user, world) (`uq_managers_user_world`, migration `0023`). JWT claims carry no `world_id` — the active world is derived from the manager row (login ladder: job world wins → explicit pick → single active world → world picker → single row → list). Full contract: OPD-15.
 - Match viewing = event-feed (see above). Email notifications (SES/Postmark/SendGrid behind interface), user-configurable prefs (`notification_preferences` table), Web Push later.
 
 ---
@@ -65,12 +65,17 @@ Both are the source of truth. Do not invent systems absent from these docs.
 
 ```
 backend/
-  cmd/{api,scheduler,worker}/main.go     — three binaries (build ✓): api connects Postgres (GET /health + /health/db), scheduler + worker db-connected with health listeners (:8081/:8082)
+  cmd/{api,scheduler,worker}/main.go     — three binaries (build ✓). api connects Postgres (GET /health + /health/db), scheduler + worker db-connected with health listeners (:8081/:8082)
+  cmd/api/{router,handlers,middleware}.go — Gin auth API (S02-01): POST /api/auth/login (world-picker branch), POST /api/auth/refresh (rotation), protected GET /api/dashboard stub; httpOnly cookie pair; CORS via APP_ORIGIN
   cmd/ref-seed/main.go                   — reference-data seeder (nationalities + name_pool), idempotent; wired into compose + CI
+  cmd/user-create/main.go                — dev bootstrap account CLI (email/password/world; creates auth.users + unemployed manager; prints OPD-02 note)
   internal/{club,player,transfer,finance,match,social,world}/  — domain packages + Service interfaces (stubs + structs, no DB impl yet)
+  internal/auth/    — auth Service: Login (OPD-15 world ladder) + Refresh (rotate+revoke via auth.sessions, hashed tokens); sentinel errors; integration tests (tag `integration`)
+  internal/testdb/  — shared integration harness (migrate + truncate, CreateWorld/CreateUser/Join/CreateClub); consumed by pkg/eventbus, internal/auth, cmd/api tests
   pkg/eventbus/    — EventBus (river, Postgres-native). river.go: RiverBus publish (world.events + enqueue), Subscribe, Start/Stop; worker.go: touchline_event job; integration + unit tests
   pkg/playergen/   — DB-free procedural generation: LoadNameData (curated data/names JSON), PoolGenerator, NationalityPool, NameRegistry, PlayerFactory (age 17–33, 12 positions), tests ✓
-  pkg/auth/        — JWTConfig, GenerateTokenPair, ValidateToken, tests ✓ (uses golang-jwt/v5)
+  pkg/auth/        — JWTConfig, GenerateTokenPair (access sub/user_id/jti/exp/iat/type, refresh sub/jti/exp/iat/type; HS256-pinned), ValidateAccessToken/ValidateRefreshToken, HashRefreshToken, tests ✓ (golang-jwt/v5)
+  migrations/      — 0000–0014 base + 0016–0022 river + 0023 manager world scoping (uq_managers_user_world, uq_manager_one_job_per_user)
   data/names/      — 21 curated nationality datasets (README.md + PROVENANCE.md); eng/sco are documented non-ISO slugs
   go.mod           — module github.com/touchline/backend, go 1.25
 frontend/
@@ -95,7 +100,8 @@ README.md, .gitignore, OPENCODE.md
 - `cd backend && go build ./...` ✓
 - `cd backend && go test ./...` ✓ (auth + playergen smoke tests)
 - `cd backend && go vet ./...` ✓
-- Frontend `npm install` + `npm run dev` NOT yet exercised (no package-lock committed; `npm install` will generate it).
+- Integration tests (tag `integration`) hit a real Postgres pointed at by `TEST_DATABASE_URL` (testcontainers fallback needs Docker): `cd backend && TEST_DATABASE_URL=… go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./cmd/api/...` ✓ (eventbus round-trip, auth service ladder + rotation, HTTP login/dashboard/refresh).
+- Frontend `npm install` + `npm run dev` NOT yet exercised (no package-lock committed; `npm install` will generate it). `vue-tsc --noEmit` typecheck passes locally once `vite` is resolvable (pnpm doesn't hoist a direct `node_modules/vite`; CI's `npm install` hoists so the plain command works there).
 - `docker compose` config-checked and full-stack-boot verified in the CI `compose` job; local Docker is absent on the dev machine, so the stack boot is CI-verified only (see `docs/development.md`, OPD-14).
 
 ---
@@ -104,7 +110,7 @@ README.md, .gitignore, OPENCODE.md
 
 1. **DB migrations** (golang-migrate, one set per schema). Done in `backend/migrations/0000–0014` (base schemas) + `0016–0022` (river), see its README. The weighted nationality pool is `ref.nationalities.generation_weight` + `ref.name_pool` (global, non-world-scoped — see resolved decision OPD-11 in `docs/product_manager.md`); `world.events`, `world.world_config` (tick cadences), and `world.news_stories` are defined under `world`. Migrations execute via a Helm pre-install/pre-upgrade hook (`infra/helm/migrations`), a `docker compose` migration service, and a CI gate.
 2. **~~Wire river properly~~** ✅ Done (S01-02): `pkg/eventbus` runs a real river round-trip against exported migrations `0016–0022`; publish → queue → worker handler, unique-by-args enqueue, at-least-once delivery with handler-side idempotency, integration-tested.
-3. **Gin API wiring** (`cmd/api`): real router, auth middleware, `/api/auth/login|refresh`, `/api/dashboard`, health.
+3. **~~Gin API wiring~~** ✅ Done (S02-01): `cmd/api` real router + CORS + auth middleware; `POST /api/auth/login` (+ world picker branch), `POST /api/auth/refresh` (rotation against `auth.sessions`), protected `GET /api/dashboard` stub; `cmd/user-create` dev bootstrap; frontend `useAuth` + `login.vue` world picker (httpOnly cookies, `credentials:'include'`). Session/identity model: OPD-15.
 4. **Scheduler**: `robfig/cron`, read cadences from `world_config`, emit `WORLD_TICK` events.
 5. **Worker**: subscribe to ticks, dispatch to engine handlers (granularity-scoped).
 6. **~~playergen data~~** ✅ Done (S01-04): 21 curated nationality datasets in `backend/data/names` (see its README + PROVENANCE).

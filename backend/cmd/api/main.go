@@ -4,13 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	internalauth "github.com/touchline/backend/internal/auth"
+	pkgjwt "github.com/touchline/backend/pkg/auth"
 )
+
+type server struct {
+	svc           *internalauth.Service
+	jwtCfg        pkgjwt.JWTConfig
+	pool          *pgxpool.Pool
+	cookiesSecure bool
+	appOrigin     string
+}
 
 func main() {
 	port := os.Getenv("API_PORT")
@@ -25,22 +34,28 @@ func main() {
 	defer pool.Close()
 	log.Printf("connected to PostgreSQL")
 
-	r := gin.Default()
+	jwtCfg := pkgjwt.JWTConfig{
+		Secret:     os.Getenv("JWT_SECRET"),
+		AccessTTL:  envDuration("JWT_ACCESS_TTL", 15*time.Minute),
+		RefreshTTL: envDuration("JWT_REFRESH_TTL", 720*time.Hour),
+	}
+	if jwtCfg.Secret == "" {
+		log.Fatalf("JWT_SECRET is required — set it in .env (see docs/development.md)")
+	}
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
-	r.GET("/health/db", func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-		defer cancel()
-		if err := pool.Ping(ctx); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "db-down"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "db-ok"})
-	})
+	appOrigin := envOr("APP_ORIGIN", "http://localhost:3000")
 
-	log.Printf("API server starting on :%s", port)
+	s := &server{
+		svc:           internalauth.NewService(pool, jwtCfg),
+		jwtCfg:        jwtCfg,
+		pool:          pool,
+		cookiesSecure: os.Getenv("ENV") != "development",
+		appOrigin:     appOrigin,
+	}
+
+	r := s.router()
+
+	log.Printf("API server starting on :%s (cors origin %s)", port, appOrigin)
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal(err)
 	}
@@ -66,4 +81,21 @@ func connectDB() (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("cannot reach PostgreSQL: %w", err)
 	}
 	return pool, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+		log.Printf("warning: invalid %s %q, using %s", key, v, fallback)
+	}
+	return fallback
 }
