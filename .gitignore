@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.output/
+.nuxt/
+dist/
+
+# Go
+backend/api
+backend/scheduler
+backend/worker
+*.test
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/

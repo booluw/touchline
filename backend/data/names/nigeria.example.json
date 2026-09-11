@@ -1,0 +1,5 @@
+{
+  "_comment": "Example/documented schema. Replace with curated data. File must be named <nationality>.json to be loaded (e.g. nigeria.json).",
+  "first_names": ["first_name_a", "first_name_b", "first_name_c"],
+  "last_names": ["last_name_a", "last_name_b", "last_name_c"]
+}

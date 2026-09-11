@@ -1,0 +1,74 @@
+# Touchline dev environment.
+# Postgres runs on Neon (see DATABASE_URL) per the technical plan — not in this stack.
+# Redis is the only backing store in the compose stack (NATS deferred; river chose as the Phase-0 event bus).
+
+name: touchline
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+    # The shared Dockerfile builds all three binaries; override CMD here.
+    command: ["/usr/local/bin/api"]
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
+      API_PORT: "8080"
+      ENV: development
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    build:
+      context: .
+    command: ["/usr/local/bin/scheduler"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
+      REDIS_URL: redis://redis:6379
+      SCHEDULER_PORT: "8081"
+      ENV: development
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+    command: ["/usr/local/bin/worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
+      REDIS_URL: redis://redis:6379
+      WORKER_PORT: "8082"
+      ENV: development
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+    environment:
+      NUXT_PUBLIC_API_BASE: http://localhost:8080
+    ports:
+      - "3000:3000"
+
+volumes:
+  redis-data:

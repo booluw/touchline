@@ -1,0 +1,6 @@
+apiVersion: v2
+name: touchline-scheduler
+description: Touchline tick scheduler — publishes WORLD_TICK events on configurable cadences
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

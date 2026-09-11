@@ -1,0 +1,24 @@
+# Go backend (multi-stage build, shared by api / scheduler / worker)
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+COPY backend/go.mod backend/ ./
+RUN go mod download
+
+COPY backend/ ./
+
+# Confirm the binary name and run tests before finishing the build stage's context
+RUN go build -o /out/api ./cmd/api && \
+    go build -o /out/scheduler ./cmd/scheduler && \
+    go build -o /out/worker ./cmd/worker
+
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /out/api /out/scheduler /out/worker /usr/local/bin/
+
+EXPOSE 8080
+
+CMD ["api"]

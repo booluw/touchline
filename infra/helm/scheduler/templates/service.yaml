@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "touchline-scheduler.fullname" . }}
+  labels:
+    app: {{ include "touchline-scheduler.name" . }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ include "touchline-scheduler.name" . }}
+  ports:
+    - port: {{ .Values.service.port }}
+      protocol: TCP
+      name: http

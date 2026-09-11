@@ -1,0 +1,30 @@
+replicaCount: 3
+
+image:
+  repository: ghcr.io/touchline/worker
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8082
+
+env:
+  WORKER_PORT: "8082"
+  ENV: production
+
+# HPA keys off event-bus queue depth. Override `hpa.enabled` in an environment overlay.
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  queueDepthThreshold: 100
+  # Custom metric expected from the event bus (river Postgres queue depth / NATS consumer lag).
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 2000m
+    memory: 1024Mi

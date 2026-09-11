@@ -1,0 +1,6 @@
+apiVersion: v2
+name: touchline-worker
+description: Touchline simulation worker pool — processes WORLD_TICK events (match, economic, daily, weekly, monthly, seasonal)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: touchline-api
+description: Touchline API gateway (Go/Gin) — authn/z, rate limiting, request validation
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
