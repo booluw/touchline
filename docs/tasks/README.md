@@ -5,9 +5,13 @@ This directory is the product-delivery backlog for Touchline. It translates the 
 ## Working rules
 
 - Complete tasks in sprint order unless a task explicitly identifies safe parallel work.
-- A task is complete only when every acceptance criterion is demonstrably met.
+- **Ownership:** a task is owned by the implementing agent (`opencode agent`). Ownership is assigned only when the owner asks to implement that task; the task file then records `Owner` and `Status: In progress` in its header. No bulk ownership assignment.
+- **Status/evidence gate:** a task is `Done` only when every acceptance criterion is demonstrably met and its `Delivery evidence` section links concrete implementation or verification. Do not mark `Done` on intent.
+- **Scope gate:** work entering a sprint must match the phase/sprint scope on the sprint map. Do not pull Phase 2+ (V1/V2) scope into the Phase 1 MVP merely because schema hooks exist.
 - Preserve the non-negotiable technical constraints in `OPENCODE.md`, especially server authority, event logging, determinism, world scoping, append-only finance ledgers, relationship graph modeling, structured board mandates, and explanation objects.
 - If a task needs a product rule not specified in the PRD or technical plan, stop and add it to `docs/product_manager.md` as an open decision. Do not invent the rule.
+- **Open decisions:** any requirement not resolved by the PRD, technical plan, or `OPENCODE.md` is recorded in the Open Product Decisions Registry in `docs/product_manager.md` before implementation relies on it.
+- **MVP validation:** MVP advancement is evaluated against the PRD §85 core-loop question (is managing a club in a world populated by other real managers more compelling than managing a club alone?) and the product metrics in PRD §79 (North Star: Meaningful Manager Decisions per Active Manager per Week).
 
 ## Sprint map
 

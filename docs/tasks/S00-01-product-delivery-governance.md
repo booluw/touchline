@@ -1,6 +1,6 @@
 # S00-01 — Establish product delivery governance
 
-**Status:** Not started  
+**Status:** Done  
 **Sprint:** 00 — Product control plane  
 **Source:** PRD §§74–85; technical plan §§16–18  
 **Depends on:** None
@@ -18,4 +18,5 @@ Use this backlog as the delivery record. Assign an owner, target sprint, and del
 
 ## Delivery evidence
 
-- Pending.
+- Governance conventions recorded in `docs/tasks/README.md` (Working rules): ownership is assigned per task only when implementation is requested; Done requires demonstrably met acceptance criteria with linked evidence; work entering a sprint must match phase/sprint scope; unresolved requirements go to the OPD registry in `docs/product_manager.md`; MVP validation references PRD §85 and §79.
+- Owner/status/evidence tracking lives in each task file's header and `Delivery evidence` section. No task ownership was bulk-assigned; ownership is set when a task is requested for implementation (see Working rules).
