@@ -67,11 +67,11 @@ Both are the source of truth. Do not invent systems absent from these docs.
 backend/
   cmd/{api,scheduler,worker}/main.go     — three binaries (all build ✓)
   internal/{club,player,transfer,finance,match,social,world}/  — domain packages + Service interfaces (stubs + structs, no DB impl yet)
-  pkg/eventbus/    — EventBus interface + river.go stub publish (inserts into world.events)
+  pkg/eventbus/    — EventBus (river, Postgres-native). river.go: RiverBus publish (world.events + enqueue), Subscribe, Start/Stop; worker.go: touchline_event job; integration + unit tests
   pkg/playergen/   — PlayerNameGenerator iface, file-backed gen, NationalityPool, PlayerFactory, tests ✓
   pkg/auth/        — JWTConfig, GenerateTokenPair, ValidateToken, tests ✓ (uses golang-jwt/v5)
   data/names/      — README + format example. NOTE: no real name data curated yet.
-  go.mod           — module github.com/touchline/backend, go 1.22
+  go.mod           — module github.com/touchline/backend, go 1.25
 frontend/
   nuxt.config.ts   — Nuxt 3 + @vite-pwa/nuxt + @pinia/nuxt + Tailwind
   app.vue, pages/{index, auth/login}.vue
@@ -80,10 +80,10 @@ frontend/
   server/index.ts  — BFF health/status only (no game logic)
   assets/css/main.css, tailwind.config.js, tsconfig.json, package.json, .env.example
 infra/
-  docker/          — Dockerfile.{api,scheduler,worker,frontend} (multi-stage; go 1.22-alpine builder)
+  docker/          — Dockerfile.{api,scheduler,worker,frontend} (multi-stage; go 1.25-alpine builder)
   helm/{api,scheduler,worker,frontend}/  — Chart.yaml + values.yaml + templates (deployment/service/ingress; worker has HPA on event_bus_queue_depth)
 docker-compose.yml  — redis + api + scheduler + worker + frontend; requires Neon DATABASE_URL
-.github/workflows/ci.yml — backend lint/vet/test, frontend lint/typecheck, multi-arch GHCR build on main
+.github/workflows/ci.yml — backend lint/vet/test, eventbus integration (postgres:16), migrations up/down/re-up, frontend lint/typecheck, multi-arch GHCR build on main
 README.md, .gitignore, OPENCODE.md
 ```
 
@@ -102,7 +102,7 @@ README.md, .gitignore, OPENCODE.md
 ## What is NOT built yet (Phase 0 backlog — next steps for an agent)
 
 1. **DB migrations** (golang-migrate, one set per schema). Done in `backend/migrations/0000–0014` (see its README). The weighted nationality pool is `ref.nationalities.generation_weight` + `ref.name_pool` (global, non-world-scoped — see resolved decision OPD-11 in `docs/product_manager.md`); `world.events`, `world.world_config` (tick cadences), and `world.news_stories` are defined under `world`. Migrations execute via a Helm pre-install/pre-upgrade hook (`infra/helm/migrations`), a `docker compose` migration service, and a CI gate.
-2. **Wire river properly**: `pkg/eventbus` currently inserts into `world.events` directly; still needs real river round-trip (publish→queue→worker). Add river dep back to go.mod when implemented (tidy currently strips unused deps — expected).
+2. **~~Wire river properly~~** ✅ Done (S01-02): `pkg/eventbus` runs a real river round-trip against exported migrations `0016–0022`; publish → queue → worker handler, unique-by-args enqueue, at-least-once delivery with handler-side idempotency, integration-tested.
 3. **Gin API wiring** (`cmd/api`): real router, auth middleware, `/api/auth/login|refresh`, `/api/dashboard`, health.
 4. **Scheduler**: `robfig/cron`, read cadences from `world_config`, emit `WORLD_TICK` events.
 5. **Worker**: subscribe to ticks, dispatch to engine handlers (granularity-scoped).
@@ -122,7 +122,7 @@ README.md, .gitignore, OPENCODE.md
 
 - **Do NOT add `balance` columns** to finance tables. Ledger only.
 - **`world_id` on every schema** from the first migration — do not retrofit.
-- `go mod tidy` removes unused deps (river/redis/cron are currently declared only in plan — will vanish until imported; that's fine).
+- `go mod tidy` removes unused deps (redis/cron are currently declared only in plan — will vanish until imported; that's fine). River stays: imported by `pkg/eventbus`.
 - Match engine stays **pure** (`Simulate(seed, teamA, teamB, tacticsA, tacticsB) MatchResult`), zero DB — testability + determinism.
 - Comments: project code intentionally has few comments; treat docs as the spec.
 - Keep frontend server routes BFF-only; game logic never in Nuxt.

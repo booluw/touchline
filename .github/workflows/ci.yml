@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
       - name: Lint
         uses: golangci/golangci-lint-action@v4
         with:
@@ -38,9 +38,43 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
       - name: Test
         run: go test -race ./...
+
+  eventbus-integration:
+    name: Eventbus integration tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: touchline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Migrate up
+        run: |
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          migrate -database "$TEST_DATABASE_URL" -path migrations up
+      - name: Eventbus integration tests
+        run: go test -tags integration -race ./pkg/eventbus/...
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
 
   frontend-lint:
     name: Frontend lint + typecheck
@@ -65,6 +99,8 @@ jobs:
   migrations:
     name: Migrations up/down/re-up
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
     services:
       postgres:
         image: postgres:16
@@ -83,7 +119,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
       - name: Migrate up
@@ -94,8 +130,6 @@ jobs:
         run: migrate -database "$DATABASE_URL" -path backend/migrations up
       - name: Verify version
         run: migrate -database "$DATABASE_URL" -path backend/migrations version
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
 
   build-images:
     name: Build + push images

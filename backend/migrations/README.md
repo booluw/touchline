@@ -1,7 +1,8 @@
 # Touchline database migrations
 
 This folder is `backend/migrations` in the repo layout from the implementation
-plan. It contains the full Touchline schema (14 domain schemas, ~60 tables)
+plan. It contains the full Touchline schema (14 domain schemas plus the `river`
+job-queue schema, ~60 tables)
 split into ordered, reversible migration files, one pair per schema.
 
 Every `up`/`down` pair in this folder was generated from, and tested against,
@@ -107,6 +108,32 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0012 | `competition` | Competitions, rules, seasons, entries, standings |
 | 0013 | `notification` | Per-category, per-channel notification preferences and dispatch log |
 | 0014 | `moderation` | Anti-abuse flags and device fingerprints |
+| 0016–0022 | `river` (event bus) | River v0.44.0 job-queue schema, exported one migration per river version |
+
+### River migrations (0016–0022)
+
+Migrations 0016 through 0022 are the **River** job-queue schema (used by the
+event bus in `pkg/eventbus`), not hand-written — they are exported from
+`github.com/riverqueue/river` (driver `riverpgxv5`) **v0.44.0**, one
+golang-migrate pair per River's own versioned migrations.
+
+- The exported SQL runs in the `river` schema: each file begins with
+  `SET search_path TO river;` and River's `/* TEMPLATE: schema */` placeholder
+  has been resolved to the qualified name `river.`.
+- `0016_river_migration.up.sql` also creates the `river` schema; its `.down.sql`
+  drops it (`DROP SCHEMA river CASCADE`), mirroring the per-schema pattern above.
+- River's own `river_migration` bookkeeping table is created but not populated —
+  golang-migrate's `schema_migrations` is the source of truth.
+- **On a River upgrade:** re-export the new driver's migration files. Pin with:
+
+  ```bash
+  go mod download github.com/riverqueue/river/riverdriver/riverpgxv5@v0.44.0
+  ```
+
+  then diff `$(go env GOMODCACHE)/github.com/riverqueue/river/riverdriver/riverpgxv5@<version>/migration/main/*.sql`
+  against the files here, add/remove versions as needed (keep the per-version
+  numbering strictly increasing), and re-verify with the CI `migrations` job.
+  Keep the "Migration exported from …" header comment in sync first.
 
 Each `.down.sql` does `DROP SCHEMA <name> CASCADE`, which also removes any
 foreign keys later migrations added pointing into that schema — this only
