@@ -16,6 +16,7 @@ Browser-based multiplayer football management simulation. Thousands of managers 
   /cmd/api          API gateway binary
   /cmd/scheduler    Tick scheduler binary (WORLD_TICK cadences)
   /cmd/worker       Simulation worker pool binary
+  /cmd/ref-seed     Reference data seeder (nationalities + name pools; idempotent)
   /internal         Engine packages: club, player, transfer, finance, match, social, world
   /pkg/eventbus     Event bus interface + river implementation
   /pkg/playergen    Procedural player name/nationality generation
@@ -34,9 +35,14 @@ Go + Gin · PostgreSQL (Neon) · Redis · river (event bus / job queue) · Nuxt 
 
 ## Getting started
 
-1. Read the technical plan (`docs/Touchline_Technical_Implementation_Plan.md`) — Phase 0 scope is the only thing scaffolded so far.
-2. Copy `backend/.env.example` → `.env` and set a Neon `DATABASE_URL`.
-3. `docker compose up`
+Full walkthrough in [`docs/development.md`](docs/development.md).
+
+1. Read the technical plan (`docs/Touchline_Technical_Implementation_Plan.md`) and the developer guide (`docs/development.md`).
+2. `cp .env.example .env` (repo **root**; `.env` is git-ignored) and set a Neon `DATABASE_URL` — unpooled endpoint, `postgres://` scheme, no surrounding quotes.
+3. `docker compose up --build`
+4. Verify: `curl -s http://localhost:8080/health/db` → `{"status":"db-ok"}`, then open http://localhost:3000.
+
+Postgres is **external** (Neon) — the base compose stack has no Postgres service. Want a hermetic DB? Use the override: `docker compose -f docker-compose.yml -f infra/ci/docker-compose.postgres.yml up`. Compose handles the bootstrap order automatically: migrations → ref-seed → api/scheduler/worker → frontend.
 
 ## Handoff notes for AI agents
 

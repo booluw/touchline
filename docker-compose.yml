@@ -1,6 +1,14 @@
 # Touchline dev environment.
-# Postgres runs on Neon (see DATABASE_URL) per the technical plan — not in this stack.
-# Redis is the only backing store in the compose stack (NATS deferred; river chose as the Phase-0 event bus).
+#
+# Postgres is EXTERNAL — a Neon serverless instance, per the technical plan. It is
+# deliberately NOT a compose service. Bring your own DATABASE_URL in a repo-root
+# `.env` (copy `.env.example`). CI and developers who want a local database use
+# `infra/ci/docker-compose.postgres.yml` as an opt-in override — the base file
+# stays Postgres-external.
+#
+# Redis is the only backing store in the compose stack (NATS deferred; river
+# chosen as the Phase-0 event bus). Bootstrap order: migrations →
+# ref-seed (S01-04 reference data) → api/scheduler/worker → frontend.
 
 name: touchline
 
@@ -20,7 +28,7 @@ services:
   # One-shot: applies pending migrations against Neon before apps boot.
   migrations:
     image: migrate/migrate:v4.18.1
-    command: ["-database", "${DATABASE_URL:?Neon DATABASE_URL required}", "-path", "/migrations", "up"]
+    command: ["-database", "${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}", "-path", "/migrations", "up"]
     volumes:
       - ./backend/migrations:/migrations
     restart: "no"
@@ -33,7 +41,7 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.ref-seed
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -42,61 +50,97 @@ services:
   api:
     build:
       context: .
-    # The shared Dockerfile builds all three binaries; override CMD here.
+      dockerfile: infra/docker/Dockerfile.api
     command: ["/usr/local/bin/api"]
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL required (see .env.example / docs/development.md)}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
       API_PORT: "8080"
       ENV: development
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
         condition: service_healthy
       migrations:
+        condition: service_completed_successfully
+      ref-seed:
         condition: service_completed_successfully
 
   scheduler:
     build:
       context: .
+      dockerfile: infra/docker/Dockerfile.scheduler
     command: ["/usr/local/bin/scheduler"]
+    ports:
+      - "8081:8081"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL required (see .env.example / docs/development.md)}
       SCHEDULER_PORT: "8081"
       ENV: development
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
         condition: service_healthy
       migrations:
+        condition: service_completed_successfully
+      ref-seed:
         condition: service_completed_successfully
 
   worker:
     build:
       context: .
+      dockerfile: infra/docker/Dockerfile.worker
     command: ["/usr/local/bin/worker"]
+    ports:
+      - "8082:8082"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL required (see .env.example / docs/development.md)}
       WORKER_PORT: "8082"
       ENV: development
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
         condition: service_healthy
       migrations:
         condition: service_completed_successfully
+      ref-seed:
+        condition: service_completed_successfully
 
   frontend:
     build:
       context: .
-    environment:
-      NUXT_PUBLIC_API_BASE: http://localhost:8080
+      dockerfile: infra/docker/Dockerfile.frontend
+      args:
+        # Nuxt bakes public runtime config at build time — must be a build arg,
+        # not just a runtime env var.
+        NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE:-http://localhost:8080}
     ports:
       - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   redis-data:

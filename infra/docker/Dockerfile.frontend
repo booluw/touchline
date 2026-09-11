@@ -1,9 +1,12 @@
-# Nuxt 3 frontend
+# Nuxt 3 frontend. NUXT_PUBLIC_API_BASE is baked into the client bundle at
+# build time; pass it as a build arg in Docker Compose.
 FROM node:20-alpine AS builder
+ARG NUXT_PUBLIC_API_BASE=http://localhost:8080
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 COPY frontend/ ./
+ENV NUXT_PUBLIC_API_BASE=$NUXT_PUBLIC_API_BASE
 RUN npm run build
 
 FROM node:20-alpine

@@ -1,0 +1,29 @@
+# Optional Postgres override for Docker Compose.
+#
+# The base docker-compose.yml is intentionally Postgres-external (Postgres runs
+# on Neon per OPD-14). This override adds a real Postgres service so the full
+# stack can boot hermetically:
+#
+#   docker compose -f docker-compose.yml -f infra/ci/docker-compose.postgres.yml up
+#
+# It is used by the CI `compose` job; developers may opt in locally the same way.
+# All services keep their standard DATABASE_URL interpolation — point it at this
+# override by exporting:
+#
+#   export DATABASE_URL='postgres://postgres:postgres@postgres:5432/touchline?sslmode=disable'
+#
+# before invoking compose (the `postgres` hostname resolves on the compose network).
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: touchline
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: "no"

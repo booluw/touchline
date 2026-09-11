@@ -140,6 +140,38 @@ jobs:
           grep -q 'ref.nationalities=21 ' <<<"$out1" || { echo "expected 21 nationalities in ref-seed output"; exit 1; }
           [ "$out1" = "$out2" ] || { echo "ref-seed is not idempotent"; exit 1; }
 
+  compose:
+    name: Docker Compose contract
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/touchline?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ci-secret
+      NUXT_PUBLIC_API_BASE: http://localhost:8080
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose config
+        run: docker compose config --quiet
+      - name: Boot full stack against containerized Postgres
+        run: |
+          docker compose -f docker-compose.yml -f infra/ci/docker-compose.postgres.yml up -d --build
+          echo "Waiting for the API health check (api /health/db)..."
+          for i in $(seq 1 120); do
+            if curl -fsS http://localhost:8080/health/db >/dev/null 2>&1; then
+              echo "API healthy after ~$((i * 5))s"
+              break
+            fi
+            sleep 5
+          done
+          curl -fsS http://localhost:8080/health/db
+          echo
+          curl -fsS http://localhost:8080/health
+          echo
+          docker compose -f docker-compose.yml -f infra/ci/docker-compose.postgres.yml ps
+          curl -fsS http://localhost:3000 >/dev/null && echo "frontend responding on :3000"
+          docker compose -f docker-compose.yml -f infra/ci/docker-compose.postgres.yml logs --no-color | tail -80
+          docker compose -f docker-compose.yml -f infra/ci/docker-compose.postgres.yml down -v
+
   build-images:
     name: Build + push images
     runs-on: ubuntu-latest

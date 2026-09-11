@@ -30,7 +30,7 @@ Both are the source of truth. Do not invent systems absent from these docs.
 | Migrations | **golang-migrate**, versioned per schema, run as Helm pre-install/pre-upgrade hook |
 | Frontend | Nuxt 3 (Vue 3, Composition API), Pinia, Tailwind, `@vite-pwa/nuxt` |
 | Realtime client | One WebSocket, wrapped in `useSocket()` composable, fanned out to Pinia stores |
-| Dev infra | Docker Compose (Redis + api + scheduler + worker + frontend). **Postgres is NOT in compose — it's Neon.** |
+| Dev infra | Docker Compose (migrations + ref-seed + Redis + api + scheduler + worker + frontend). **Postgres is NOT in compose — it's Neon** (opt-in Postgres override in `infra/ci/docker-compose.postgres.yml`, OPD-14). |
 | Prod infra | k3s on Contabo VPS(s); Helm charts; cloud-agnostic (works on EKS/GKE/AKS unchanged) |
 | CI/CD | GitHub Actions → lint/test → build multi-arch images → GHCR; Argo CD deploys |
 | Contract/UI | text/event-feed match viewer (live commentary feed style); 2D pitch deferred |
@@ -65,12 +65,13 @@ Both are the source of truth. Do not invent systems absent from these docs.
 
 ```
 backend/
-  cmd/{api,scheduler,worker}/main.go     — three binaries (all build ✓)
+  cmd/{api,scheduler,worker}/main.go     — three binaries (build ✓): api connects Postgres (GET /health + /health/db), scheduler + worker db-connected with health listeners (:8081/:8082)
+  cmd/ref-seed/main.go                   — reference-data seeder (nationalities + name_pool), idempotent; wired into compose + CI
   internal/{club,player,transfer,finance,match,social,world}/  — domain packages + Service interfaces (stubs + structs, no DB impl yet)
   pkg/eventbus/    — EventBus (river, Postgres-native). river.go: RiverBus publish (world.events + enqueue), Subscribe, Start/Stop; worker.go: touchline_event job; integration + unit tests
-  pkg/playergen/   — PlayerNameGenerator iface, file-backed gen, NationalityPool, PlayerFactory, tests ✓
+  pkg/playergen/   — DB-free procedural generation: LoadNameData (curated data/names JSON), PoolGenerator, NationalityPool, NameRegistry, PlayerFactory (age 17–33, 12 positions), tests ✓
   pkg/auth/        — JWTConfig, GenerateTokenPair, ValidateToken, tests ✓ (uses golang-jwt/v5)
-  data/names/      — README + format example. NOTE: no real name data curated yet.
+  data/names/      — 21 curated nationality datasets (README.md + PROVENANCE.md); eng/sco are documented non-ISO slugs
   go.mod           — module github.com/touchline/backend, go 1.25
 frontend/
   nuxt.config.ts   — Nuxt 3 + @vite-pwa/nuxt + @pinia/nuxt + Tailwind
@@ -82,8 +83,8 @@ frontend/
 infra/
   docker/          — Dockerfile.{api,scheduler,worker,frontend} (multi-stage; go 1.25-alpine builder)
   helm/{api,scheduler,worker,frontend}/  — Chart.yaml + values.yaml + templates (deployment/service/ingress; worker has HPA on event_bus_queue_depth)
-docker-compose.yml  — redis + api + scheduler + worker + frontend; requires Neon DATABASE_URL
-.github/workflows/ci.yml — backend lint/vet/test, eventbus integration (postgres:16), migrations up/down/re-up, frontend lint/typecheck, multi-arch GHCR build on main
+docker-compose.yml  — redis + migrations + ref-seed + api + scheduler + worker + frontend; requires Neon DATABASE_URL (healthchecks + env guards; opt-in Postgres override infra/ci/docker-compose.postgres.yml)
+.github/workflows/ci.yml — backend lint/vet/test, eventbus integration (postgres:16), migrations + ref-seed idempotency, frontend lint/typecheck, compose config + full-stack smoke (Postgres override), multi-arch GHCR build on main
 README.md, .gitignore, OPENCODE.md
 ```
 
@@ -95,19 +96,19 @@ README.md, .gitignore, OPENCODE.md
 - `cd backend && go test ./...` ✓ (auth + playergen smoke tests)
 - `cd backend && go vet ./...` ✓
 - Frontend `npm install` + `npm run dev` NOT yet exercised (no package-lock committed; `npm install` will generate it).
-- `docker compose up` NOT yet exercised (needs Neon `DATABASE_URL`).
+- `docker compose` config-checked and full-stack-boot verified in the CI `compose` job; local Docker is absent on the dev machine, so the stack boot is CI-verified only (see `docs/development.md`, OPD-14).
 
 ---
 
 ## What is NOT built yet (Phase 0 backlog — next steps for an agent)
 
-1. **DB migrations** (golang-migrate, one set per schema). Done in `backend/migrations/0000–0014` (see its README). The weighted nationality pool is `ref.nationalities.generation_weight` + `ref.name_pool` (global, non-world-scoped — see resolved decision OPD-11 in `docs/product_manager.md`); `world.events`, `world.world_config` (tick cadences), and `world.news_stories` are defined under `world`. Migrations execute via a Helm pre-install/pre-upgrade hook (`infra/helm/migrations`), a `docker compose` migration service, and a CI gate.
+1. **DB migrations** (golang-migrate, one set per schema). Done in `backend/migrations/0000–0014` (base schemas) + `0016–0022` (river), see its README. The weighted nationality pool is `ref.nationalities.generation_weight` + `ref.name_pool` (global, non-world-scoped — see resolved decision OPD-11 in `docs/product_manager.md`); `world.events`, `world.world_config` (tick cadences), and `world.news_stories` are defined under `world`. Migrations execute via a Helm pre-install/pre-upgrade hook (`infra/helm/migrations`), a `docker compose` migration service, and a CI gate.
 2. **~~Wire river properly~~** ✅ Done (S01-02): `pkg/eventbus` runs a real river round-trip against exported migrations `0016–0022`; publish → queue → worker handler, unique-by-args enqueue, at-least-once delivery with handler-side idempotency, integration-tested.
 3. **Gin API wiring** (`cmd/api`): real router, auth middleware, `/api/auth/login|refresh`, `/api/dashboard`, health.
 4. **Scheduler**: `robfig/cron`, read cadences from `world_config`, emit `WORLD_TICK` events.
 5. **Worker**: subscribe to ticks, dispatch to engine handlers (granularity-scoped).
-6. **playergen data**: curate real per-nationality name files (content/data task).
-7. **Neon `DATABASE_URL`** + env docs for local dev.
+6. **~~playergen data~~** ✅ Done (S01-04): 21 curated nationality datasets in `backend/data/names` (see its README + PROVENANCE).
+7. **~~Neon `DATABASE_URL` + env docs~~** ✅ Done (S01-05): root `.env.example` + `backend/.env.example` + `docs/development.md` (OPD-14).
 8. **Redis wiring**: session store, rate limiting, WS pub/sub.
 
 ## Phase roadmap summary (plan §16)
