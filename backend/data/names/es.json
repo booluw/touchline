@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "es", "name": "Spain", "generation_weight": 7},
+  "provenance": {
+    "source": "Common Spanish given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Adrian", "Alejandro", "Alvaro", "Andres", "Antonio", "Carlos", "Cesar", "Daniel", "David", "Diego", "Eduardo", "Emilio", "Enrique", "Fernando", "Francisco", "Gabriel", "Gonzalo", "Guillermo", "Hector", "Ignacio", "Ivan", "Jaime", "Javier", "Jesus", "Joel", "Jon", "Jorge", "Jose", "Juan", "Julian", "Julio", "Luis", "Manuel", "Marco", "Marcos", "Mario", "Martin", "Miguel", "Nacho", "Nicolas", "Oscar", "Pablo", "Pedro", "Rafael", "Raul", "Roberto", "Rodrigo", "Ruben", "Samuel", "Santiago", "Sergio", "Tomas", "Victor", "Xavier"],
+  "last_names": ["Alonso", "Alvarez", "Arce", "Blanco", "Bravo", "Caballero", "Cabrera", "Calvo", "Camacho", "Campos", "Cano", "Carmona", "Carrasco", "Castillo", "Castro", "Crespo", "Cruz", "Delgado", "Diez", "Dominguez", "Duran", "Esteban", "Ferrer", "Fuentes", "Gallego", "Garcia", "Garrido", "Gil", "Gimenez", "Gomez", "Gonzalez", "Guerrero", "Gutierrez", "Herrero", "Hidalgo", "Iglesias", "Jimenez", "Lara", "Leon", "Llorente", "Lopez", "Lorenzo", "Marquez", "Martin", "Martinez", "Medina", "Mendez", "Molina", "Montero", "Mora", "Morales", "Moreno", "Munoz", "Navarro", "Nieto", "Nunez", "Ortega", "Ortiz", "Palacios", "Parra", "Pascual", "Pastor", "Pena", "Prieto", "Ramos", "Rey", "Rivas", "Rodriguez", "Romero", "Rubio", "Ruiz", "Sanchez", "Sanz", "Serrano", "Sierra", "Soler", "Soriano", "Suarez", "Torres", "Vargas", "Vazquez", "Vega", "Vera"]
+}

@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "hr", "name": "Croatia", "generation_weight": 3.5},
+  "provenance": {
+    "source": "Common Croatian given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Andrija", "Ante", "Antun", "Borna", "Branko", "Bruno", "Damir", "Dario", "Darko", "Denis", "Dino", "Dominik", "Dragan", "Drazen", "Duje", "Filip", "Fran", "Goran", "Hrvoje", "Ivan", "Ivica", "Jakov", "Josip", "Jure", "Karlo", "Luka", "Marko", "Marin", "Marino", "Matija", "Matej", "Mateo", "Milan", "Mirko", "Nikola", "Nino", "Nenad", "Petar", "Roko", "Sinisa", "Stjepan", "Tomislav", "Vito", "Zvonimir", "Zoran"],
+  "last_names": ["Anic", "Babic", "Bozic", "Brkic", "Dragic", "Erceg", "Filipovic", "Grgic", "Horvat", "Ivkovic", "Jelic", "Jukic", "Kovac", "Kovacevic", "Lovric", "Lukic", "Maric", "Markovic", "Matic", "Novak", "Obradovic", "Peric", "Petrovic", "Popovic", "Radic", "Saric", "Simic", "Stanic", "Tomasevic", "Tomic", "Vidovic", "Vrdoljak", "Vukovic", "Zoric", "Zivkovic"]
+}

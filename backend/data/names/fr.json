@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "fr", "name": "France", "generation_weight": 8},
+  "provenance": {
+    "source": "Common French given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Arthur", "Baptiste", "Clement", "Corentin", "Damien", "David", "Dylan", "Eloi", "Enzo", "Erwan", "Etienne", "Florian", "Gabriel", "Gaetan", "Guillaume", "Hugo", "Jean", "Jules", "Julien", "Kevin", "Loic", "Louis", "Lucas", "Malo", "Mathis", "Mathieu", "Maxime", "Nathan", "Nicolas", "Noah", "Paul", "Pierre", "Quentin", "Raphael", "Remi", "Robin", "Romain", "Samuel", "Simon", "Theo", "Thomas", "Tristan", "Valentin", "Vincent"],
+  "last_names": ["Bernard", "Bertrand", "Blanc", "Bonnet", "Bourgeois", "Caron", "Charpentier", "Chevalier", "Colin", "Dubois", "Dufour", "Dupont", "Dupuis", "Faure", "Fontaine", "Garnier", "Gauthier", "Girard", "Guerin", "Guillot", "Henry", "Hubert", "Lambert", "Laurent", "Lefebvre", "Lemoine", "Leroy", "Marchand", "Martin", "Masson", "Mercier", "Meyer", "Michel", "Moreau", "Morin", "Perrin", "Petit", "Picard", "Richard", "Robert", "Roussel", "Schneider", "Tessier", "Thomas"]
+}

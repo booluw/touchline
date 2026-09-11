@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "sco", "name": "Scotland", "generation_weight": 2.5},
+  "provenance": {
+    "source": "Common Scottish given/surname lists, hand-curated (see PROVENANCE.md). Scotland has no ISO 3166-1 alpha-2 code; 'sco' is a project-reserved slug.",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Alasdair", "Alexander", "Alistair", "Andrew", "Angus", "Archie", "Blair", "Callum", "Calum", "Cameron", "Charlie", "Craig", "Douglas", "Euan", "Ewan", "Fraser", "Gordon", "Gregor", "Hamish", "Harry", "Iain", "Jamie", "Jason", "John", "Kyle", "Lachlan", "Lewis", "Liam", "Logan", "Magnus", "Malcolm", "Matthew", "Michael", "Murray", "Neil", "Niall", "Oliver", "Peter", "Robbie", "Robert", "Ross", "Ruairidh", "Ryan", "Scott", "Sean", "Stewart", "Stuart", "Thomas", "William"],
+  "last_names": ["Anderson", "Armstrong", "Black", "Brown", "Buchanan", "Campbell", "Crawford", "Cunningham", "Davidson", "Duncan", "Ferguson", "Fraser", "Gordon", "Grant", "Graham", "Gunn", "Hamilton", "Henderson", "Hunter", "Kerr", "MacDonald", "MacGregor", "MacKay", "MacLean", "MacLeod", "MacPherson", "Martin", "McDonald", "McGregor", "McIntosh", "McLean", "Miller", "Mitchell", "Morrison", "Muir", "Munro", "Paterson", "Reid", "Robertson", "Russell", "Sinclair", "Smith", "Sutherland", "Taylor", "Thomson", "Walker", "Watson", "Williamson", "Wilson", "Young"]
+}

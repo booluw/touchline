@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "br", "name": "Brazil", "generation_weight": 10},
+  "provenance": {
+    "source": "Common Brazilian given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Ana", "Beatriz", "Bruno", "Caio", "Carla", "Carlos", "Daniel", "Diego", "Eduardo", "Felipe", "Fernando", "Gabriel", "Gustavo", "Henrique", "Igor", "Joao", "Jonas", "Jorge", "Jose", "Julio", "Kaique", "Lucas", "Luana", "Luciano", "Marcelo", "Marcos", "Matheus", "Murilo", "Paula", "Patricia", "Paulo", "Pedro", "Rafael", "Renato", "Ricardo", "Rodrigo", "Samuel", "Thiago", "Vinicius", "Vitor"],
+  "last_names": ["Almeida", "Alves", "Araujo", "Barbosa", "Campos", "Cardoso", "Carvalho", "Castilho", "Costa", "Dias", "Duarte", "Fernandes", "Ferreira", "Freitas", "Gomes", "Lima", "Lopes", "Martins", "Melo", "Monteiro", "Moraes", "Moreira", "Nascimento", "Nunes", "Oliveira", "Pereira", "Pinto", "Ramos", "Ribeiro", "Rocha", "Rodrigues", "Sales", "Santana", "Santos", "Silva", "Souza", "Tavares", "Teixeira", "Vieira"]
+}

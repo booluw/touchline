@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "it", "name": "Italy", "generation_weight": 6},
+  "provenance": {
+    "source": "Common Italian given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Alessandro", "Alessio", "Andrea", "Angelo", "Antonio", "Carlo", "Christian", "Claudio", "Daniele", "Davide", "Diego", "Emanuele", "Enrico", "Fabio", "Federico", "Filippo", "Francesco", "Gabriele", "Giacomo", "Gianluca", "Giovanni", "Giulio", "Giuseppe", "Jacopo", "Leonardo", "Lorenzo", "Luca", "Luciano", "Luigi", "Marco", "Massimo", "Matteo", "Mattia", "Michele", "Mirko", "Niccolo", "Nicola", "Paolo", "Piero", "Pietro", "Riccardo", "Roberto", "Salvatore", "Samuele", "Simone", "Stefano", "Tommaso", "Valerio", "Vincenzo"],
+  "last_names": ["Amato", "Barbieri", "Bianchi", "Bruno", "Caruso", "Colombo", "Conti", "Costa", "D'Amico", "De Angelis", "De Luca", "De Santis", "Esposito", "Fabbri", "Ferrari", "Ferraro", "Ferri", "Fiore", "Fontana", "Gallo", "Gatti", "Gentile", "Greco", "Grimaldi", "Guerra", "Leone", "Lombardi", "Longo", "Mancini", "Marchetti", "Mariani", "Marino", "Martinelli", "Martini", "Messina", "Moretti", "Neri", "Orlando", "Palmieri", "Pellegrini", "Ricci", "Rinaldi", "Rizzo", "Romano", "Rossi", "Ruggiero", "Russo", "Sala", "Santoro", "Sartori", "Serra", "Silvestri", "Testa", "Valentini", "Villa", "Vitale", "Volpe"]
+}

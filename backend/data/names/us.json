@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "us", "name": "United States", "generation_weight": 3.5},
+  "provenance": {
+    "source": "Common US given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Aidan", "Alexander", "Andrew", "Anthony", "Benjamin", "Brandon", "Bryan", "Caleb", "Cameron", "Carter", "Charles", "Chase", "Christopher", "Cole", "Connor", "Cooper", "Daniel", "David", "Dylan", "Elijah", "Eric", "Ethan", "Evan", "Gabriel", "Grayson", "Henry", "Hunter", "Jacob", "Jackson", "James", "Jason", "Jayden", "John", "Joseph", "Joshua", "Justin", "Landon", "Logan", "Lucas", "Luke", "Mason", "Matthew", "Michael", "Nathan", "Nicholas", "Nolan", "Oliver", "Owen", "Parker", "Ryan", "Samuel", "Thomas", "Tyler", "William", "Wyatt"],
+  "last_names": ["Adams", "Allen", "Anderson", "Bailey", "Baker", "Barnes", "Bennett", "Berry", "Brooks", "Brown", "Butler", "Campbell", "Carter", "Clark", "Collins", "Cook", "Cooper", "Cox", "Davis", "Diaz", "Edwards", "Ellis", "Evans", "Fisher", "Flores", "Ford", "Foster", "Fox", "Fuller", "Garcia", "Gibson", "Gonzales", "Gonzalez", "Graham", "Gray", "Green", "Griffin", "Hall", "Hamilton", "Harris", "Harrison", "Hayes", "Henderson", "Hernandez", "Hill", "Holmes", "Howard", "Hughes", "Hunt", "Jackson", "James", "Jenkins", "Johnson", "Jones", "Jordan", "Kelly", "Kennedy", "King", "Knight", "Lewis", "Long", "Lopez", "Martin", "Martinez", "Mason", "Matthews", "Miller", "Mills", "Mitchell", "Moore", "Morgan", "Morris", "Morrison", "Murphy", "Murray", "Nelson", "Newman", "Nguyen", "Ortiz", "Owens", "Parker", "Patterson", "Payne", "Perry", "Peterson", "Phillips", "Pierce", "Powell", "Price", "Ramirez", "Reed", "Reynolds", "Richardson", "Rivera", "Roberts", "Robinson", "Rodriguez", "Rogers", "Ross", "Russell", "Ryan", "Sanders", "Sanchez", "Scott", "Shaw", "Simmons", "Simpson", "Smith", "Snyder", "Spencer", "Stanley", "Stevens", "Stewart", "Stone", "Sullivan", "Taylor", "Thompson", "Torres", "Turner", "Walker", "Wallace", "Ward", "Warren", "Washington", "Watson", "Weaver", "Wells", "West", "White", "Williams", "Willis", "Wilson", "Wood", "Wright", "Young"]
+}

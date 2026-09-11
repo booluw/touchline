@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "ng", "name": "Nigeria", "generation_weight": 8},
+  "provenance": {
+    "source": "Common Nigerian given/surname lists across regions, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Abubakar", "Ade", "Adaeze", "Ademola", "Akin", "Blessing", "Chibuike", "Chinedu", "Chinonso", "Chisom", "Chukwu", "David", "Ekene", "Emeka", "Emmanuel", "Femi", "Ifeanyi", "Ifeoma", "Ikechukwu", "John", "Joseph", "Kehinde", "Kelechi", "Michael", "Ngozi", "Nnamdi", "Nneka", "Obasi", "Olumide", "Oluwaseun", "Onyekachi", "Samuel", "Seyi", "Simon", "Stephen", "Tobi", "Tochukwu", "Uche", "Ugochukwu", "Wisdom", "Yemi", "Zainab"],
+  "last_names": ["Abiola", "Adebiyi", "Adeleke", "Adeyemi", "Adigun", "Adio", "Adisa", "Agbo", "Akinwande", "Akinwunmi", "Amadi", "Anyim", "Aremu", "Asiegbu", "Bamidele", "Balogun", "Chukwuma", "Ebi", "Egwu", "Ekundayo", "Ekwueme", "Eze", "Ibekwe", "Ibrahim", "Isong", "Kehinde", "Lawal", "Maduka", "Nwosu", "Obi", "Okafor", "Okeke", "Okonkwo", "Onyeka", "Osei", "Ozoani", "Uba", "Umar", "Usman", "Yakubu"]
+}

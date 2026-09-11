@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "ci", "name": "Ivory Coast", "generation_weight": 3},
+  "provenance": {
+    "source": "Common Ivorian given/surname lists (Akan and Mande-diaspora surnames), hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Aboubacar", "Adama", "Albert", "Ali", "Ange", "Aristide", "Arsene", "Bakary", "Boris", "Brice", "Cedric", "Charles", "Cheick", "Christian", "Claude", "Cyrille", "Daouda", "Didier", "Drissa", "Eric", "Fabrice", "Franck", "Frederic", "Gael", "Guy", "Ibrahim", "Ibrahima", "Ismael", "Jean", "Joel", "Jonathan", "Joseph", "Jules", "Karim", "Kevin", "Koffi", "Kouame", "Landry", "Marius", "Michel", "Mohamed", "Moussa", "Narcisse", "Olivier", "Omar", "Pacome", "Paul", "Richard", "Romaric", "Salomon", "Serge", "Souleymane", "Stephane", "Sylvain", "Thomas", "Victor", "Wilfried", "Yacouba", "Yao", "Yaya"],
+  "last_names": ["Adou", "Aka", "Bamba", "Boka", "Cisse", "Coulibaly", "Diabate", "Diallo", "Diarra", "Doumbia", "Fofana", "Gbohou", "Kacou", "Kader", "Kakou", "Keita", "Konate", "Kone", "Konan", "Kouadio", "Kouassi", "Meite", "N'Diaye", "N'Goran", "N'Guessan", "Ouattara", "Sangare", "Sanogo", "Soro", "Sylla", "Tiehi", "Toure", "Traore", "Yapi", "Zongo"]
+}

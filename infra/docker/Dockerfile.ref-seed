@@ -1,0 +1,14 @@
+# One-shot reference-data seeder. Builds cmd/ref-seed and ships the curated
+# name data so the reference tables can be populated before the apps boot.
+FROM golang:1.25-alpine AS builder
+WORKDIR /app
+COPY backend/go.mod backend/ ./
+RUN go mod download
+COPY backend/ ./
+RUN go build -o /out/ref-seed ./cmd/ref-seed
+
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /out/ref-seed /usr/local/bin/ref-seed
+COPY --from=builder /app/data/names /data/names
+CMD ["ref-seed", "-data", "/data/names"]

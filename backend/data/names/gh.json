@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "gh", "name": "Ghana", "generation_weight": 4.5},
+  "provenance": {
+    "source": "Common Ghanaian given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Abena", "Ama", "Akwasi", "Albert", "Alex", "Anthony", "Bright", "Charles", "Daniel", "David", "Divine", "Ekow", "Emmanuel", "Ernest", "Eugene", "Francis", "Frank", "Frederick", "George", "Gilbert", "Godwin", "Isaac", "James", "Jeffrey", "John", "Joseph", "Joshua", "Justice", "Kofi", "Kojo", "Kwabena", "Kwadwo", "Kwame", "Kwasi", "Michael", "Nana", "Nicholas", "Patrick", "Peter", "Philip", "Richard", "Robert", "Samuel", "Seth", "Stephen", "Vincent", "Yaw"],
+  "last_names": ["Addo", "Adjei", "Adom", "Afriyie", "Agyemang", "Aidoo", "Akoto", "Amankwah", "Amoah", "Antwi", "Appiah", "Armah", "Asante", "Asare", "Awuah", "Boateng", "Boakye", "Bonsu", "Darko", "Essien", "Frimpong", "Kwarteng", "Mensah", "Mintah", "Obeng", "Osei", "Owusu", "Poku", "Sarpong", "Tetteh", "Yeboah"]
+}

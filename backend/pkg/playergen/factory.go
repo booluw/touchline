@@ -1,43 +1,83 @@
 package playergen
 
-import "github.com/google/uuid"
+import (
+	"fmt"
+	"math/rand"
+)
 
-// NationalityPool defines weightings for nationality distribution.
-// Weights reflect realistic football-producing populations.
-type NationalityPool struct {
-	Entries []NationalityWeight `json:"entries"`
-}
+// maxNameAttempts bounds regeneration when a collision registry is in use.
+// On exhaustion CreatePlayer returns an error rather than emitting a duplicate.
+const maxNameAttempts = 16
 
-type NationalityWeight struct {
-	Nationality string  `json:"nationality"`
-	Weight      float64 `json:"weight"`
-}
-
-// PlayerFactory creates players with generated names and nationality-weighted attributes.
+// PlayerFactory creates players with nationality-weighted names and basic
+// attributes. It holds no database dependency: the caller supplies the loaded
+// name generator, nationality pool, and a seeded rng (one per world/team).
 type PlayerFactory struct {
 	nameGen  PlayerNameGenerator
 	natPool  *NationalityPool
+	rng      *rand.Rand
+	registry *NameRegistry
 }
 
-func NewPlayerFactory(nameGen PlayerNameGenerator, natPool *NationalityPool) *PlayerFactory {
+// NewPlayerFactory returns a factory using the given name generator, weighted
+// nationality pool, and seeded random source.
+func NewPlayerFactory(nameGen PlayerNameGenerator, natPool *NationalityPool, rng *rand.Rand) *PlayerFactory {
 	return &PlayerFactory{
 		nameGen: nameGen,
 		natPool: natPool,
+		rng:     rng,
 	}
 }
 
-func (f *PlayerFactory) CreatePlayer(worldID uuid.UUID) (firstName, lastName, nationality string) {
-	nationality = f.natPool.WeightedRandom()
-	firstName, lastName = f.nameGen.GenerateFullName(nationality)
-	return
+// WithRegistry enables collision-avoiding name uniqueness for factory output.
+func (f *PlayerFactory) WithRegistry(r *NameRegistry) *PlayerFactory {
+	f.registry = r
+	return f
 }
 
-// WeightedRandom selects a nationality based on weights.
-// Placeholder: needs weighted random implementation.
-func (p *NationalityPool) WeightedRandom() string {
-	if len(p.Entries) == 0 {
-		return "unknown"
+// CreatePlayer generates one player. For a fixed rng seed the output sequence
+// is deterministic. With a registry set, names are regenerated until unique
+// within the pool (bounded by maxNameAttempts).
+func (f *PlayerFactory) CreatePlayer() (*GeneratedPlayer, error) {
+	if f.natPool == nil {
+		return nil, fmt.Errorf("playergen: nil nationality pool")
 	}
-	// TODO: implement weighted random selection
-	return p.Entries[0].Nationality
+	if f.nameGen == nil {
+		return nil, fmt.Errorf("playergen: nil name generator")
+	}
+	if f.rng == nil {
+		return nil, fmt.Errorf("playergen: nil random source")
+	}
+
+	code, err := f.natPool.WeightedRandom(f.rng)
+	if err != nil {
+		return nil, err
+	}
+
+	for attempt := 0; attempt < maxNameAttempts; attempt++ {
+		first, last, err := f.nameGen.GenerateFullName(f.rng, code)
+		if err != nil {
+			return nil, err
+		}
+		if f.registry == nil || f.registry.Reserve(code, first, last) {
+			return &GeneratedPlayer{
+				FirstName:       first,
+				LastName:        last,
+				DisplayName:     displayName(first, last),
+				NationalityCode: code,
+				Age:             minAge + f.rng.Intn(maxAge-minAge+1),
+				PrimaryPosition: ValidPositions[f.rng.Intn(len(ValidPositions))],
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("playergen: could not generate a unique name for %q within %d attempts", code, maxNameAttempts)
+}
+
+// displayName is the shirt name. For first_last cultures the surname is used;
+// single-name cultures (deferred) fall back to the given name.
+func displayName(first, last string) string {
+	if last != "" {
+		return last
+	}
+	return first
 }

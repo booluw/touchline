@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "ar", "name": "Argentina", "generation_weight": 8.5},
+  "provenance": {
+    "source": "Common Argentine given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Agustin", "Alejandro", "Andres", "Ariel", "Carlos", "Cristian", "Damián", "Daniel", "Diego", "Emanuel", "Emiliano", "Enzo", "Facundo", "Federico", "Franco", "Gabriel", "Gonzalo", "Guido", "Ignacio", "Javier", "Joaquin", "Jorge", "Juan", "Julian", "Leandro", "Leonardo", "Lucas", "Luciano", "Manuel", "Marcos", "Martin", "Matias", "Mauricio", "Miguel", "Nicolas", "Pablo", "Rodrigo", "Santiago", "Sebastian", "Sergio", "Tomas", "Valentin"],
+  "last_names": ["Aguirre", "Alvarez", "Arias", "Barrios", "Benitez", "Cabrera", "Campos", "Castillo", "Castro", "Correa", "Diaz", "Dominguez", "Fernandez", "Flores", "Garcia", "Gomez", "Gonzalez", "Gutierrez", "Herrera", "Iglesias", "Jimenez", "Juarez", "Lopez", "Luna", "Martinez", "Medina", "Mendoza", "Miranda", "Molina", "Morales", "Moreno", "Navarro", "Ortega", "Paredes", "Pereyra", "Perez", "Ramirez", "Rios", "Rojas", "Romero", "Ruiz", "Sanchez", "Silva", "Sosa", "Suarez", "Torres", "Vega"]
+}

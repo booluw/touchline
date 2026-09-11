@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "pt", "name": "Portugal", "generation_weight": 6},
+  "provenance": {
+    "source": "Common Portuguese given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Afonso", "Alexandre", "Andre", "Antonio", "Artur", "Bernardo", "Bruno", "Carlos", "Daniel", "David", "Diogo", "Duarte", "Eduardo", "Fabio", "Filipe", "Francisco", "Gil", "Goncalo", "Guilherme", "Gustavo", "Henrique", "Hugo", "Ivo", "Joao", "Jorge", "Jose", "Leonardo", "Lourenco", "Luis", "Manuel", "Marco", "Marcos", "Miguel", "Nuno", "Paulo", "Pedro", "Rafael", "Renato", "Ricardo", "Rodrigo", "Rui", "Salvador", "Samuel", "Simao", "Tiago", "Tomas", "Vasco", "Vitor"],
+  "last_names": ["Abreu", "Almeida", "Alves", "Amaral", "Antunes", "Azevedo", "Barbosa", "Barros", "Batista", "Cardoso", "Carvalho", "Castro", "Coelho", "Correia", "Costa", "Cruz", "Cunha", "Dias", "Domingues", "Esteves", "Fernandes", "Ferreira", "Figueiredo", "Fonseca", "Freitas", "Gomes", "Goncalves", "Guerreiro", "Henriques", "Lopes", "Lourenco", "Machado", "Marques", "Martins", "Melo", "Mendes", "Miranda", "Monteiro", "Moraes", "Moreira", "Nascimento", "Nogueira", "Nunes", "Oliveira", "Pacheco", "Pereira", "Pinto", "Pires", "Ramos", "Reis", "Ribeiro", "Rocha", "Rodrigues", "Santos", "Silva", "Simoes", "Sousa", "Tavares", "Teixeira", "Torres", "Vaz", "Vicente", "Vieira"]
+}

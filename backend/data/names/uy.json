@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "uy", "name": "Uruguay", "generation_weight": 4},
+  "provenance": {
+    "source": "Common Uruguayan given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Agustin", "Alvaro", "Andres", "Bruno", "Carlos", "Christian", "Diego", "Emiliano", "Enzo", "Facundo", "Federico", "Felipe", "Fernando", "Franco", "Gaston", "Gonzalo", "Guillermo", "Ignacio", "Joaquin", "Jorge", "Jose", "Juan", "Julian", "Lautaro", "Leandro", "Leonardo", "Lucas", "Luciano", "Luis", "Marcelo", "Marcos", "Martin", "Matias", "Mauro", "Maximiliano", "Nahuel", "Nicolas", "Pablo", "Rodrigo", "Santiago", "Sebastian", "Sergio", "Tomas", "Valentin", "Victor"],
+  "last_names": ["Acosta", "Aguirre", "Alvarez", "Arias", "Barrios", "Benitez", "Blanco", "Cabrera", "Caceres", "Carballo", "Correa", "De Leon", "Diaz", "Dominguez", "Fernandez", "Ferreira", "Flores", "Garcia", "Gimenez", "Gonzalez", "Gutierrez", "Herrera", "Lopez", "Machado", "Martinez", "Medina", "Mendez", "Miranda", "Morales", "Moreira", "Munoz", "Nunez", "Olivera", "Pereira", "Perez", "Ramirez", "Ramos", "Reyes", "Rios", "Rodriguez", "Romero", "Salazar", "Santamaria", "Saravia", "Silva", "Sosa", "Soto", "Suarez", "Torres", "Varela", "Vargas", "Vazquez", "Vidal", "Zabala"]
+}

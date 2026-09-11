@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "co", "name": "Colombia", "generation_weight": 5},
+  "provenance": {
+    "source": "Common Colombian given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Andres", "Camilo", "Carlos", "Cristian", "Daniel", "David", "Diego", "Esteban", "Felipe", "Fernando", "Gabriel", "Gustavo", "Ivan", "Jaime", "Jairo", "Javier", "Jesus", "Jorge", "Jose", "Juan", "Julian", "Leonardo", "Luis", "Manuel", "Matias", "Miguel", "Nicolas", "Pablo", "Pedro", "Rafael", "Ricardo", "Samuel", "Santiago", "Sebastian", "Sergio", "Simon", "Tomas", "Valentin", "Wilson", "Yeferson"],
+  "last_names": ["Alvarez", "Angulo", "Arias", "Arango", "Asprilla", "Avila", "Bedoya", "Bermudez", "Bonilla", "Caballero", "Cardenas", "Cardona", "Castillo", "Castro", "Caicedo", "Cifuentes", "Diaz", "Duarte", "Escobar", "Fernandez", "Florez", "Franco", "Fuentes", "Garcia", "Gomez", "Gonzalez", "Gutierrez", "Herrera", "Hurtado", "Jimenez", "Lopez", "Marin", "Martinez", "Medina", "Mejia", "Mendoza", "Montes", "Mora", "Morales", "Moreno", "Munoz", "Murillo", "Narvaez", "Ochoa", "Ospina", "Paez", "Palacios", "Parra", "Pena", "Perez", "Quintero", "Ramirez", "Rincon", "Rios", "Rivera", "Rojas", "Romero", "Ruiz", "Salazar", "Sanchez", "Silva", "Soto", "Suarez", "Torres", "Uribe", "Valencia", "Vargas", "Vasquez", "Zapata"]
+}

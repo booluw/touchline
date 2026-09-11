@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "kr", "name": "South Korea", "generation_weight": 3},
+  "provenance": {
+    "source": "Common South Korean given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Chang-ho", "Chan-woo", "Dae-hyun", "Dong-hyun", "Dong-won", "Eun-ho", "Gun-woo", "Hyeon-woo", "Hyuk", "Hyun-jun", "Hyun-soo", "Hyun-woo", "Jae-hyun", "Jae-sung", "Jae-won", "Ji-hoon", "Ji-won", "Ji-woo", "Jin-ho", "Jin-woo", "Joon-ho", "Jun-ho", "Jun-seo", "Jung-ho", "Jung-hoo", "Kang-ho", "Kyung-ho", "Min-ho", "Min-jae", "Min-jun", "Min-seok", "Sang-ho", "Sang-min", "Seong-ho", "Seung-ho", "Seung-min", "Si-woo", "Soo-hyun", "Sung-min", "Sung-woo", "Tae-hyun", "Tae-yang", "Woo-jin", "Yeon-jun", "Yong-woo", "Yun-ho"],
+  "last_names": ["An", "Ahn", "Baek", "Bae", "Byun", "Cha", "Chae", "Cho", "Choi", "Chun", "Chung", "Han", "Heo", "Hong", "Hwang", "Im", "Jang", "Jeon", "Jeong", "Ji", "Jin", "Ju", "Jung", "Kang", "Kim", "Ko", "Kwak", "Kwon", "Lee", "Lim", "Min", "Moon", "Noh", "Oh", "Ok", "Park", "Seo", "Shim", "Shin", "Sim", "Son", "Song", "Suh", "Woo", "Yoo", "Yoon", "Yu", "Yun"]
+}

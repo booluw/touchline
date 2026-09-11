@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "de", "name": "Germany", "generation_weight": 6.5},
+  "provenance": {
+    "source": "Common German given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Alexander", "Anton", "Arne", "Bastian", "Benjamin", "Carl", "Christian", "Daniel", "David", "Dennis", "Elias", "Emil", "Erik", "Felix", "Finn", "Florian", "Friedrich", "Georg", "Hannes", "Hans", "Henrik", "Jakob", "Jan", "Jonas", "Julian", "Julius", "Karl", "Konstantin", "Lars", "Lennard", "Leon", "Linus", "Louis", "Lukas", "Marc", "Marco", "Marvin", "Mathis", "Mats", "Max", "Maximilian", "Moritz", "Nils", "Noah", "Oskar", "Paul", "Peter", "Philipp", "Robin", "Simon", "Stefan", "Tim", "Tobias", "Valentin", "Vincent"],
+  "last_names": ["Albrecht", "Altmann", "Arnold", "Bachmann", "Becker", "Berger", "Beyer", "Bohm", "Brand", "Brandt", "Braun", "Breuer", "Busch", "Engel", "Fischer", "Frank", "Franz", "Fuchs", "Gartner", "Gerber", "Glaser", "Gross", "Gruber", "Hahn", "Hartmann", "Heinrich", "Herrmann", "Hoffmann", "Horn", "Huber", "Jager", "Jung", "Kaiser", "Keller", "Klein", "Koch", "Konig", "Kramer", "Kraft", "Kraus", "Kruger", "Kuhn", "Lange", "Lehmann", "Lindner", "Lorenz", "Ludwig", "Maier", "Mayer", "Meier", "Moller", "Muller", "Neumann", "Peters", "Pfeiffer", "Pohl", "Richter", "Roth", "Rudolph", "Sauer", "Schafer", "Schmidt", "Schneider", "Schreiber", "Schulz", "Schwarz", "Seidel", "Sommer", "Stein", "Vogel", "Vogt", "Wagner", "Walter", "Weber", "Weiss", "Werner", "Winter", "Wolf", "Zimmermann"]
+}

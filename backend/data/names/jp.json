@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "jp", "name": "Japan", "generation_weight": 3},
+  "provenance": {
+    "source": "Common Japanese given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Akio", "Akira", "Daichi", "Daiki", "Daisuke", "Eiji", "Eita", "Haruto", "Hayato", "Hikaru", "Hiroshi", "Hiroto", "Itsuki", "Jun", "Kaito", "Kazuki", "Kazuma", "Kazuo", "Kei", "Keita", "Kenji", "Kenzo", "Kenta", "Kohei", "Kota", "Koji", "Makoto", "Manabu", "Masashi", "Masayuki", "Naoki", "Naoto", "Riku", "Ryo", "Ryota", "Ryuichi", "Sho", "Shota", "Sota", "Takashi", "Takumi", "Taro", "Tomoya", "Toru", "Tsuyoshi", "Yuji", "Yuichi", "Yuki", "Yuto"],
+  "last_names": ["Abe", "Adachi", "Ando", "Aoki", "Arai", "Aoyama", "Endo", "Fujii", "Fujita", "Fujiwara", "Fukuda", "Goto", "Hasegawa", "Hayashi", "Hirai", "Honda", "Ikeda", "Inoue", "Ishida", "Ishii", "Ishikawa", "Ito", "Kato", "Kaneko", "Kawai", "Kawakami", "Kawamura", "Kimura", "Kobayashi", "Komatsu", "Kondo", "Kudo", "Maeda", "Matsui", "Matsumoto", "Matsuda", "Mizuno", "Mori", "Morita", "Murakami", "Nagai", "Nagata", "Nakagawa", "Nakamura", "Nakano", "Nishikawa", "Nishimura", "Nomura", "Ogawa", "Oda", "Okada", "Okamoto", "Okazaki", "Ono", "Otani", "Saito", "Sakai", "Sakamoto", "Sasaki", "Sato", "Shibata", "Shimizu", "Sugawara", "Suzuki", "Takahashi", "Takagi", "Takeuchi", "Tamura", "Tanabe", "Tanaka", "Uchida", "Ueda", "Ueno", "Wada", "Watanabe", "Yamada", "Yamaguchi", "Yamamoto", "Yamashita", "Yamazaki", "Yoshida", "Yoshikawa"]
+}

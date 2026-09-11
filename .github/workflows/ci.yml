@@ -130,6 +130,15 @@ jobs:
         run: migrate -database "$DATABASE_URL" -path backend/migrations up
       - name: Verify version
         run: migrate -database "$DATABASE_URL" -path backend/migrations version
+      - name: Seed reference tables (idempotency check)
+        working-directory: backend
+        run: |
+          out1=$(go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names 2>&1)
+          echo "$out1"
+          out2=$(go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names 2>&1)
+          echo "$out2"
+          grep -q 'ref.nationalities=21 ' <<<"$out1" || { echo "expected 21 nationalities in ref-seed output"; exit 1; }
+          [ "$out1" = "$out2" ] || { echo "ref-seed is not idempotent"; exit 1; }
 
   build-images:
     name: Build + push images

@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "en", "name": "England", "generation_weight": 7.5},
+  "provenance": {
+    "source": "Common English given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Aaron", "Adam", "Alfie", "Archie", "Arthur", "Benjamin", "Charlie", "Daniel", "David", "Edward", "Ellis", "Felix", "George", "Harry", "Henry", "Jacob", "James", "Jamie", "Jack", "Joseph", "Joshua", "Leo", "Lewis", "Liam", "Logan", "Louis", "Luca", "Mason", "Max", "Michael", "Nathan", "Noah", "Oliver", "Oscar", "Owen", "Reece", "Riley", "Ryan", "Samuel", "Toby", "Tom", "Tommy", "Tyler", "William"],
+  "last_names": ["Adams", "Allen", "Anderson", "Atkinson", "Bailey", "Baker", "Ball", "Barker", "Barnes", "Bell", "Bennett", "Booth", "Brooks", "Brown", "Butler", "Carter", "Chapman", "Clarke", "Cole", "Collins", "Cook", "Cooper", "Cox", "Davies", "Davis", "Dixon", "Edwards", "Ellis", "Evans", "Fisher", "Foster", "Fox", "Gibson", "Graham", "Grant", "Green", "Griffiths", "Hall", "Harris", "Harrison", "Hayes", "Hill", "Hughes", "Hunter", "Jackson", "James", "Johnson", "Jones", "Kelly", "Lewis", "Marshall", "Martin", "Mason", "Matthews", "Miller", "Mitchell", "Moore", "Morgan", "Morris", "Murphy", "Murray", "Owen", "Parker", "Pearce", "Phillips", "Price", "Reed", "Richards", "Roberts", "Robinson", "Russell", "Shaw", "Simpson", "Smith", "Taylor", "Thompson", "Turner", "Walker", "Walsh", "Ward", "Watson", "Webb", "White", "Williams", "Wilson", "Wood", "Wright"]
+}

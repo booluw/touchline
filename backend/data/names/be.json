@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "be", "name": "Belgium", "generation_weight": 5},
+  "provenance": {
+    "source": "Common Belgian (Flemish + Walloon) given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Alexander", "Arthur", "Axel", "Baptiste", "Bart", "Bram", "Brecht", "Cedric", "Charles", "Christophe", "Daan", "Elias", "Emiel", "Eric", "Felix", "Florian", "Gauthier", "Gilles", "Guillaume", "Hugo", "Jan", "Jasper", "Jens", "Jeroen", "Jonas", "Julien", "Kobe", "Lars", "Lennert", "Loic", "Louis", "Lukas", "Maarten", "Mathieu", "Maxime", "Milan", "Nathan", "Nicolas", "Niels", "Olivier", "Pieter", "Robbe", "Robin", "Sam", "Simon", "Stan", "Stijn", "Theo", "Thomas", "Tim", "Tom", "Tristan", "Victor", "Wannes", "Wout", "Yannick", "Yves"],
+  "last_names": ["Baert", "Beckers", "Claes", "Claessen", "Claeys", "Coenen", "De Boeck", "De Cock", "De Ridder", "De Smedt", "De Smet", "De Vos", "Denis", "Devos", "Dubois", "Dumont", "Geerts", "Goossens", "Jacobs", "Janssen", "Lambert", "Lauwers", "Lefebvre", "Lejeune", "Lenaerts", "Maes", "Martens", "Mertens", "Michiels", "Moreau", "Peeters", "Pieters", "Segers", "Simon", "Stevens", "Thys", "Van Damme", "Van Looy", "Verbeke", "Vermeulen", "Verstraete", "Willems", "Wouters"]
+}

@@ -1,0 +1,12 @@
+{
+  "nationality": {"code": "nl", "name": "Netherlands", "generation_weight": 5.5},
+  "provenance": {
+    "source": "Common Dutch given/surname lists, hand-curated (see PROVENANCE.md)",
+    "license": "Factual name data; see PROVENANCE.md",
+    "curated_by": "Touchline data engineering (S01-04)",
+    "date": "2026-09-11",
+    "verified": false
+  },
+  "first_names": ["Bram", "Cas", "Daan", "David", "Dean", "Dylan", "Erik", "Finn", "Floris", "Gijs", "Guus", "Hugo", "Jan", "Jasper", "Jesse", "Joost", "Joris", "Julian", "Kaj", "Lars", "Laurens", "Levi", "Lucas", "Luuk", "Maarten", "Max", "Merijn", "Milan", "Niels", "Noah", "Olivier", "Pepijn", "Pieter", "Quinten", "Ralph", "Robin", "Ruben", "Rutger", "Sam", "Sem", "Siem", "Simon", "Stan", "Stijn", "Sven", "Teun", "Thijs", "Thomas", "Tim", "Tijn", "Tobias", "Tom", "Victor", "Wessel", "Willem", "Yannick"],
+  "last_names": ["Bakker", "Bakkeren", "Bergsma", "Boer", "Bos", "Bosman", "Bouman", "Brouwer", "Bruin", "Dekker", "Dijk", "Dijkstra", "Driessen", "Evers", "Graaf", "Groen", "Heijden", "Hendriks", "Hermans", "Hoekstra", "Jacobs", "Jansen", "Jong", "Janssen", "Klaassen", "Kok", "Koning", "Koopman", "Koster", "Kramer", "Kuipers", "Maas", "Meijer", "Molenaar", "Mulder", "Peters", "Post", "Prins", "Smit", "Smits", "Steen", "Timmerman", "van de Berg", "van den Berg", "van der Meer", "van der Zee", "van Dijk", "van Leeuwen", "Veenstra", "Vermeer", "Vermeulen", "Visser", "Vos", "Vries", "Willems", "Wit", "Wolters"]
+}

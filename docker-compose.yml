@@ -25,6 +25,20 @@ services:
       - ./backend/migrations:/migrations
     restart: "no"
 
+  # One-shot: populates ref.nationalities + ref.name_pool from the curated
+  # data/names files. Reference data only — never writes game entities.
+  # Runs after migrations; idempotent by construction.
+  ref-seed:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.ref-seed
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Neon DATABASE_URL required}
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    restart: "no"
+
   api:
     build:
       context: .
