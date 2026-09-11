@@ -151,6 +151,7 @@ These decisions are deliberately open in the source specifications. Engineering 
 | Decision ID | Resolution | Resolved by |
 |---|---|---|
 | **OPD-11** (topics doc `world.nationality_pool`) | The weighted nationality distribution pool lives in the `ref` schema — `ref.nationalities.generation_weight` plus `ref.name_pool` — not `world.nationality_pool`. Nationality/name data is identical across parallel worlds, so it is non-world-scoped by design (migrations `0002_ref`, `backend/migrations/README.md`). Tech plan §7 and the Phase-0 handoff notes used the name `world.nationality_pool`; that wording is superseded. `pkg/playergen` consumes the same weights regardless of table name (S01-04). | S01-01 |
+| **OPD-12** (technical plan §8 / PRD §54 explainability contract) | The explanation contract lives in `pkg/explanation` (cross-cutting, not `internal/world`). The wire shape is pinned as `{"subject","score","factors":[{"label","delta"}]}` with all fields always emitted; additive-only changes. `Factors` are the authoritative reason and are **not** required to sum to `Score` (narrative "why" cases such as an AI club's bid carry no numeric total); an opt-in `Validate()` reports a summed-deltas mismatch only when a producer calls it. Explanations persist with their causing event in `world.events.explanation` (JSONB); consumers render stored reasons (reference `Render()` in the package) and never recalculate. State-changing API endpoints (S02+) must return the `Explanation` directly. | S01-03 |
 
 ---
 

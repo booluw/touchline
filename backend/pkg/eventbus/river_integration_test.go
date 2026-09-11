@@ -22,12 +22,16 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+
+	"github.com/touchline/backend/pkg/explanation"
 )
 
 // fastRetry backs off ~100ms so the retry test stays quick.
 type fastRetry struct{}
 
-func (fastRetry) NextRetry(_ *rivertype.JobRow) time.Time { return time.Now().Add(100 * time.Millisecond) }
+func (fastRetry) NextRetry(_ *rivertype.JobRow) time.Time {
+	return time.Now().Add(100 * time.Millisecond)
+}
 
 // integrationDB returns a ready pool and applies all migrations. When
 // TEST_DATABASE_URL is set it is used verbatim (CI / local cluster); otherwise
@@ -187,6 +191,9 @@ func jsonEquals(t *testing.T, a, b []byte) bool {
 func publishEvent(bus *RiverBus, worldID uuid.UUID, causeID *uuid.UUID) *Event {
 	actorType := "system"
 	seed := int64(424242)
+	exp, _ := json.Marshal(explanation.New("board_confidence", -14).
+		Add("Wage bill 18% above structure", -12).
+		Add("Failed to qualify for Europe", -2))
 	e := &Event{
 		ID:              uuid.New(),
 		WorldID:         worldID,
@@ -195,7 +202,7 @@ func publishEvent(bus *RiverBus, worldID uuid.UUID, causeID *uuid.UUID) *Event {
 		ActorType:       &actorType,
 		ActorID:         &worldID,
 		Payload:         []byte(`{"home":3,"away":1}`),
-		Explanation:     []byte(`{"why":"determinism seed"}`),
+		Explanation:     exp,
 		CausedByEventID: causeID,
 		RandomSeed:      &seed,
 	}
@@ -234,26 +241,47 @@ func TestPublishConsumeRoundTrip(t *testing.T) {
 		got.RandomSeed == nil || *got.RandomSeed != 424242 {
 		t.Fatalf("dispatched event mismatch:\n got %+v\nwant %+v", got, want)
 	}
-	if !jsonEquals(t, got.Payload, []byte(`{"home":3,"away":1}`)) ||
-		!jsonEquals(t, got.Explanation, []byte(`{"why":"determinism seed"}`)) {
-		t.Fatalf("payload/explanation mismatch: payload=%s explanation=%s", got.Payload, got.Explanation)
+	if !jsonEquals(t, got.Payload, []byte(`{"home":3,"away":1}`)) {
+		t.Fatalf("payload mismatch: payload=%s", got.Payload)
 	}
 	if got.OccurredAt.IsZero() {
 		t.Fatalf("occurred_at must be set on dispatch")
 	}
 
+	// The structured explanation survives publish -> queue -> worker dispatch as
+	// the shared contract type (S01-03).
+	var wantExplanation explanation.Explanation
+	if err := json.Unmarshal([]byte(`{"subject":"board_confidence","score":-14,"factors":[{"label":"Wage bill 18% above structure","delta":-12},{"label":"Failed to qualify for Europe","delta":-2}]}`), &wantExplanation); err != nil {
+		t.Fatalf("build want explanation: %v", err)
+	}
+	var gotExplanation explanation.Explanation
+	if err := json.Unmarshal(got.Explanation, &gotExplanation); err != nil {
+		t.Fatalf("decode dispatched explanation: %v", err)
+	}
+	if !reflect.DeepEqual(gotExplanation, wantExplanation) {
+		t.Fatalf("dispatched explanation mismatch: got %+v want %+v", gotExplanation, wantExplanation)
+	}
+
 	// Event log row round-tripped all columns.
-	var actorType, payload, explanation string
+	var actorType, payload, explanationStr string
 	var seed int64
 	err := pool.QueryRow(context.Background(),
 		`SELECT actor_type, payload::text, explanation::text, random_seed FROM world.events WHERE id = $1`, want.ID,
-	).Scan(&actorType, &payload, &explanation, &seed)
+	).Scan(&actorType, &payload, &explanationStr, &seed)
 	if err != nil {
 		t.Fatalf("load world.events row: %v", err)
 	}
-	if actorType != "system" || !jsonEquals(t, []byte(payload), []byte(`{"home":3,"away":1}`)) ||
-		!jsonEquals(t, []byte(explanation), []byte(`{"why":"determinism seed"}`)) || seed != 424242 {
-		t.Fatalf("world.events row mismatch: actor_type=%s payload=%s explanation=%s seed=%d", actorType, payload, explanation, seed)
+	if actorType != "system" || !jsonEquals(t, []byte(payload), []byte(`{"home":3,"away":1}`)) || seed != 424242 {
+		t.Fatalf("world.events row mismatch: actor_type=%s payload=%s seed=%d", actorType, payload, seed)
+	}
+	// The persisted world.events.explanation column decodes to the same contract
+	// type a consumer renders from without recomputing the decision.
+	var storedExplanation explanation.Explanation
+	if err := json.Unmarshal([]byte(explanationStr), &storedExplanation); err != nil {
+		t.Fatalf("decode stored explanation: %v", err)
+	}
+	if !reflect.DeepEqual(storedExplanation, wantExplanation) {
+		t.Fatalf("stored explanation mismatch: got %+v want %+v", storedExplanation, wantExplanation)
 	}
 
 	// River queued and completed the job exactly as consumed.
