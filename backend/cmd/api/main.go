@@ -10,11 +10,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalauth "github.com/touchline/backend/internal/auth"
+	internalmanager "github.com/touchline/backend/internal/manager"
+	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
 )
 
 type server struct {
 	svc           *internalauth.Service
+	worldSvc      *internalworld.Service
+	mgrSvc        *internalmanager.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -47,6 +51,8 @@ func main() {
 
 	s := &server{
 		svc:           internalauth.NewService(pool, jwtCfg),
+		worldSvc:      internalworld.NewService(pool, nil), // bus wiring lands with the S02-03 scheduler
+		mgrSvc:        internalmanager.NewService(pool, nil),
 		jwtCfg:        jwtCfg,
 		pool:          pool,
 		cookiesSecure: os.Getenv("ENV") != "development",

@@ -57,6 +57,8 @@ Both are the source of truth. Do not invent systems absent from these docs.
 
 - **Multiple parallel worlds from day one.** Every schema carries `world_id` from first migration. Scheduler is world-scoped.
 - **One account, many worlds.** Membership is one `manager.managers` row per (user, world); a user holds at most **one job platform-wide** (`uq_manager_one_job_per_user`), and at most one row per (user, world) (`uq_managers_user_world`, migration `0023`). JWT claims carry no `world_id` — the active world is derived from the manager row (login ladder: job world wins → explicit pick → single active world → world picker → single row → list). Full contract: OPD-15.
+- **World lifecycle = admin-only (S02-02, OPD-16).** Admin provisions a world (`provisioning`), launches it (`active`/`open_beta` = playable), pauses/resumes, archives (terminal). `world.world_config` cadence keys are seeded on launch (`internal/world.defaultConfigKeys`); S02-03 reads them.
+- **A first club = a job offer from an AI club — the only sanctioned path (S02-02, OPD-16).** Admin (on an AI club's behalf) creates `manager.job_offers`; the unemployed human manager accepts or declines. Accepting hands the club over (incumbent AI manager stands down, `is_ai_controlled`→FALSE, `manager.manager_history` opens). Resign/sack close the history row (never deleted). One active assignment platform-wide; historical/display rep reads are global, operational rep is world-scoped (`WorldReputationTotal`). League composition is deliberately NOT decided here (OPD-01 → S03-01).
 - Match viewing = event-feed (see above). Email notifications (SES/Postmark/SendGrid behind interface), user-configurable prefs (`notification_preferences` table), Web Push later.
 
 ---
@@ -66,16 +68,18 @@ Both are the source of truth. Do not invent systems absent from these docs.
 ```
 backend/
   cmd/{api,scheduler,worker}/main.go     — three binaries (build ✓). api connects Postgres (GET /health + /health/db), scheduler + worker db-connected with health listeners (:8081/:8082)
-  cmd/api/{router,handlers,middleware}.go — Gin auth API (S02-01): POST /api/auth/login (world-picker branch), POST /api/auth/refresh (rotation), protected GET /api/dashboard stub; httpOnly cookie pair; CORS via APP_ORIGIN
+  cmd/api/{router,handlers,middleware}.go — Gin auth API (S02-01): POST /api/auth/login (world-picker branch), POST /api/auth/refresh (rotation), protected GET /api/dashboard stub; httpOnly cookie pair; CORS via APP_ORIGIN. S02-02 adds lifecycle_handlers.go: admin group (POST /api/admin/worlds, POST /api/admin/worlds/:id/status, POST /api/admin/offers — requireAuth + requireAdmin reading auth.users.is_admin) + player group (GET /api/managers/me/offers, POST /api/offers/:id/accept, POST /api/offers/:id/decline, POST /api/managers/me/resign)
   cmd/ref-seed/main.go                   — reference-data seeder (nationalities + name_pool), idempotent; wired into compose + CI
   cmd/user-create/main.go                — dev bootstrap account CLI (email/password/world; creates auth.users + unemployed manager; prints OPD-02 note)
-  internal/{club,player,transfer,finance,match,social,world}/  — domain packages + Service interfaces (stubs + structs, no DB impl yet)
+  internal/{club,player,transfer,finance,match,social}/  — domain packages + Service interfaces (stubs + structs, no DB impl yet)
+  internal/world/   — world lifecycle Service (S02-02): CreateWorld/GetWorld/ListWorlds/SetStatus (provisioning→active/paused→active/open_beta/archived), world_config seed on launch, WORLD_* events via pkg/eventbus Publishable; integration tests ✓
+  internal/manager/ — job-offer + assignment Service (S02-02): CreateJobOffer/ListOffers/AcceptJobOffer/DeclineJobOffer/Resign/Sack, one-active-assignment enforcement, manager_history open/close, JOB_OFFER_ACCEPTED + MANAGER_RESIGNED/SACKED events, append-only reputation boundary (GetReputation/ListCareerHistory/WorldReputationTotal); integration tests ✓
   internal/auth/    — auth Service: Login (OPD-15 world ladder) + Refresh (rotate+revoke via auth.sessions, hashed tokens); sentinel errors; integration tests (tag `integration`)
-  internal/testdb/  — shared integration harness (migrate + truncate, CreateWorld/CreateUser/Join/CreateClub); consumed by pkg/eventbus, internal/auth, cmd/api tests
+  internal/testdb/  — shared integration harness (migrate + truncate, CreateWorld/CreateUser/Join/CreateClub/CreateClubWithAIManager/MakeAdmin); consumed by pkg/eventbus, internal/auth, internal/world, internal/manager, cmd/api tests
   pkg/eventbus/    — EventBus (river, Postgres-native). river.go: RiverBus publish (world.events + enqueue), Subscribe, Start/Stop; worker.go: touchline_event job; integration + unit tests
   pkg/playergen/   — DB-free procedural generation: LoadNameData (curated data/names JSON), PoolGenerator, NationalityPool, NameRegistry, PlayerFactory (age 17–33, 12 positions), tests ✓
   pkg/auth/        — JWTConfig, GenerateTokenPair (access sub/user_id/jti/exp/iat/type, refresh sub/jti/exp/iat/type; HS256-pinned), ValidateAccessToken/ValidateRefreshToken, HashRefreshToken, tests ✓ (golang-jwt/v5)
-  migrations/      — 0000–0014 base + 0016–0022 river + 0023 manager world scoping (uq_managers_user_world, uq_manager_one_job_per_user)
+  migrations/      — 0000–0014 base + 0016–0022 river + 0023 manager world scoping (uq_managers_user_world, uq_manager_one_job_per_user) + 0024 manager lifecycle contract (manager.job_offers + pending-unique, world name unique, one-active-person index, status↔club CHECK, reputation 'career' category)
   data/names/      — 21 curated nationality datasets (README.md + PROVENANCE.md); eng/sco are documented non-ISO slugs
   go.mod           — module github.com/touchline/backend, go 1.25
 frontend/
@@ -100,7 +104,8 @@ README.md, .gitignore, OPENCODE.md
 - `cd backend && go build ./...` ✓
 - `cd backend && go test ./...` ✓ (auth + playergen smoke tests)
 - `cd backend && go vet ./...` ✓
-- Integration tests (tag `integration`) hit a real Postgres pointed at by `TEST_DATABASE_URL` (testcontainers fallback needs Docker): `cd backend && TEST_DATABASE_URL=… go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./cmd/api/...` ✓ (eventbus round-trip, auth service ladder + rotation, HTTP login/dashboard/refresh).
+- Integration tests (tag `integration`) hit a real Postgres pointed at by `TEST_DATABASE_URL` (testcontainers fallback needs Docker): `cd backend && TEST_DATABASE_URL=… go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./internal/world/... ./internal/manager/... ./cmd/api/...` ✓ (eventbus round-trip; auth service ladder + rotation; world lifecycle transitions + event log + config seed; job-offer accept/decline/resign/sack + one-active invariant + reputation deltas; HTTP login/dashboard/refresh + admin world lifecycle + offer inbox/accept/resign 401/403 coverage). `-p 1` is required — packages share + truncate one DB.
+- Live API smoke (S02-02) verified by hand against a local Postgres: admin login → create+launch world (archived terminal) → config seeded → AI-club offer created → candidate logged in, saw the offer, accepted (bot stood down, club handed over, history opened, +5 reputation) → resigned (history closed, club back to AI control); double resign 409.
 - Frontend `npm install` + `npm run dev` NOT yet exercised (no package-lock committed; `npm install` will generate it). `vue-tsc --noEmit` typecheck passes locally once `vite` is resolvable (pnpm doesn't hoist a direct `node_modules/vite`; CI's `npm install` hoists so the plain command works there).
 - `docker compose` config-checked and full-stack-boot verified in the CI `compose` job; local Docker is absent on the dev machine, so the stack boot is CI-verified only (see `docs/development.md`, OPD-14).
 
@@ -111,11 +116,13 @@ README.md, .gitignore, OPENCODE.md
 1. **DB migrations** (golang-migrate, one set per schema). Done in `backend/migrations/0000–0014` (base schemas) + `0016–0022` (river), see its README. The weighted nationality pool is `ref.nationalities.generation_weight` + `ref.name_pool` (global, non-world-scoped — see resolved decision OPD-11 in `docs/product_manager.md`); `world.events`, `world.world_config` (tick cadences), and `world.news_stories` are defined under `world`. Migrations execute via a Helm pre-install/pre-upgrade hook (`infra/helm/migrations`), a `docker compose` migration service, and a CI gate.
 2. **~~Wire river properly~~** ✅ Done (S01-02): `pkg/eventbus` runs a real river round-trip against exported migrations `0016–0022`; publish → queue → worker handler, unique-by-args enqueue, at-least-once delivery with handler-side idempotency, integration-tested.
 3. **~~Gin API wiring~~** ✅ Done (S02-01): `cmd/api` real router + CORS + auth middleware; `POST /api/auth/login` (+ world picker branch), `POST /api/auth/refresh` (rotation against `auth.sessions`), protected `GET /api/dashboard` stub; `cmd/user-create` dev bootstrap; frontend `useAuth` + `login.vue` world picker (httpOnly cookies, `credentials:'include'`). Session/identity model: OPD-15.
-4. **Scheduler**: `robfig/cron`, read cadences from `world_config`, emit `WORLD_TICK` events.
-5. **Worker**: subscribe to ticks, dispatch to engine handlers (granularity-scoped).
-6. **~~playergen data~~** ✅ Done (S01-04): 21 curated nationality datasets in `backend/data/names` (see its README + PROVENANCE).
-7. **~~Neon `DATABASE_URL` + env docs~~** ✅ Done (S01-05): root `.env.example` + `backend/.env.example` + `docs/development.md` (OPD-14).
-8. **Redis wiring**: session store, rate limiting, WS pub/sub.
+4. **~~World lifecycle + assignment contract~~** ✅ Done (S02-02, OPD-16): admin-only world lifecycle (`internal/world` + `POST /api/admin/worlds{,/:id/status}`), `manager.job_offers` offer state machine + AI-club handover (`internal/manager` + offers/resign endpoints), one-active-assignment invariants, `WORLD_*`/`JOB_OFFER_ACCEPTED`/`MANAGER_RESIGNED|SACKED` events, append-only reputation boundary (migration 0024). League composition deliberately deferred to S03-01 (OPD-01).
+5. **Scheduler**: `robfig/cron`, read cadences from `world_config`, emit `WORLD_TICK` events.
+6. **Worker**: subscribe to ticks, dispatch to engine handlers (granularity-scoped).
+7. **~~playergen data~~** ✅ Done (S01-04): 21 curated nationality datasets in `backend/data/names` (see its README + PROVENANCE).
+8. **~~Neon `DATABASE_URL` + env docs~~** ✅ Done (S01-05): root `.env.example` + `backend/.env.example` + `docs/development.md` (OPD-14).
+9. **Redis wiring**: session store, rate limiting, WS pub/sub.
+10. **World bootstrap (S03-01)**: seed clubs/leagues/first squads at game start (admin world create currently leaves the world empty of leagues/clubs) — consumes OPD-01.
 
 ## Phase roadmap summary (plan §16)
 

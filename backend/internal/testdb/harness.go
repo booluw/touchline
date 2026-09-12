@@ -79,11 +79,20 @@ func New(t *testing.T) *pgxpool.Pool {
 	if _, err := pool.Exec(context.Background(),
 		`TRUNCATE TABLE river.river_job, world.events, world.worlds,
 		 manager.managers, manager.manager_history, manager.job_security_snapshots,
-		 manager.manager_reputation_events, club.clubs, club.club_dna,
+		 manager.manager_reputation_events, manager.job_offers, club.clubs, club.club_dna,
 		 auth.sessions, auth.users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("reset test tables: %v", err)
 	}
 	return pool
+}
+
+// MakeAdmin promotes a user account to is_admin (for admin-route tests).
+func MakeAdmin(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE auth.users SET is_admin = TRUE WHERE id = $1`, userID); err != nil {
+		t.Fatalf("make admin: %v", err)
+	}
 }
 
 // CreateWorld inserts a world row and returns its id.
@@ -165,4 +174,29 @@ func CreateClub(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) uuid.UUID {
 		t.Fatalf("create club: %v", err)
 	}
 	return id
+}
+
+// CreateClubWithAIManager inserts a club whose current manager is its AI
+// policy-bot: the fixture shape for "AI club offering a job". Returns the club
+// id and the bot manager id.
+func CreateClubWithAIManager(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) (uuid.UUID, uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+
+	id, err := createClub(ctx, pool, worldID, "ai-fixture-club")
+	if err != nil {
+		t.Fatalf("create club: %v", err)
+	}
+
+	var botID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO manager.managers (world_id, is_policy_bot, status, current_club_id)
+		VALUES ($1, TRUE, 'active', $2) RETURNING id`, worldID, id).Scan(&botID); err != nil {
+		t.Fatalf("create AI manager: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE club.clubs SET current_manager_id = $2, is_ai_controlled = TRUE WHERE id = $1`, id, botID); err != nil {
+		t.Fatalf("assign AI manager: %v", err)
+	}
+	return id, botID
 }

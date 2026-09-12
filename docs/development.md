@@ -112,12 +112,13 @@ set -a; source ../.env; set +a
 go run ./cmd/api   # POST /api/auth/{login,refresh}, GET /api/dashboard
 ```
 
-Create a dev account (world must already exist, e.g.
-`INSERT INTO world.worlds (name, status) VALUES ('Sandbox','active')`):
+Create a dev account (world must already exist — see "Worlds and job offers"
+below for the supported admin flow):
 
 ```bash
 cd backend
 go run ./cmd/user-create -email you@example.com -password 'hunter2' -world-id <uuid>
+go run ./cmd/user-create -password-env ADMIN_PW -email admin@example.com -world-id <uuid> -admin
 ```
 
 Reference data without compose:
@@ -130,14 +131,15 @@ go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names
 ### Integration tests
 
 Integration tests (tag `integration`) live in `pkg/eventbus`, `internal/auth`,
-and `cmd/api`, sharing a harness in `internal/testdb` that migrates and
-truncates a real Postgres. Point them at any reachable instance with
-`TEST_DATABASE_URL` (without it they fall back to testcontainers, which
-requires Docker):
+`internal/world`, `internal/manager`, and `cmd/api`, sharing a harness in
+`internal/testdb` that migrates and truncates a real Postgres. Point them at
+any reachable instance with `TEST_DATABASE_URL` (without it they fall back to
+testcontainers, which requires Docker):
 
 ```bash
 TEST_DATABASE_URL="$DATABASE_URL" go test -p 1 -tags integration -race \
-  ./pkg/eventbus/... ./internal/auth/... ./cmd/api/...
+  ./pkg/eventbus/... ./internal/auth/... ./internal/world/... \
+  ./internal/manager/... ./cmd/api/...
 ```
 
 `-p 1` serializes packages: each test truncates the shared database, so
@@ -158,6 +160,52 @@ concurrent packages would wipe each other's fixtures mid-test.
 One account can hold one manager row per world (`uq_managers_user_world`) and
 at most one *job* across all worlds (`uq_manager_one_job_per_user`); the JWT
 carries no `world_id` — the world is derived from the manager row. See OPD-15.
+
+### Worlds and job offers (S02-02)
+
+Worlds and clubs are created by an admin at game start (OPD-16). All admin
+routes require an `is_admin` account (create one with `user-create -admin`).
+With the API running:
+
+```bash
+# Admin provisions a world, then launches it into 'active' (playable).
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' -d '{"email":"admin@example.com","password":"…"}'
+curl -b /tmp/jar -X POST localhost:8080/api/admin/worlds \
+  -H 'Content-Type: application/json' -d '{"name":"My World"}'
+curl -b /tmp/jar -X POST localhost:8080/api/admin/worlds/<world-id>/status \
+  -H 'Content-Type: application/json' -d '{"status":"active"}'
+```
+
+Versions of the lifecycle: `active`/`open_beta` are playable, `paused` sleeps,
+`archived` is terminal. Launching seeds `world.world_config` cadence keys that
+the S02-03 scheduler reads.
+
+A manager's **first club must come from a job offer** — there is no
+auto-assignment. Before the S03-01 bootstrap generates leagues/clubs, create a
+club with its AI (policy-bot) manager and have an admin issue the offer:
+
+```bash
+# scratch: an AI-managed club in the world (a real bootstrap replaces this in S03-01)
+psql "$DATABASE_URL" -Atqc "INSERT INTO club.clubs (world_id,name,short_name,country) VALUES ('<world-id>','AI Town','AT','tonga') RETURNING id"
+# …then set its current_manager_id to a policy-bot row (is_policy_bot=TRUE)
+curl -b /tmp/jar -X POST localhost:8080/api/admin/offers \
+  -H 'Content-Type: application/json' \
+  -d '{"club_id":"<club-id>","manager_id":"<unemployed-manager-id>"}'
+```
+
+The candidate manager can then see, accept, decline, and resign:
+
+```bash
+curl -b /tmp/jar localhost:8080/api/managers/me/offers
+curl -b /tmp/jar -X POST localhost:8080/api/offers/<offer-id>/accept
+curl -b /tmp/jar -X POST localhost:8080/api/offers/<offer-id>/decline
+curl -b /tmp/jar -X POST localhost:8080/api/managers/me/resign
+```
+
+Accepting hands the club over: the incumbent AI manager stands down,
+`is_ai_controlled` flips FALSE, a `manager.manager_history` row opens; resign
+or sack closes it (history is never deleted). See OPD-16.
 
 ## CI
 

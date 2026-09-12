@@ -46,7 +46,7 @@ func main() {
 		log.Fatal("-email is required")
 	}
 	if *worldID == "" {
-		log.Fatal("-world-id is required (create a world first; the world CLI lands in S02-02)")
+		log.Fatal("-world-id is required (an admin creates the world first — see docs/development.md, Worlds and job offers)")
 	}
 	database := *databaseURL
 	if database == "" {
@@ -102,7 +102,7 @@ func main() {
 		log.Fatalf("check world: %v", err)
 	}
 	if !worldExists {
-		log.Fatalf("world %s does not exist (create a world first; the world CLI lands in S02-02)", world)
+		log.Fatalf("world %s does not exist (an admin creates the world first — see docs/development.md, Worlds and job offers)", world)
 	}
 
 	var userID uuid.UUID

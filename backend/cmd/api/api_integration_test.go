@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,10 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalauth "github.com/touchline/backend/internal/auth"
+	internalmanager "github.com/touchline/backend/internal/manager"
 	"github.com/touchline/backend/internal/testdb"
+	internalworld "github.com/touchline/backend/internal/world"
 	pkgauth "github.com/touchline/backend/pkg/auth"
 )
 
@@ -28,6 +32,8 @@ func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	cfg := pkgauth.JWTConfig{Secret: "api-integration-secret", AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
 	s := &server{
 		svc:           internalauth.NewService(pool, cfg),
+		worldSvc:      internalworld.NewService(pool, nil),
+		mgrSvc:        internalmanager.NewService(pool, nil),
 		jwtCfg:        cfg,
 		pool:          pool,
 		cookiesSecure: false,
@@ -134,6 +140,129 @@ func TestHTTPLogin_Validation(t *testing.T) {
 	}
 	if resp := post(t, ts, client, "/api/auth/login", `not-json`, ""); resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("bad json = %d, want 400", resp.StatusCode)
+	}
+}
+
+// login returns the cookie header for an account that resolves to a single
+// session context (no world picker).
+func login(t *testing.T, ts *httptest.Server, client *http.Client, email, password string) string {
+	t.Helper()
+	resp := post(t, ts, client, "/api/auth/login",
+		fmt.Sprintf(`{"email":%q,"password":%q}`, email, password), "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login %s = %d, want 200", email, resp.StatusCode)
+	}
+	return cookieHeader(cookieMap(resp))
+}
+
+func TestHTTPAdminWorldLifecycle(t *testing.T) {
+	ts, pool := testHTTPServer(t)
+	client := ts.Client()
+
+	w := testdb.CreateWorld(t, pool, "W-ADMIN-A")
+	admin := testdb.CreateUser(t, pool, "admin@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	testdb.MakeAdmin(t, pool, admin)
+	adminCookies := login(t, ts, client, "admin@example.com", "s3cret")
+
+	// A non-admin account is forbidden from creating worlds.
+	testdb.CreateUser(t, pool, "plain@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	plainCookies := login(t, ts, client, "plain@example.com", "s3cret")
+	if resp := post(t, ts, client, "/api/admin/worlds", `{"name":"sneaky"}`, plainCookies); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-admin create world = %d, want 403", resp.StatusCode)
+	}
+
+	// Unauthenticated admin routes are 401.
+	if resp := post(t, ts, client, "/api/admin/worlds", `{"name":"anon"}`, ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous create world = %d, want 401", resp.StatusCode)
+	}
+
+	// Admin creates a world, launches it, and can list/pause/archive.
+	resp := post(t, ts, client, "/api/admin/worlds", `{"name":"Created World"}`, adminCookies)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create world = %d, want 201", resp.StatusCode)
+	}
+	var created map[string]any
+	raw, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode created world: %v", err)
+	}
+	worldID, _ := created["id"].(string)
+	if worldID == "" || created["status"] != "provisioning" {
+		t.Fatalf("created world = %v", created)
+	}
+
+	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/status", `{"status":"active"}`, adminCookies); resp.StatusCode != http.StatusOK {
+		t.Fatalf("launch world = %d, want 200", resp.StatusCode)
+	}
+	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/status", `{"status":"archived"}`, adminCookies); resp.StatusCode != http.StatusOK {
+		t.Fatalf("archive world = %d, want 200", resp.StatusCode)
+	}
+	// Invalid transition surfaces as 400.
+	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/status", `{"status":"active"}`, adminCookies); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("launch archived world = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestHTTPJobOfferFlow(t *testing.T) {
+	ts, pool := testHTTPServer(t)
+	client := ts.Client()
+
+	w := testdb.CreateWorld(t, pool, "W-OFFERS")
+	clubID, _ := testdb.CreateClubWithAIManager(t, pool, w)
+	candidate := testdb.CreateUser(t, pool, "candidate@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	admin := testdb.CreateUser(t, pool, "admin2@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	testdb.MakeAdmin(t, pool, admin)
+
+	adminCookies := login(t, ts, client, "admin2@example.com", "s3cret")
+
+	var candManager uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM manager.managers WHERE user_id = $1 AND world_id = $2`, candidate, w).Scan(&candManager); err != nil {
+		t.Fatalf("candidate manager id: %v", err)
+	}
+
+	// Admin issues an offer on the AI club's behalf.
+	offerBody := fmt.Sprintf(`{"club_id":%q,"manager_id":%q}`, clubID, candManager)
+	resp := post(t, ts, client, "/api/admin/offers", offerBody, adminCookies)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("admin create offer = %d, want 201", resp.StatusCode)
+	}
+	var created map[string]any
+	raw, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode offer: %v", err)
+	}
+	offerID, _ := created["id"].(string)
+	if offerID == "" {
+		t.Fatalf("offer = %v", created)
+	}
+
+	// The candidate logs in and sees the pending offer in their inbox.
+	candidateCookies := login(t, ts, client, "candidate@example.com", "s3cret")
+	resp = get(t, ts, client, "/api/managers/me/offers", candidateCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list offers = %d, want 200", resp.StatusCode)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	if !strings.Contains(string(raw), offerID) {
+		t.Fatalf("offers response missing offer: %s", raw)
+	}
+
+	// Accept it as the candidate.
+	resp = post(t, ts, client, "/api/offers/"+offerID+"/accept", "", candidateCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("accept offer = %d, want 200", resp.StatusCode)
+	}
+
+	// Resign frees the manager.
+	resp = post(t, ts, client, "/api/managers/me/resign", "", candidateCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resign = %d, want 200", resp.StatusCode)
+	}
+	// Resigning again (jobless) is a 409 conflict.
+	resp = post(t, ts, client, "/api/managers/me/resign", "", candidateCookies)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("double resign = %d, want 409", resp.StatusCode)
 	}
 }
 

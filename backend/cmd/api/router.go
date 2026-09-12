@@ -41,6 +41,23 @@ func (s *server) router() *gin.Engine {
 		api.POST("/auth/login", s.handleLogin)
 		api.POST("/auth/refresh", s.handleRefresh)
 		api.GET("/dashboard", s.requireAuth, s.handleDashboard)
+
+		// Player: the manager's own offer inbox and career actions.
+		manager := api.Group("/managers", s.requireAuth)
+		{
+			manager.GET("/me/offers", s.handleListOffers)
+			manager.POST("/me/resign", s.handleResign)
+		}
+		api.POST("/offers/:id/accept", s.requireAuth, s.handleAcceptOffer)
+		api.POST("/offers/:id/decline", s.requireAuth, s.handleDeclineOffer)
+
+		// Admin: world lifecycle (S02-02) and game-start club->manager job offers.
+		admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
+		{
+			admin.POST("/worlds", s.handleCreateWorld)
+			admin.POST("/worlds/:id/status", s.handleWorldStatus)
+			admin.POST("/offers", s.handleCreateOffer)
+		}
 	}
 
 	return r
