@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/pkg/eventbus"
+	"github.com/touchline/backend/pkg/realtime"
 )
 
 func main() {
@@ -39,6 +40,13 @@ func main() {
 		log.Fatalf("init event bus: %v", err)
 	}
 
+	// Realtime fan-out transport (S02-04): every WORLD_TICK is pushed to
+	// connected WebSocket clients through Redis, so API pods (and browsers) see
+	// ticks live. Degrades to the in-process broker when Redis is unavailable;
+	// Redis is never authoritative gameplay storage.
+	realtimeBroker := newRealtimeBroker(ctx)
+	defer realtimeBroker.Close()
+
 	// Phase 0 handler: proves the publish -> queue -> consume round-trip and
 	// demonstrates granularity-aware dispatch (S02-03). Engine handlers consume
 	// only the WORLD_TICK granularities they own by inspecting payload
@@ -54,6 +62,20 @@ func main() {
 		}
 		log.Printf("handled event %s (%s, granularity %s) for world %s at tick %d",
 			ev.ID, ev.EventType, payload.Granularity, ev.WorldID, ev.WorldTick)
+
+		tickEvent, err := realtime.NewEvent(realtime.EventWorldTick, ev.WorldID, map[string]any{
+			"event_id":    ev.ID.String(),
+			"granularity": payload.Granularity,
+			"tick":        ev.WorldTick,
+		})
+		if err != nil {
+			log.Printf("world tick %s: skip realtime push (%v)", ev.ID, err)
+			return nil
+		}
+		if err := realtimeBroker.Publish(ctx, tickEvent); err != nil {
+			log.Printf("world tick %s: realtime push failed (%v)", ev.ID, err)
+			return nil
+		}
 		return nil
 	}); err != nil {
 		log.Fatalf("subscribe: %v", err)
@@ -94,6 +116,22 @@ func connectDB() (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("cannot reach PostgreSQL: %w", err)
 	}
 	return pool, nil
+}
+
+// newRealtimeBroker builds the Redis pub/sub transport for realtime fan-out,
+// degrading gracefully to the in-process broker when Redis is unavailable so
+// bare `go run` still works.
+func newRealtimeBroker(ctx context.Context) realtime.Broker {
+	url := os.Getenv("REDIS_URL")
+	if url == "" {
+		return realtime.NewLocalBroker()
+	}
+	broker, err := realtime.NewRedisBroker(ctx, url)
+	if err != nil {
+		log.Printf("warning: REDIS_URL unreachable (%v); falling back to in-process realtime fan-out", err)
+		return realtime.NewLocalBroker()
+	}
+	return broker
 }
 
 // serveHealth exposes a liveness endpoint used by Docker Compose. It runs until

@@ -23,15 +23,23 @@ import (
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgauth "github.com/touchline/backend/pkg/auth"
+	"github.com/touchline/backend/pkg/realtime"
 )
 
-// testHTTPServer boots the real Gin router against a migrated, truncated DB
-// and returns the test server plus its pool (for fixtures).
-func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
+// newTestServer builds a server wired like main(): real services, a realtime
+// hub with an in-process broker, and its pooled Postgres test DB. WS tests use
+// it directly to reach the hub; REST tests wrap it below.
+func newTestServer(t *testing.T) (*server, *pgxpool.Pool) {
 	t.Helper()
 	pool := testdb.New(t)
 
 	cfg := pkgauth.JWTConfig{Secret: "api-integration-secret", AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
+
+	hub := realtime.NewHub(realtime.NewLocalBroker(),
+		realtime.WithOriginPatterns(originHostPattern("http://localhost:3000")))
+	go func() { _ = hub.Run(context.Background()) }()
+	t.Cleanup(func() { _ = hub.Close() })
+
 	s := &server{
 		svc:           internalauth.NewService(pool, cfg),
 		worldSvc:      internalworld.NewService(pool, nil),
@@ -42,8 +50,16 @@ func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		pool:          pool,
 		cookiesSecure: false,
 		appOrigin:     "http://localhost:3000",
+		hub:           hub,
 	}
+	return s, pool
+}
 
+// testHTTPServer boots the real Gin router against a migrated, truncated DB
+// and returns the test server plus its pool (for fixtures).
+func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
+	t.Helper()
+	s, pool := newTestServer(t)
 	ts := httptest.NewServer(s.router())
 	t.Cleanup(ts.Close)
 	return ts, pool

@@ -24,7 +24,7 @@ Both are the source of truth. Do not invent systems absent from these docs.
 | API style | REST/JSON + WebSockets (`/ws`, single multiplexed socket) |
 | Database | **PostgreSQL** (Neon serverless from day one; self-hosted later) |
 | Schemas | One Postgres schema per engine: `club, player, manager, transfer, finance, social, match, competition, world` |
-| Cache / ephemeral | Redis (sessions, rate limit, live-match state, pub/sub WS fan-out) |
+| Cache / ephemeral | Redis — **S02-04 ships WS pub/sub fan-out only** (OPD-19); session store + rate limiting remain open (S11) |
 | Event bus / job queue | **river** (Postgres-native) as Phase-0 event bus. NATS JetStream documented as a swap-in later — the `pkg/eventbus.EventBus` interface is the stable seam. |
 | Auth | **Custom JWT** (access + refresh, httpOnly cookies). No Ory/Clerk. |
 | Migrations | **golang-migrate**, versioned per schema, run as Helm pre-install/pre-upgrade hook |
@@ -68,7 +68,7 @@ Both are the source of truth. Do not invent systems absent from these docs.
 ```
 backend/
   cmd/{api,scheduler,worker}/main.go     — three binaries (build ✓). api connects Postgres (GET /health + /health/db); scheduler runs the world clock (S02-03) and has a health listener; worker consumes the bus with a health listener
-  cmd/api/{router,handlers,middleware,lifecycle_handlers,bootstrap_handlers}.go — Gin API: auth (S02-01) + admin world lifecycle & config (S02-02/03) + world bootstrap & club reads (S03-01) + job-offer inbox/accept/decline/resign (S02-02); httpOnly cookie pair; CORS via APP_ORIGIN
+  cmd/api/{router,handlers,middleware,lifecycle_handlers,bootstrap_handlers,ws}.go — Gin API: auth (S02-01) + admin world lifecycle & config (S02-02/03) + world bootstrap & club reads (S03-01) + job-offer inbox/accept/decline/resign (S02-02) + single authenticated WebSocket (S02-04); httpOnly cookie pair; CORS via APP_ORIGIN
   cmd/ref-seed/main.go                   — reference-data seeder (nationalities + name_pool), idempotent; wired into compose + CI
   cmd/user-create/main.go                — dev bootstrap account CLI (email/password/world; creates auth.users + unemployed manager; prints OPD-02 note)
   internal/{finance,match,social,transfer}/  — domain packages + Service interfaces (stubs + structs, no DB impl yet)
@@ -82,6 +82,7 @@ backend/
   internal/testdb/  — shared integration harness (migrate + truncate, CreateWorld/CreateUser/Join/CreateClub/CreateClubWithAIManager/MakeAdmin + SeedRefData for hermetic bootstrap tests); consumed by pkg/eventbus, internal/auth, internal/world, internal/manager, internal/scheduler, internal/bootstrap, cmd/api tests
   pkg/eventbus/    — EventBus (river, Postgres-native). river.go: RiverBus publish (world.events + enqueue), Subscribe, Start/Stop; worker.go: touchline_event job; integration + unit tests
   pkg/playergen/   — DB-free procedural generation: LoadNameData (curated data/names JSON), PoolGenerator, NationalityPool, NameRegistry, PlayerFactory (age 17–33, 12 positions), tests ✓
+  pkg/realtime/    — single-socket realtime foundation (S02-04, OPD-19): typed Event envelope, Hub (world-scoped client registry + coder/websocket pumps, ping/pong, unknown-type error), Broker (Redis pub/sub fan-out across pods, LocalBroker in-process fallback); miniredis unit + cmd/api integration tests ✓
   pkg/auth/        — JWTConfig, GenerateTokenPair (access sub/user_id/jti/exp/iat/type, refresh sub/jti/exp/iat/type; HS256-pinned), ValidateAccessToken/ValidateRefreshToken, HashRefreshToken, tests ✓ (golang-jwt/v5)
   migrations/      — 0000–0014 base + 0016–0022 river + 0023 manager world scoping (uq_managers_user_world, uq_manager_one_job_per_user) + 0024 manager lifecycle contract (manager.job_offers + pending-unique, world name unique, one-active-person index, status↔club CHECK, reputation 'career' category)
   data/names/      — 21 curated nationality datasets (README.md + PROVENANCE.md); eng/sco are documented non-ISO slugs
@@ -89,8 +90,8 @@ backend/
 frontend/
   nuxt.config.ts   — Nuxt 3 + @vite-pwa/nuxt + @pinia/nuxt + Tailwind
   app.vue, pages/{index, auth/login}.vue
-  composables/{useDashboard,useSocket}.ts
-  stores/{club,squad,finance,transfers,social}.ts   — Pinia
+  composables/{useDashboard,useSocket}.ts   — useSocket: singleton session with reconnect/backoff, typed dispatch, unknown-type ignore (S02-04)
+  stores/{club,squad,finance,transfers,social,realtime}.ts   — Pinia; realtime owns the single socket lifecycle + latest world_tick/error (S02-04)
   server/index.ts  — BFF health/status only (no game logic)
   assets/css/main.css, tailwind.config.js, tsconfig.json, package.json, .env.example
 infra/
@@ -108,10 +109,12 @@ README.md, .gitignore, OPENCODE.md
 - `cd backend && go build ./...` ✓
 - `cd backend && go test ./...` ✓ (auth + playergen smoke tests)
 - `cd backend && go vet ./...` ✓
-- Integration tests (tag `integration`) hit a real Postgres pointed at by `TEST_DATABASE_URL` (testcontainers fallback needs Docker): `cd backend && TEST_DATABASE_URL=… go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./internal/world/... ./internal/manager/... ./internal/scheduler/... ./internal/bootstrap/... ./internal/club/... ./cmd/api/...` ✓ (eventbus round-trip; auth service ladder + rotation; world lifecycle transitions + event log + config seed; job-offer accept/decline/resign/sack + one-active invariant + reputation deltas; world clock — configured daily tick arriving at a worker handler, cadence change on next sync, pause unregisters, counter/payload contract; world bootstrap — club+manager+24-player squad+events+seed replay, provisioning/collision/not-found guards, deterministic same-seed squads, bootstrapped world receives its daily WORLD_TICK (AC5); club/player reads; HTTP login/dashboard/refresh + admin world lifecycle/config + bootstrap/clubs endpoints + offer inbox/accept/resign 401/403/409 coverage). `-p 1` is required — packages share + truncate one DB. Bootstrap/HTTP tests call `testdb.SeedRefData` (hermetic ref pools — CI runs only migrations).
+- Integration tests (tag `integration`) hit a real Postgres pointed at by `TEST_DATABASE_URL` (testcontainers fallback needs Docker): `cd backend && TEST_DATABASE_URL=… go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./internal/world/... ./internal/manager/... ./internal/scheduler/... ./internal/bootstrap/... ./internal/club/... ./cmd/api/...` ✓ (eventbus round-trip; auth service ladder + rotation; world lifecycle transitions + event log + config seed; job-offer accept/decline/resign/sack + one-active invariant + reputation deltas; world clock — configured daily tick arriving at a worker handler, cadence change on next sync, pause unregisters, counter/payload contract; world bootstrap — club+manager+24-player squad+events+seed replay, provisioning/collision/not-found guards, deterministic same-seed squads, bootstrapped world receives its daily WORLD_TICK (AC5); club/player reads; HTTP login/dashboard/refresh + admin world lifecycle/config + bootstrap/clubs endpoints + offer inbox/accept/resign 401/403/409 coverage + WebSocket auth/world-scoped delivery (S02-04, miniredis)). `-p 1` is required — packages share + truncate one DB. Bootstrap/HTTP/WS tests call `testdb.SeedRefData` (hermetic ref pools — CI runs only migrations).
+- Realtime unit tests (no external services, miniredis in-process): `cd backend && go test -race ./pkg/realtime/...` ✓ — envelope round trip, local-broker fan-out + world isolation, cross-hub Redis fan-out across two simulated pods, ping/pong + unknown-type error envelopes, no-world handshake rejection.
 - Live API smoke (S02-02) verified by hand against a local Postgres: admin login → create+launch world (archived terminal) → config seeded → AI-club offer created → candidate logged in, saw the offer, accepted (bot stood down, club handed over, history opened, +5 reputation) → resigned (history closed, club back to AI control); double resign 409.
 - World clock smoke (S02-03) verified by hand: all five cadences fired on the real river bus at the minute boundary on a launched world (ticks 1–5); a runtime `tick.daily_cadence` change dropped `daily` on the next sync with no redeploy (4 ticks); pause → zero ticks; scheduler single-leader lock held; worker errors 0.
 - Live API smoke (S03-01) verified by hand on the local cluster: admin bootstrap of a provisioning world (201, 24-player AI squad + policy-bot manager + `CLUB_CREATED`/`WORLD_BOOTSTRAPPED`) → `GET /api/clubs` (+detail with squad) → launch → set `tick.daily_cadence=* * * * *` (picked up on next scheduler sync, no redeploy) → daily `WORLD_TICK` at the minute boundary (`current_tick=1`) handled by the running worker; double bootstrap 409. Cleaned up.
+- Realtime live smoke (S02-04) verified by hand: api + scheduler + worker binaries against the local Postgres, with api and worker sharing a Redis pub/sub broker (miniredis TCP stub — a real Redis protocol listener, no system Redis). Admin bootstrap + launch + `tick.daily_cadence=* * * * *`; a cookie-authenticated WebSocket client (throwaway `cmd/ws-smoke`) opened `/ws` and received `world_tick` envelopes from the worker each minute (`event_id`/`granularity: daily`/`tick` matching the worker's log — cross-process, cross-pod-style fan-out). Unreachable `REDIS_URL` → both processes logged the fail-soft warning and continued (in-process broker). Smoke world/accounts cleaned up; throwaway `cmd/{ws-smoke,redis-stub}` deleted.
 - Frontend `npm install` + `npm run dev` NOT yet exercised (no package-lock committed; `npm install` will generate it). `vue-tsc --noEmit` typecheck passes locally once `vite` is resolvable (pnpm doesn't hoist a direct `node_modules/vite`; CI's `npm install` hoists so the plain command works there).
 - `docker compose` config-checked and full-stack-boot verified in the CI `compose` job; local Docker is absent on the dev machine, so the stack boot is CI-verified only (see `docs/development.md`, OPD-14).
 
@@ -127,7 +130,7 @@ README.md, .gitignore, OPENCODE.md
 6. **Worker**: subscribes to `WORLD_TICK` (granularity-aware log handler) + `WORLD_*`/`JOB_OFFER_*`/`MANAGER_*`; engine handlers dispatch per granularity as the engines land (S04 onwards).
 7. **~~playergen data~~** ✅ Done (S01-04): 21 curated nationality datasets in `backend/data/names` (see its README + PROVENANCE).
 8. **~~Neon `DATABASE_URL` + env docs~~** ✅ Done (S01-05): root `.env.example` + `backend/.env.example` + `docs/development.md` (OPD-14).
-9. **Redis wiring**: session store, rate limiting, WS pub/sub.
+9. **Redis wiring — WS pub/sub done, session/rate-limit open**: S02-04 wired Redis for realtime fan-out only (`pkg/realtime`, `/ws`, worker→browser `world_tick`; OPD-19). The original session-store / rate-limiting scope stays open (S11).
 10. **~~World bootstrap~~** ✅ Done (S03-01, OPD-18): `internal/bootstrap` atomically materializes a `provisioning` world into one AI starter club + policy-bot manager + 24-player generated squad (single tx, `CLUB_CREATED` + `WORLD_BOOTSTRAPPED` with `random_seed`), admin `POST /api/admin/worlds/:id/bootstrap`; reads world-scoped via `GET /api/clubs{,/:id}`. Human entry stays the OPD-16 offer→accept flow. Leagues/competitions deliberately deferred to S04-01 (OPD-01).
 
 ## Phase roadmap summary (plan §16)
@@ -142,7 +145,7 @@ README.md, .gitignore, OPENCODE.md
 
 - **Do NOT add `balance` columns** to finance tables. Ledger only.
 - **`world_id` on every schema** from the first migration — do not retrofit.
-- `go mod tidy` removes unused deps (redis/cron are currently declared only in plan — will vanish until imported; that's fine). River stays: imported by `pkg/eventbus`.
+- `go mod tidy` removes unused deps. Redis (`go-redis/v9`), `coder/websocket`, and `alicebob/miniredis/v2` are now imported and pinned by `pkg/realtime`. River stays: imported by `pkg/eventbus`.
 - Match engine stays **pure** (`Simulate(seed, teamA, teamB, tacticsA, tacticsB) MatchResult`), zero DB — testability + determinism.
 - Comments: project code intentionally has few comments; treat docs as the spec.
 - Keep frontend server routes BFF-only; game logic never in Nuxt.

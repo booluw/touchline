@@ -15,6 +15,7 @@ import (
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
+	"github.com/touchline/backend/pkg/realtime"
 )
 
 type server struct {
@@ -27,6 +28,7 @@ type server struct {
 	pool          *pgxpool.Pool
 	cookiesSecure bool
 	appOrigin     string
+	hub           *realtime.Hub
 }
 
 func main() {
@@ -53,6 +55,8 @@ func main() {
 
 	appOrigin := envOr("APP_ORIGIN", "http://localhost:3000")
 
+	hub := newRealtimeHub(appOrigin)
+
 	s := &server{
 		svc:           internalauth.NewService(pool, jwtCfg),
 		worldSvc:      internalworld.NewService(pool, nil), // bus wiring lands with the S02-03 scheduler
@@ -63,6 +67,7 @@ func main() {
 		pool:          pool,
 		cookiesSecure: os.Getenv("ENV") != "development",
 		appOrigin:     appOrigin,
+		hub:           hub,
 	}
 
 	r := s.router()
@@ -110,4 +115,32 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		log.Printf("warning: invalid %s %q, using %s", key, v, fallback)
 	}
 	return fallback
+}
+
+// newRealtimeHub builds the realtime fan-out hub (S02-04). When REDIS_URL is
+// set and reachable the hub uses Redis pub/sub so multiple API pods share one
+// event stream; otherwise it degrades to an in-process broker so bare `go run`
+// works without Redis. Redis is never authoritative gameplay storage.
+func newRealtimeHub(appOrigin string) *realtime.Hub {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var broker realtime.Broker = realtime.NewLocalBroker()
+	if url := os.Getenv("REDIS_URL"); url != "" {
+		redisBroker, err := realtime.NewRedisBroker(ctx, url)
+		if err != nil {
+			log.Printf("warning: REDIS_URL unreachable (%v); falling back to in-process realtime fan-out", err)
+		} else {
+			broker = redisBroker
+			log.Printf("realtime fan-out via Redis (%s)", redisBroker.ChannelName())
+		}
+	}
+
+	hub := realtime.NewHub(broker, realtime.WithOriginPatterns(originHostPattern(appOrigin)))
+	go func() {
+		if err := hub.Run(context.Background()); err != nil {
+			log.Printf("realtime hub stopped: %v", err)
+		}
+	}()
+	return hub
 }

@@ -32,7 +32,7 @@ processes read the same vars from the environment; for bare `go run` use
 | Variable | Required | Example | Notes |
 |---|---|---|---|
 | `DATABASE_URL` | Yes | `postgres://user:pass@ep-….neon.tech/touchline?sslmode=require` | Postgres (Neon). Scheme must be `postgres://` — golang-migrate and river reject `postgresql://`. |
-| `REDIS_URL` | Yes | `redis://localhost:6379` | Consumed by the stack; wired into apps in S02-04. |
+| `REDIS_URL` | Yes | `redis://localhost:6379` | WebSocket fan-out transport (S02-04, OPD-19). The API subscribes + publishes, the worker publishes `world_tick`. **Fail-soft:** if `REDIS_URL` is unset or unreachable, the API/worker log a warning and fall back to an in-process broker (bare `go run` works). |
 | `JWT_SECRET` | Yes* | `change-me-in-production` | *compose falls back to a dev default; set a real secret outside dev. |
 | `JWT_ACCESS_TTL` | No | `15m` | Access token lifetime. |
 | `JWT_REFRESH_TTL` | No | `720h` | Refresh token lifetime. |
@@ -132,7 +132,8 @@ go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names
 ### Integration tests
 
 Integration tests (tag `integration`) live in `pkg/eventbus`, `internal/auth`,
-`internal/world`, `internal/manager`, and `cmd/api`, sharing a harness in
+`internal/world`, `internal/manager`, `internal/scheduler`,
+`internal/bootstrap`, `internal/club`, and `cmd/api`, sharing a harness in
 `internal/testdb` that migrates and truncates a real Postgres. Point them at
 any reachable instance with `TEST_DATABASE_URL` (without it they fall back to
 testcontainers, which requires Docker):
@@ -140,11 +141,15 @@ testcontainers, which requires Docker):
 ```bash
 TEST_DATABASE_URL="$DATABASE_URL" go test -p 1 -tags integration -race \
   ./pkg/eventbus/... ./internal/auth/... ./internal/world/... \
-  ./internal/manager/... ./cmd/api/...
+  ./internal/manager/... ./internal/scheduler/... ./internal/bootstrap/... \
+  ./internal/club/... ./cmd/api/...
 ```
 
 `-p 1` serializes packages: each test truncates the shared database, so
-concurrent packages would wipe each other's fixtures mid-test.
+concurrent packages would wipe each other's fixtures mid-test. The realtime
+unit tests (`go test -race ./pkg/realtime/...`) need no external services —
+they run against an in-process `miniredis`, and the `cmd/api` WebSocket
+integration tests use the same in-process broker.
 
 ### Auth session flow
 
@@ -251,6 +256,65 @@ curl -b /tmp/jar -X POST localhost:8080/api/admin/worlds/<world-id>/config \
 `tick.match_cadence` is seeded but deliberately ignored by the world clock:
 live match ticks belong to the match engine's per-match goroutines (S04), not
 to world-cron jobs (see OPD-17).
+
+### Realtime (WebSocket + Redis, S02-04)
+
+There is exactly **one** WebSocket: `GET /ws`, authenticated by the same
+httpOnly `access_token` cookie as REST (the browser sends it automatically on
+the handshake). The server checks the `Origin` against `APP_ORIGIN`, derives
+the world from the caller's manager row (OPD-15), and scopes every delivered
+event to that world — a socket can never receive another world's stream.
+
+Event envelope (server→client and client→server):
+
+```json
+{ "type": "world_tick", "payload": { "event_id": "…", "granularity": "daily", "tick": 1 },
+  "world_id": "…", "ts": "2026-09-11T02:03:04Z" }
+```
+
+| `type` (server→client) | Payload | Source |
+|---|---|---|
+| `world_tick` | `{event_id, granularity, tick}` | scheduler worker pushes every `WORLD_TICK` over Redis (S02-04 proof event) |
+| `match_tick`, `notification`, `board_update`, … | feature-specific | future engines (S04+) — the socket forwards any type |
+
+| `type` (client→server) | Response |
+|---|---|
+| `ping` | `pong` |
+| anything else | `error` envelope `{code, message}` (connection stays open — AC5) |
+
+Questions _to_ the server other than `ping` are not part of Phase 0; commands
+stay REST (async-first, plan §1.5).
+
+**Fan-out.** The API subscribes to a Redis pub/sub channel
+(`touchline:realtime`); the worker publishes `world_tick` there. Every API pod
+subscribes, so a browser connected to any pod sees every tick, and one pod can
+serve a whole fleet with consistent delivery. If `REDIS_URL` is missing or
+unreachable the processes log a warning and fall back to an in-process broker,
+so bare `go run` works unchanged. See OPD-19.
+
+**Client (Nuxt).** `composables/useSocket.ts` owns the single connection per
+app. It reconnects with exponential backoff + jitter while enabled, dispatches
+events to subscribers by `type`, and ignores unknown types (one warning). A
+missed live push is harmless: authoritative state and replay live in
+`world.events` (Postgres), never in the fire-and-forget Redis transport.
+`stores/realtime.ts` owns the lifecycle and the latest `world_tick`/`error`;
+`pages/auth/login.vue` connects on successful login.
+
+**Verification** — the browser is required for the handshake, but the seam is
+covered in CI/back-end tests (miniredis) and can be observed by hand:
+
+```bash
+# With Redis up and a launched world, set the daily cadence to every minute:
+curl -b /tmp/jar -X POST localhost:8080/api/admin/worlds/<world-id>/config \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"tick.daily_cadence","value":"* * * * *"}'
+# Log in via the UI, then in browser devtools:
+#   new WebSocket(`${location.origin.replace(/^http/,'ws')}:8080/ws`)  // or the app's socket
+#   onmessage  -> a world_tick envelope arrives each minute
+```
+Kill Redis and restart it: the API logs the fallback warning, the browser
+socket reconnects with backoff, and pushes resume once Redis returns (no
+redeploy).
 
 ## CI
 

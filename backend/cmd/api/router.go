@@ -36,6 +36,10 @@ func (s *server) router() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "db-ok"})
 	})
 
+	// The single authenticated WebSocket (S02-04). requireAuth validates the
+	// access_token cookie on the handshake; events are world-scoped.
+	r.GET("/ws", s.requireAuth, s.handleWS)
+
 	api := r.Group("/api")
 	{
 		api.POST("/auth/login", s.handleLogin)

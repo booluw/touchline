@@ -83,6 +83,12 @@ async function confirmWorld() {
 }
 
 async function doLogin() {
-  return await login(email.value, password.value)
+  const res = await login(email.value, password.value)
+  // A real session now exists; open the single realtime socket. World-picker
+  // responses set no cookies yet, so wait until the user has picked one.
+  if ((res as LoginWorldPicker).status !== 'worlds') {
+    useRealtimeStore().connect()
+  }
+  return res
 }
 </script>
