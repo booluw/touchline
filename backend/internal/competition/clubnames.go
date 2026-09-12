@@ -16,25 +16,15 @@ import (
 
 const maxClubNameAttempts = 200
 
-var clubStems = []string{
-	"Athletic", "Olympique", "Union", "City", "Racing", "Metropolitan",
-	"Royal", "New", "Star", "National", "Imperial", "Eagle",
-	"Panther", "Storm", "Fortress", "Atlas", "Phoenix", "Falcon",
-	"Typhoon", "Vanguard", "Summit", "Harbor",
-}
-
-var clubSuffixes = []string{
-	"FC", "United", "City", "SC", "Rovers", "Wanderers",
-	"Sporting", "AC", "Athletic", "Futbol", "Kickers",
-}
-
 // nextClubName deterministically picks a human-plausible, unique club name
-// from the constant pools above. Names already used in this league seeding
-// run are skipped; the pool is large enough that retries are bounded.
-func nextClubName(rng *rand.Rand, used map[string]bool) string {
+// from the given pools (stems + suffixes, sourced from ref.club_name_parts).
+// Names already used in this seeding run are skipped; the pools are large
+// enough that retries are bounded. Callers must have already ensured both
+// pools are non-empty via bootstrap.LoadClubNameParts.
+func nextClubName(rng *rand.Rand, stems, suffixes []string, used map[string]bool) string {
 	for attempt := 0; attempt < maxClubNameAttempts; attempt++ {
-		stem := clubStems[rng.Intn(len(clubStems))]
-		suffix := clubSuffixes[rng.Intn(len(clubSuffixes))]
+		stem := stems[rng.Intn(len(stems))]
+		suffix := suffixes[rng.Intn(len(suffixes))]
 		name := fmt.Sprintf("%s %s", stem, suffix)
 		if !used[name] {
 			return name

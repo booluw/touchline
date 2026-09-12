@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated Touchline internal club-name lists (project-original)",
+    "license": "proprietary",
+    "curated_by": "Touchline team",
+    "date": "2026-09-12",
+    "verified": false
+  },
+  "stems": [
+    "Athletic", "Olympique", "Union", "City", "Racing", "Metropolitan",
+    "Royal", "New", "Star", "National", "Imperial", "Eagle",
+    "Panther", "Storm", "Fortress", "Atlas", "Phoenix", "Falcon",
+    "Typhoon", "Vanguard", "Summit", "Harbor"
+  ],
+  "suffixes": [
+    "FC", "United", "City", "SC", "Rovers", "Wanderers",
+    "Sporting", "AC", "Athletic", "Futbol", "Kickers"
+  ]
+}

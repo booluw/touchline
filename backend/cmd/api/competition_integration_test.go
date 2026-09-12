@@ -22,6 +22,7 @@ import (
 func TestHTTPCompetitionAdminAndReads(t *testing.T) {
 	ts, pool := testHTTPServer(t)
 	testdb.SeedRefData(t, pool)
+	testdb.SeedClubNameParts(t, pool)
 	client := ts.Client()
 
 	// Provisioning world + admin with a manager row in it.

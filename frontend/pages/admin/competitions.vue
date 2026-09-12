@@ -4,12 +4,55 @@
 // the engine schedules a deterministic round-robin once seeded.
 import { ref, computed } from 'vue'
 
-import type { Country, League, SeedResult } from '~/composables/useCompetition'
+import type { Country, League, SeedResult, ClubNamePools } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
 import { useAuth } from '~/composables/useAuth'
 
 const { user } = useAuth()
 const comp = useCompetition()
+
+// Global club-name pools (no world gate): AI clubs draw names from here.
+const pools = ref<ClubNamePools>({ stems: [], suffixes: [] })
+const poolForm = ref<{ kind: 'stem' | 'suffix'; value: string }>({ kind: 'stem', value: '' })
+const poolsError = ref('')
+const poolsBusy = ref(false)
+
+async function loadPools() {
+  pools.value = await comp.listClubNameParts()
+}
+async function poolCall(fn: () => Promise<void>) {
+  poolsError.value = ''
+  if (!poolForm.value.value.trim()) {
+    poolsError.value = 'Enter a value to add to the pool.'
+    return
+  }
+  poolsBusy.value = true
+  try {
+    await fn()
+  } catch (e) {
+    poolsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    poolsBusy.value = false
+    await loadPools()
+  }
+}
+async function doAddPart() {
+  await poolCall(async () => {
+    await comp.addClubNamePart(poolForm.value.kind, poolForm.value.value.trim())
+  })
+}
+async function doRemovePart(kind: 'stem' | 'suffix', value: string) {
+  poolsBusy.value = true
+  try {
+    await comp.removeClubNamePart(kind, value)
+  } catch (e) {
+    poolsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    poolsBusy.value = false
+    await loadPools()
+  }
+}
+loadPools()
 
 const worldId = ref('')
 const error = ref('')
@@ -108,6 +151,38 @@ async function doSeed(starterLeagueId: string) {
         </div>
         <p v-if="error" class="text-red-400 text-sm mt-2">{{ error }}</p>
         <p v-if="notice" class="text-emerald-400 text-sm mt-2">{{ notice }}</p>
+      </section>
+
+      <section class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+        <h2 class="text-xl font-semibold text-white mb-1">Club name pools</h2>
+        <p class="text-slate-400 text-sm mb-3">Global (all worlds): AI clubs are named stem + suffix from these pools. Add and remove freely — seeding stays deterministic.</p>
+        <div class="flex flex-wrap gap-2 items-end mb-4">
+          <select v-model="poolForm.kind" class="bg-slate-900 border border-slate-600 rounded px-3 py-2">
+            <option value="stem">Stem</option>
+            <option value="suffix">Suffix</option>
+          </select>
+          <input v-model="poolForm.value" type="text" placeholder="e.g. Phoenix" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 w-56" />
+          <button :disabled="poolsBusy" @click="doAddPart" class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2">Add</button>
+        </div>
+        <p v-if="poolsError" class="text-red-400 text-sm mb-3">{{ poolsError }}</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <h3 class="text-sm text-slate-400 mb-2">Stems ({{ pools.stems.length }})</h3>
+            <ul class="flex flex-wrap gap-2">
+              <li v-for="s in pools.stems" :key="s" class="bg-slate-900 border border-slate-700 rounded-full pl-4 pr-1 py-1 text-sm flex items-center gap-2">
+                {{ s }}<button @click="doRemovePart('stem', s)" class="text-slate-500 hover:text-red-400 px-2" title="Remove">×</button>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="text-sm text-slate-400 mb-2">Suffixes ({{ pools.suffixes.length }})</h3>
+            <ul class="flex flex-wrap gap-2">
+              <li v-for="s in pools.suffixes" :key="s" class="bg-slate-900 border border-slate-700 rounded-full pl-4 pr-1 py-1 text-sm flex items-center gap-2">
+                {{ s }}<button @click="doRemovePart('suffix', s)" class="text-slate-500 hover:text-red-400 px-2" title="Remove">×</button>
+              </li>
+            </ul>
+          </div>
+        </div>
       </section>
 
       <section class="bg-slate-800 border border-slate-700 rounded-lg p-4">

@@ -75,6 +75,9 @@ func (s *server) router() *gin.Engine {
 			admin.POST("/leagues", s.handleCreateLeague)
 			admin.GET("/leagues", s.handleListLeagues)
 			admin.PATCH("/leagues/:id/adjacency", s.handleUpdateAdjacency)
+			admin.GET("/club-name-parts", s.handleListClubNameParts)
+			admin.POST("/club-name-parts", s.handleAddClubNamePart)
+			admin.DELETE("/club-name-parts/:kind/:value", s.handleRemoveClubNamePart)
 		}
 
 		// Competition reads (S04-01): always scoped to the caller's world.

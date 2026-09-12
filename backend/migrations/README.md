@@ -113,6 +113,7 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0024 | `manager` | Job offers (AI club → manager), club-while-active constraint, reputation categories |
 | 0025 | `competition` / `world` / `match` | Country-scoped leagues (tier, team count, P/R adjacency), live-match input log (S04) |
 | 0026 | `match` | Fixture results: `ht_score`, `at_score`, `completed_at` on `match.fixtures` (S04-01) |
+| 0027 | `ref` | Global club name parts (`ref.club_name_parts`, stems + suffixes) for deterministic AI-club naming (S04-01, data-driven) |
 
 ### River migrations (0016–0022)
 

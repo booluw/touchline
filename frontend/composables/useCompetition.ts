@@ -69,6 +69,11 @@ export interface Standings {
   rows: StandingRow[]
 }
 
+export interface ClubNamePools {
+  stems: string[]
+  suffixes: string[]
+}
+
 export function useCompetition() {
   const { authedFetch } = useAuth()
 
@@ -162,6 +167,30 @@ export function useCompetition() {
     return res.json()
   }
 
+  // ---------- Global club-name pools (admin) ----------
+
+  async function listClubNameParts(): Promise<ClubNamePools> {
+    const res = await authedFetch('/api/admin/club-name-parts')
+    if (!res.ok) return { stems: [], suffixes: [] }
+    return res.json()
+  }
+
+  async function addClubNamePart(kind: 'stem' | 'suffix', value: string): Promise<void> {
+    const res = await authedFetch('/api/admin/club-name-parts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, value }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+  }
+
+  async function removeClubNamePart(kind: 'stem' | 'suffix', value: string): Promise<void> {
+    const res = await authedFetch(`/api/admin/club-name-parts/${kind}/${encodeURIComponent(value)}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+  }
+
   return {
     createCountry,
     listCountries,
@@ -172,5 +201,8 @@ export function useCompetition() {
     listMyCompetitions,
     getFixtures,
     getStandings,
+    listClubNameParts,
+    addClubNamePart,
+    removeClubNamePart,
   }
 }

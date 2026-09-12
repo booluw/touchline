@@ -13,10 +13,12 @@ import (
 )
 
 // ref-seed ingests the curated data/names/*.json files into the reference
-// tables ref.nationalities and ref.name_pool. It is idempotent by
+// tables ref.nationalities and ref.name_pool, and the club-name pools from
+// data/clubs/clubnames.json into ref.club_name_parts. It is idempotent by
 // construction: ref.nationalities rows are upserted and ref.name_pool rows are
 // deleted and re-inserted for the ingested codes inside one transaction, with
-// the JSON files as the sole authority.
+// the JSON files as the sole authority. Club name parts are UPSERT-only (the
+// DB is the runtime source of truth there — admin-curated rows survive).
 //
 // It deliberately never writes game entities (no person.people, no
 // player.players). Generated players are persisted later, when a team is
@@ -25,7 +27,8 @@ func main() {
 	ctx := context.Background()
 
 	databaseURL := flag.String("database", "", "postgres connection URL (or $DATABASE_URL)")
-	dataDir := flag.String("data", "data/names", "path to the curated name data directory")
+	dataDir := flag.String("data", "data/names", "path to the curated player name data directory")
+	clubDataDir := flag.String("clubdata", "data/clubs", "path to the curated club name data directory")
 	flag.Parse()
 	if *databaseURL == "" {
 		*databaseURL = os.Getenv("DATABASE_URL")
@@ -39,6 +42,13 @@ func main() {
 		log.Fatalf("load name data: %v", err)
 	}
 	log.Printf("loaded %d nationalities from %s", len(data.Nationalities), *dataDir)
+
+	clubs, err := loadClubNames(*clubDataDir)
+	if err != nil {
+		log.Fatalf("load club name data: %v", err)
+	}
+	log.Printf("loaded %d club stems and %d club suffixes from %s",
+		len(clubs.Stems), len(clubs.Suffixes), *clubDataDir)
 
 	pool, err := pgxpool.New(ctx, *databaseURL)
 	if err != nil {
@@ -96,9 +106,31 @@ func main() {
 	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 		log.Fatalf("insert ref.name_pool: %v", err)
 	}
+
+	// Club name parts are UPSERT-only: deleting here would wipe admin-curated
+	// rows added through the dashboard between ingest runs (data/clubs/README).
+	clubCount := 0
+	clubBatch := &pgx.Batch{}
+	for _, stem := range clubs.Stems {
+		clubBatch.Queue(`INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
+			VALUES ('stem', $1, 1.0)
+			ON CONFLICT (kind, value) DO UPDATE SET frequency_weight = EXCLUDED.frequency_weight`, stem)
+		clubCount++
+	}
+	for _, suffix := range clubs.Suffixes {
+		clubBatch.Queue(`INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
+			VALUES ('suffix', $1, 1.0)
+			ON CONFLICT (kind, value) DO UPDATE SET frequency_weight = EXCLUDED.frequency_weight`, suffix)
+		clubCount++
+	}
+	if err := tx.SendBatch(ctx, clubBatch).Close(); err != nil {
+		log.Fatalf("upsert ref.club_name_parts: %v", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		log.Fatalf("commit: %v", err)
 	}
 
-	log.Printf("seeded ref.nationalities=%d ref.name_pool=%d (first=%d last=%d)", len(data.Nationalities), names, firstCount, lastCount)
+	log.Printf("seeded ref.nationalities=%d ref.name_pool=%d (first=%d last=%d) ref.club_name_parts=%d",
+		len(data.Nationalities), names, firstCount, lastCount, clubCount)
 }

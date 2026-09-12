@@ -19,6 +19,7 @@ func seedWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	pool := testdb.New(t)
 	testdb.SeedRefData(t, pool)
+	testdb.SeedClubNameParts(t, pool)
 
 	w, err := internalworld.NewService(pool, nil).CreateWorld(context.Background(), "competition-it")
 	if err != nil {

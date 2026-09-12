@@ -94,6 +94,13 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 	}
 	master := rand.New(rand.NewSource(worldSeed))
 
+	// Club name pools come from the global reference data (data-driven, OPD-13
+	// analogue): admins extend ref.club_name_parts via the dashboard or JSON.
+	stems, suffixes, err := bootstrap.LoadClubNameParts(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
 	freeClubs, err := clubsWithoutEntries(ctx, tx, worldID)
 	if err != nil {
 		return nil, err
@@ -124,7 +131,7 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 			if err != nil {
 				return nil, err
 			}
-			clubName := nextClubName(master, names)
+			clubName := nextClubName(master, stems, suffixes, names)
 			generated, err := bootstrap.GenerateAIClub(ctx, tx, worldID, clubName, short(clubName), country.Name, factory)
 			if err != nil {
 				return nil, fmt.Errorf("generate AI club for %s: %w", l.Name, err)

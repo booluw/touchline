@@ -149,6 +149,34 @@ func SeedRefData(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+// SeedClubNameParts seeds the global club-name pools (ref.club_name_parts)
+// with a small deterministic set so S04-01 seeding can draw names. It upserts
+// (mirroring cmd/ref-seed's contract) so re-runs and admin additions coexist.
+func SeedClubNameParts(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	var stems = []string{"Athletic", "Olympique", "Union", "City", "Racing", "Metropolitan"}
+	var suffixes = []string{"FC", "United", "City", "SC", "Rovers", "Wanderers"}
+
+	for _, s := range stems {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
+			VALUES ('stem', $1, 1.0)
+			ON CONFLICT (kind, value) DO NOTHING`, s); err != nil {
+			t.Fatalf("seed club stem %q: %v", s, err)
+		}
+	}
+	for _, s := range suffixes {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
+			VALUES ('suffix', $1, 1.0)
+			ON CONFLICT (kind, value) DO NOTHING`, s); err != nil {
+			t.Fatalf("seed club suffix %q: %v", s, err)
+		}
+	}
+}
+
 // CreateWorld inserts a world row and returns its id.
 func CreateWorld(t *testing.T, pool *pgxpool.Pool, name string) uuid.UUID {
 	t.Helper()
