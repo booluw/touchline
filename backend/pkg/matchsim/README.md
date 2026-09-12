@@ -160,3 +160,5 @@ synthesized at minutes 45 and 90 after the minute's draws.
   - **Shot Conversion Rate:** Base goal threshold `0.10` (10% xG per chance) aligns with real-world Opta shot conversion averages (9.8% - 10.2%).
   - **Shot Distribution:** Cumulative weights (10% goal, 20% saved on target, 45% off target, 20% blocked, 5% foul) accurately reflect European league shot outcome breakdowns.
 - **PM Conclusion:** The cumulative-threshold chance table structure is approved. Resolving Concerns 1-4 elevates the engine from a good mathematical abstraction to a data-backed realistic simulation.
+
+An improved version of this is at [MatchSim v1.2](./matchsim_addendum_v1.2.md)
