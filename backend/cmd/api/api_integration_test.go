@@ -194,6 +194,31 @@ func TestHTTPAdminWorldLifecycle(t *testing.T) {
 	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/status", `{"status":"active"}`, adminCookies); resp.StatusCode != http.StatusOK {
 		t.Fatalf("launch world = %d, want 200", resp.StatusCode)
 	}
+
+	// Admin can tune a runtime cadence; it lands in world_config for the
+	// scheduler to pick up on its next sync (S02-03).
+	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/config",
+		`{"key":"tick.daily_cadence","value":"30 0 * * *"}`, adminCookies); resp.StatusCode != http.StatusOK {
+		t.Fatalf("set config = %d, want 200", resp.StatusCode)
+	}
+	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/config",
+		`{"key":"tick.daily_cadence","value":"30 0 * * *"}`, plainCookies); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-admin set config = %d, want 403", resp.StatusCode)
+	}
+	var daily string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT config_value::text FROM world.world_config WHERE world_id = $1 AND config_key = 'tick.daily_cadence'`, worldID,
+	).Scan(&daily); err != nil {
+		t.Fatalf("read daily cadence: %v", err)
+	}
+	if daily != `"30 0 * * *"` {
+		t.Fatalf("daily cadence stored as %s", daily)
+	}
+	if resp := post(t, ts, client, "/api/admin/worlds/"+uuid.Nil.String()+"/config",
+		`{"key":"tick.daily_cadence","value":"0 0 * * *"}`, adminCookies); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("set config on missing world = %d, want 404", resp.StatusCode)
+	}
+
 	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/status", `{"status":"archived"}`, adminCookies); resp.StatusCode != http.StatusOK {
 		t.Fatalf("archive world = %d, want 200", resp.StatusCode)
 	}

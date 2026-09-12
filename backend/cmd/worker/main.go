@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -38,11 +39,21 @@ func main() {
 		log.Fatalf("init event bus: %v", err)
 	}
 
-	// Phase 0 handler: proves the publish -> queue -> consume round-trip.
-	// Engine handlers (WORLD_TICK dispatch, match ticks, economic/social,
-	// daily/weekly/monthly/seasonal) register here as they land.
+	// Phase 0 handler: proves the publish -> queue -> consume round-trip and
+	// demonstrates granularity-aware dispatch (S02-03). Engine handlers consume
+	// only the WORLD_TICK granularities they own by inspecting payload
+	// granularity; everything else is ignored. Ticks are dispatched to engine
+	// handlers as those engines land (S03-01 onwards).
 	if err := bus.Subscribe(ctx, "WORLD_TICK", func(ev eventbus.Event) error {
-		log.Printf("handled event %s (%s) for world %s at tick %d", ev.ID, ev.EventType, ev.WorldID, ev.WorldTick)
+		var payload struct {
+			Granularity string `json:"granularity"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			log.Printf("world tick %s: unreadable payload (%v); skipping", ev.ID, err)
+			return nil
+		}
+		log.Printf("handled event %s (%s, granularity %s) for world %s at tick %d",
+			ev.ID, ev.EventType, payload.Granularity, ev.WorldID, ev.WorldTick)
 		return nil
 	}); err != nil {
 		log.Fatalf("subscribe: %v", err)

@@ -56,6 +56,7 @@ func (s *server) router() *gin.Engine {
 		{
 			admin.POST("/worlds", s.handleCreateWorld)
 			admin.POST("/worlds/:id/status", s.handleWorldStatus)
+			admin.POST("/worlds/:id/config", s.handleWorldConfig)
 			admin.POST("/offers", s.handleCreateOffer)
 		}
 	}

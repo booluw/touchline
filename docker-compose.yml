@@ -87,6 +87,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}
       REDIS_URL: ${REDIS_URL:?REDIS_URL required (see .env.example / docs/development.md)}
       SCHEDULER_PORT: "8081"
+      SCHEDULER_POLL_INTERVAL: ${SCHEDULER_POLL_INTERVAL:-15s}
       ENV: development
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]

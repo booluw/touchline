@@ -71,6 +71,37 @@ func (s *server) handleWorldStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, w)
 }
 
+type worldConfigRequest struct {
+	Key   string `json:"key"`
+	Value any    `json:"value"`
+}
+
+// handleWorldConfig upserts a single world_config key at runtime. Cadence
+// changes take effect once the scheduler re-reads config on its next poll.
+func (s *server) handleWorldConfig(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		return
+	}
+	var req worldConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Key == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+		return
+	}
+
+	err = s.worldSvc.SetConfig(c.Request.Context(), id, req.Key, req.Value)
+	switch {
+	case errors.Is(err, internalworld.ErrWorldNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 type createOfferRequest struct {
 	ClubID    uuid.UUID `json:"club_id"`
 	ManagerID uuid.UUID `json:"manager_id"`

@@ -121,6 +121,30 @@ func (s *Service) ListWorlds(ctx context.Context) ([]*World, error) {
 	return out, rows.Err()
 }
 
+// SetConfig upserts a runtime world_config key. A cadence change takes effect
+// once the S02-03 scheduler re-reads config on its next poll — no redeploy.
+func (s *Service) SetConfig(ctx context.Context, id uuid.UUID, key string, value any) error {
+	if key == "" {
+		return fmt.Errorf("config key is required")
+	}
+	if _, err := s.GetWorld(ctx, id); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("marshal config value for %s: %w", key, err)
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO world.world_config (world_id, config_key, config_value)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (world_id, config_key)
+		DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now()`,
+		id, key, raw); err != nil {
+		return fmt.Errorf("set config %s: %w", key, err)
+	}
+	return nil
+}
+
 // SetStatus applies a lifecycle transition.
 //
 //	provisioning | open_beta -> active   (launch; seeds world_config, sets launched_at)

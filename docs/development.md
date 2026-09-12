@@ -38,6 +38,7 @@ processes read the same vars from the environment; for bare `go run` use
 | `JWT_REFRESH_TTL` | No | `720h` | Refresh token lifetime. |
 | `API_PORT` | No | `8080` | API listen port. |
 | `SCHEDULER_PORT` | No | `8081` | Scheduler health listener. |
+| `SCHEDULER_POLL_INTERVAL` | No | `15s` | How often the scheduler re-reads `world_config` cadences and reconciles its cron registry. |
 | `WORKER_PORT` | No | `8082` | Worker health listener. |
 | `ENV` | No | `development` | Environment tag. Any non-`development` value makes the API set `Secure` on auth cookies. |
 | `APP_ORIGIN` | No | `http://localhost:3000` | Exact browser origin allowed by CORS and credentialed cookie requests. |
@@ -206,6 +207,35 @@ curl -b /tmp/jar -X POST localhost:8080/api/managers/me/resign
 Accepting hands the club over: the incumbent AI manager stands down,
 `is_ai_controlled` flips FALSE, a `manager.manager_history` row opens; resign
 or sack closes it (history is never deleted). See OPD-16.
+
+### World clock (S02-03)
+
+The scheduler binary is the world clock. It reads each **playable** world's
+cadence values from `world.world_config` and fires world-scoped `WORLD_TICK`
+events whose payload carries the tick `granularity`
+(`hourly|daily|weekly|monthly|seasonal`). Cadences are re-read every
+`SCHEDULER_POLL_INTERVAL`, so a runtime change takes effect without a redeploy.
+The scheduler takes a Postgres advisory lock on boot — a second instance waits,
+so only one scheduler can ever fire a cadence. Each emitted tick advances that
+world's monotonic `current_tick`.
+
+```bash
+# World clock running (with the worker consuming WORLD_TICK log lines):
+go run ./cmd/scheduler
+go run ./cmd/worker
+```
+
+An admin tunes a cadence at runtime (no redeploy):
+
+```bash
+curl -b /tmp/jar -X POST localhost:8080/api/admin/worlds/<world-id>/config \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"tick.daily_cadence","value":"30 0 * * *"}'
+```
+
+`tick.match_cadence` is seeded but deliberately ignored by the world clock:
+live match ticks belong to the match engine's per-match goroutines (S04), not
+to world-cron jobs (see OPD-17).
 
 ## CI
 
