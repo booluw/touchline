@@ -68,7 +68,7 @@ Both are the source of truth. Do not invent systems absent from these docs.
 ```
 backend/
   cmd/{api,scheduler,worker}/main.go     — three binaries (build ✓). api connects Postgres (GET /health + /health/db); scheduler runs the world clock (S02-03) and has a health listener; worker consumes the bus with a health listener
-  cmd/api/{router,handlers,middleware,lifecycle_handlers,bootstrap_handlers,ws}.go — Gin API: auth (S02-01) + admin world lifecycle & config (S02-02/03) + world bootstrap & club reads (S03-01) + job-offer inbox/accept/decline/resign (S02-02) + single authenticated WebSocket (S02-04); httpOnly cookie pair; CORS via APP_ORIGIN
+  cmd/api/{router,handlers,middleware,lifecycle_handlers,bootstrap_handlers,ws}.go — Gin API: auth (S02-01) + admin world lifecycle & config (S02-02/03) + world bootstrap & club reads (S03-01) + job-offer inbox/accept/decline/resign (S02-02) + single authenticated WebSocket (S02-04); httpOnly cookie pair; CORS via APP_ORIGIN. Integration tests incl. `phase0_slice_integration_test.go` (S03-02: create→bootstrap→launch→daily tick → `/ws` receive — the full Phase-0 exit criterion)
   cmd/ref-seed/main.go                   — reference-data seeder (nationalities + name_pool), idempotent; wired into compose + CI
   cmd/user-create/main.go                — dev bootstrap account CLI (email/password/world; creates auth.users + unemployed manager; prints OPD-02 note)
   internal/{finance,match,social,transfer}/  — domain packages + Service interfaces (stubs + structs, no DB impl yet)
@@ -90,15 +90,16 @@ backend/
 frontend/
   nuxt.config.ts   — Nuxt 3 + @vite-pwa/nuxt + @pinia/nuxt + Tailwind
   app.vue, pages/{index, auth/login}.vue
+  components/PhaseZeroStatus.vue       — S03-02 Phase-0 status panel: live socket badge, latest world_tick, bootstrapped club/squad, readable 401/403/network errors (no client-side simulation)
   composables/{useDashboard,useSocket}.ts   — useSocket: singleton session with reconnect/backoff, typed dispatch, unknown-type ignore (S02-04)
   stores/{club,squad,finance,transfers,social,realtime}.ts   — Pinia; realtime owns the single socket lifecycle + latest world_tick/error (S02-04)
   server/index.ts  — BFF health/status only (no game logic)
-  assets/css/main.css, tailwind.config.js, tsconfig.json, package.json, .env.example
+  assets/css/main.css, tailwind.config.js, tsconfig.json, package.json (pnpm-managed), eslint.config.mjs (S03-02), pnpm-lock.yaml, pnpm-workspace.yaml, .env.example
 infra/
   docker/          — Dockerfile.{api,scheduler,worker,frontend} (multi-stage; go 1.25-alpine builder)
   helm/{api,scheduler,worker,frontend}/  — Chart.yaml + values.yaml + templates (deployment/service/ingress; worker has HPA on event_bus_queue_depth)
 docker-compose.yml  — redis + migrations + ref-seed + api + scheduler + worker + frontend; requires Neon DATABASE_URL (healthchecks + env guards; opt-in Postgres override infra/ci/docker-compose.postgres.yml)
-.github/workflows/ci.yml — backend lint/vet/test, eventbus integration (postgres:16), migrations + ref-seed idempotency, frontend lint/typecheck, compose config + full-stack smoke (Postgres override), multi-arch GHCR build on main
+.github/workflows/ci.yml — backend lint/vet/test, eventbus integration (postgres:16), migrations + ref-seed idempotency, frontend lint/typecheck (pnpm), compose config + full-stack smoke (Postgres override), multi-arch GHCR build on main
 README.md, .gitignore, OPENCODE.md
 ```
 
@@ -115,7 +116,8 @@ README.md, .gitignore, OPENCODE.md
 - World clock smoke (S02-03) verified by hand: all five cadences fired on the real river bus at the minute boundary on a launched world (ticks 1–5); a runtime `tick.daily_cadence` change dropped `daily` on the next sync with no redeploy (4 ticks); pause → zero ticks; scheduler single-leader lock held; worker errors 0.
 - Live API smoke (S03-01) verified by hand on the local cluster: admin bootstrap of a provisioning world (201, 24-player AI squad + policy-bot manager + `CLUB_CREATED`/`WORLD_BOOTSTRAPPED`) → `GET /api/clubs` (+detail with squad) → launch → set `tick.daily_cadence=* * * * *` (picked up on next scheduler sync, no redeploy) → daily `WORLD_TICK` at the minute boundary (`current_tick=1`) handled by the running worker; double bootstrap 409. Cleaned up.
 - Realtime live smoke (S02-04) verified by hand: api + scheduler + worker binaries against the local Postgres, with api and worker sharing a Redis pub/sub broker (miniredis TCP stub — a real Redis protocol listener, no system Redis). Admin bootstrap + launch + `tick.daily_cadence=* * * * *`; a cookie-authenticated WebSocket client (throwaway `cmd/ws-smoke`) opened `/ws` and received `world_tick` envelopes from the worker each minute (`event_id`/`granularity: daily`/`tick` matching the worker's log — cross-process, cross-pod-style fan-out). Unreachable `REDIS_URL` → both processes logged the fail-soft warning and continued (in-process broker). Smoke world/accounts cleaned up; throwaway `cmd/{ws-smoke,redis-stub}` deleted.
-- Frontend `npm install` + `npm run dev` NOT yet exercised (no package-lock committed; `npm install` will generate it). `vue-tsc --noEmit` typecheck passes locally once `vite` is resolvable (pnpm doesn't hoist a direct `node_modules/vite`; CI's `npm install` hoists so the plain command works there).
+- Phase-0 vertical slice (S03-02) verified by an automated integration test (`cmd/api/phase0_slice_integration_test.go`): admin creates a world over HTTP → bootstraps Slice FC (24-player squad) → launches → sets `tick.daily_cadence=* * * * *` → scheduler FireTick writes the `WORLD_TICK` into `world.events` (world_id + granularity daily + current_tick=1) → the envelope is pushed to a cookie-authenticated `/ws` client using the same `realtime.BuildWorldTick` helper cmd/worker uses, and the client receives it (event_id/tick matching the persisted row) → failure feedback verified (401 wrong password, 403 `no world context` without a manager row). Frontend surfaces the same slice: `components/PhaseZeroStatus.vue` on the landing page renders the live socket connection state, the latest world tick, the bootstrapped club/squad, and readable 401/403/network errors (no client-side simulation).
+- Frontend package manager is **pnpm** (`frontend/pnpm-lock.yaml` + `frontend/pnpm-workspace.yaml`; pinned by `packageManager` in package.json; CI and Dockerfile use `pnpm install --frozen-lockfile`). `pnpm run lint` ✓ (flat ESLint config added in S03-02: JS + TS + Vue essential) and `pnpm run typecheck` (`vue-tsc --noEmit`) ✓. Note Nuxt auto-imports (ref, navigateTo, useAuth, ...) are not globals in ESLint — `no-undef` is off; vue-tsc type-checks real undefineds.
 - `docker compose` config-checked and full-stack-boot verified in the CI `compose` job; local Docker is absent on the dev machine, so the stack boot is CI-verified only (see `docs/development.md`, OPD-14).
 
 ---
@@ -132,10 +134,11 @@ README.md, .gitignore, OPENCODE.md
 8. **~~Neon `DATABASE_URL` + env docs~~** ✅ Done (S01-05): root `.env.example` + `backend/.env.example` + `docs/development.md` (OPD-14).
 9. **Redis wiring — WS pub/sub done, session/rate-limit open**: S02-04 wired Redis for realtime fan-out only (`pkg/realtime`, `/ws`, worker→browser `world_tick`; OPD-19). The original session-store / rate-limiting scope stays open (S11).
 10. **~~World bootstrap~~** ✅ Done (S03-01, OPD-18): `internal/bootstrap` atomically materializes a `provisioning` world into one AI starter club + policy-bot manager + 24-player generated squad (single tx, `CLUB_CREATED` + `WORLD_BOOTSTRAPPED` with `random_seed`), admin `POST /api/admin/worlds/:id/bootstrap`; reads world-scoped via `GET /api/clubs{,/:id}`. Human entry stays the OPD-16 offer→accept flow. Leagues/competitions deliberately deferred to S04-01 (OPD-01).
+11. **~~Phase-0 exit criterion automated check~~** ✅ Done (S03-02): `cmd/api/phase0_slice_integration_test.go` walks create→bootstrap→launch→daily tick→`/ws` receive over HTTP as the repeatable proof; the landing page's `PhaseZeroStatus` panel surfaces the same slice live in the browser.
 
 ## Phase roadmap summary (plan §16)
 
-- **Phase 0 (pre-MVP)**: scaffolding, event bus + `world.events` working end-to-end, auth E2E, playergen, core schemas, scheduler publishing WORLD_TICK. Exit: create world → generate club + squad → see daily tick.
+- **Phase 0 (pre-MVP)**: scaffolding, event bus + `world.events` working end-to-end, auth E2E, playergen, core schemas, scheduler publishing WORLD_TICK. Exit: create world → generate club + squad → see daily tick — **proven end to end by the S03-02 slice test + live status panel**.
 - **Phase 1 (MVP)**: match engine + fixtures/tables, squad/tactics/training (Simple mode), transfers + human-human negotiation, contracts, ledger finance, board + sackings, player morale, social (messaging/rivalries), absence mode/PoliticsBot, dashboard, PWA + email notifications.
 - **Phase 2 (V1)**: academies, full personalities + relationship graph, agents, injuries, dynamic potential, manager-created competitions, news read-model, club DNA driving AI, supporters, anti-abuse.
 - **Phase 3 (V2)**: club creation, ownership path, national football, retired-player careers (Person entity), stadiums, extraction candidate.
@@ -146,6 +149,7 @@ README.md, .gitignore, OPENCODE.md
 - **Do NOT add `balance` columns** to finance tables. Ledger only.
 - **`world_id` on every schema** from the first migration — do not retrofit.
 - `go mod tidy` removes unused deps. Redis (`go-redis/v9`), `coder/websocket`, and `alicebob/miniredis/v2` are now imported and pinned by `pkg/realtime`. River stays: imported by `pkg/eventbus`.
+- Frontend deps are pnpm-managed and committed via `frontend/pnpm-lock.yaml` (packageManager pinned in package.json; CI + Docker use frozen-lockfile installs). Add deps with `pnpm add -D` in `frontend/`, never with npm.
 - Match engine stays **pure** (`Simulate(seed, teamA, teamB, tacticsA, tacticsB) MatchResult`), zero DB — testability + determinism.
 - Comments: project code intentionally has few comments; treat docs as the spec.
 - Keep frontend server routes BFF-only; game logic never in Nuxt.

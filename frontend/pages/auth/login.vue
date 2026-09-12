@@ -79,7 +79,12 @@ async function submitLogin() {
 }
 
 async function confirmWorld() {
-  await doLogin()
+  const res = await doLogin()
+  // The world picker logged in with cookies on this call; land on the home
+  // status panel, which opens the live socket.
+  if ((res as LoginWorldPicker).status !== 'worlds') {
+    navigateTo('/')
+  }
 }
 
 async function doLogin() {

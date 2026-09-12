@@ -316,6 +316,39 @@ Kill Redis and restart it: the API logs the fallback warning, the browser
 socket reconnects with backoff, and pushes resume once Redis returns (no
 redeploy).
 
+### Phase-0 slice — create world → club/squad → live daily tick (S03-02)
+
+The Phase-0 exit criterion (plan §16) is *create a world, generate a club with
+a squad, and see a daily tick fire*. It is verified two ways:
+
+1. **Automated (repeatable):** `cmd/api/phase0_slice_integration_test.go`
+   walks the whole exit path over real HTTP + the realtime seam — admin login →
+   `POST /api/admin/worlds` (provisioning) → bootstrap `Slice FC` (24-player
+   squad) → launch → set `tick.daily_cadence=* * * * *` → the scheduler's
+   `FireTick` writes `WORLD_TICK` to `world.events` (`world_id`, granularity,
+   `current_tick=1`) → the envelope is pushed to a cookie-authenticated `/ws`
+   client with the same `realtime.BuildWorldTick` helper `cmd/worker` uses, and
+   the client receives it. Failure feedback is asserted too: 401 on a bad
+   password, 403 `no world context` for an authenticated account without a
+   manager row. Run it with the integration suite (above).
+
+2. **In the browser:** `components/PhaseZeroStatus.vue` on the landing page
+   (`pages/index.vue`) renders the live socket connection state, the latest
+   `world_tick` pushed over the socket, the bootstrapped club/squad, and
+   readable 401/403/network errors — everything comes from the server, nothing
+   is simulated client-side. Boot the stack (or bare-metal backend) plus the
+   frontend, log in with a `user-create` account, run the admin bootstrap +
+   `tick.daily_cadence=* * * * *` curl steps above, and the tick counter
+   updates each minute on the page.
+
+### Frontend package manager (pnpm)
+
+The frontend is **pnpm-managed** (`frontend/pnpm-lock.yaml` +
+`frontend/pnpm-workspace.yaml`; the version is pinned by the `packageManager`
+field in `package.json`). Install with `pnpm install` (or
+`pnpm install --frozen-lockfile` in CI/Docker), run `pnpm run lint` /
+`pnpm run typecheck`. Never use `npm` in this repo.
+
 ## CI
 
 `.github/workflows/ci.yml` runs, among others, a **`compose`** job that

@@ -8,13 +8,8 @@
       <p class="text-slate-500 max-w-2xl mx-auto">
         Every club has a personality. Every player has a story. Every decision has consequences.
       </p>
-      <div class="mt-10 space-x-4">
-        <NuxtLink
-          to="/auth/login"
-          class="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-500"
-        >
-          Sign in
-        </NuxtLink>
+      <div class="mt-10">
+        <PhaseZeroStatus />
       </div>
     </main>
   </div>

@@ -136,7 +136,7 @@ These decisions are deliberately open in the source specifications. Engineering 
 | Decision ID | Open Topic | Impacted Sprints | Governing Resolution Standard |
 |---|---|---|---|
 | **OPD-01** | World Bootstrap & Regional Formats | S03, S04 | Define initial league size (e.g. 10/12/18 teams), promotion/relegation numbers, and tier structures. S02-02 explicitly does **not** infer these (see OPD-16(6)). S03-01 (OPD-18) ships the world as **one starter club with no competition tables**; the decision is required before S04-01, which seeds fixtures. No blocking dependency on S02. |
-| **OPD-02** | Registration & Account Policy | S02-01 | Define age/privacy requirements, identity verification thresholds, and password reset flows. |
+| **OPD-02** | Registration & Account Policy | S02-01 | Define age/privacy requirements, identity verification thresholds, and password reset flows. **⚠ ESCALATED (S03-02):** the Phase-0 vertical slice is verified end to end only via the admin bootstrap + dev-only `cmd/user-create` (OPD-15(6)). There is **no public onboarding flow** — a self-service "create account / start playing" path (registration, age/privacy consent, password reset) is **blocked** on this decision before any product launch. |
 | **OPD-03** | Simulation Formulae & Tuning | S04, S05, S06 | Standardize mathematical weights for board job security, injury probability curves, and morale decay rates. |
 | **OPD-04** | MVP Tactical Boundaries | S05-01 | Specify exact initial tactical input controls for Simple mode (e.g. formation, mentality, pressing intensity). |
 | **OPD-05** | Transfer Workflow Rules | S06-01 | Set bid expiration windows (e.g. 24h / 48h world ticks) and valid clause structures. |

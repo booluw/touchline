@@ -63,11 +63,7 @@ func main() {
 		log.Printf("handled event %s (%s, granularity %s) for world %s at tick %d",
 			ev.ID, ev.EventType, payload.Granularity, ev.WorldID, ev.WorldTick)
 
-		tickEvent, err := realtime.NewEvent(realtime.EventWorldTick, ev.WorldID, map[string]any{
-			"event_id":    ev.ID.String(),
-			"granularity": payload.Granularity,
-			"tick":        ev.WorldTick,
-		})
+		tickEvent, err := realtime.BuildWorldTick(ev.WorldID, ev.ID.String(), payload.Granularity, ev.WorldTick)
 		if err != nil {
 			log.Printf("world tick %s: skip realtime push (%v)", ev.ID, err)
 			return nil
