@@ -95,6 +95,58 @@ func MakeAdmin(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID) {
 	}
 }
 
+// SeedRefData ensures ref.nationalities + ref.name_pool contain the minimal
+// data a bootstrap/player-generation test needs (eng + br). It mirrors
+// cmd/ref-seed's semantics: upsert nationalities, delete+reinsert the name
+// pool for the seeded codes — so tests stay hermetic regardless of whether the
+// full 21-code curated set has been seeded in this database.
+func SeedRefData(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	var codes = []string{"eng", "br"}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO ref.nationalities (code, name, generation_weight) VALUES
+			('eng', 'England', 10.0),
+			('br',  'Brazil',  9.0)
+		ON CONFLICT (code) DO UPDATE SET
+			name = EXCLUDED.name, generation_weight = EXCLUDED.generation_weight`); err != nil {
+		t.Fatalf("seed nationalities: %v", err)
+	}
+
+	names := map[string][][2]string{ // code -> {type, name}
+		"eng": {
+			{"first", "Oliver"}, {"first", "Harry"}, {"first", "Jack"}, {"first", "Charlie"},
+			{"first", "George"}, {"first", "Freddie"}, {"first", "Alfie"}, {"first", "Oscar"},
+			{"last", "Smith"}, {"last", "Jones"}, {"last", "Taylor"}, {"last", "Brown"},
+			{"last", "Wilson"}, {"last", "Evans"}, {"last", "Thomas"}, {"last", "Roberts"},
+		},
+		"br": {
+			{"first", "Gabriel"}, {"first", "Matheus"}, {"first", "Rafael"}, {"first", "Lucas"},
+			{"first", "Pedro"}, {"first", "Bruno"}, {"first", "Diego"}, {"first", "Thiago"},
+			{"last", "Silva"}, {"last", "Santos"}, {"last", "Oliveira"}, {"last", "Souza"},
+			{"last", "Lima"}, {"last", "Pereira"}, {"last", "Costa"}, {"last", "Alves"},
+		},
+	}
+
+	for _, code := range codes {
+		if _, err := pool.Exec(ctx,
+			`DELETE FROM ref.name_pool WHERE nationality_code = $1`, code); err != nil {
+			t.Fatalf("clean name pool %s: %v", code, err)
+		}
+	}
+	// batch-insert all (code, type, name) rows
+	sqlStr := `INSERT INTO ref.name_pool (nationality_code, name_type, name, frequency_weight)
+		VALUES ($1, $2, $3, 1.0)`
+	for _, code := range codes {
+		for _, row := range names[code] {
+			if _, err := pool.Exec(ctx, sqlStr, code, row[0], row[1]); err != nil {
+				t.Fatalf("insert name pool %s %s: %v", code, row[0], err)
+			}
+		}
+	}
+}
+
 // CreateWorld inserts a world row and returns its id.
 func CreateWorld(t *testing.T, pool *pgxpool.Pool, name string) uuid.UUID {
 	t.Helper()

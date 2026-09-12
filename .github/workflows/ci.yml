@@ -43,7 +43,7 @@ jobs:
         run: go test -race ./...
 
   eventbus-integration:
-    name: Integration tests (eventbus, auth, world, manager, scheduler, api)
+    name: Integration tests (eventbus, auth, world, manager, scheduler, bootstrap, club, api)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -74,7 +74,7 @@ jobs:
       - name: Integration tests
         # -p 1 serializes packages: the harness truncates a shared database,
         # so concurrent packages would wipe each other's fixtures mid-test.
-        run: go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./internal/world/... ./internal/manager/... ./internal/scheduler/... ./cmd/api/...
+        run: go test -p 1 -tags integration -race ./pkg/eventbus/... ./internal/auth/... ./internal/world/... ./internal/manager/... ./internal/scheduler/... ./internal/bootstrap/... ./internal/club/... ./cmd/api/...
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
 

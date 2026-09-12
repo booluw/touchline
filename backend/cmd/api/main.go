@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalauth "github.com/touchline/backend/internal/auth"
+	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
+	internalclub "github.com/touchline/backend/internal/club"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
@@ -19,6 +21,8 @@ type server struct {
 	svc           *internalauth.Service
 	worldSvc      *internalworld.Service
 	mgrSvc        *internalmanager.Service
+	clubSvc       *internalclub.Service
+	bootSvc       *internalbootstrap.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -53,6 +57,8 @@ func main() {
 		svc:           internalauth.NewService(pool, jwtCfg),
 		worldSvc:      internalworld.NewService(pool, nil), // bus wiring lands with the S02-03 scheduler
 		mgrSvc:        internalmanager.NewService(pool, nil),
+		clubSvc:       internalclub.NewService(pool),
+		bootSvc:       internalbootstrap.NewService(pool, nil), // S03-01: events always land in the log; bus fan-out lands with engine wiring
 		jwtCfg:        jwtCfg,
 		pool:          pool,
 		cookiesSecure: os.Getenv("ENV") != "development",

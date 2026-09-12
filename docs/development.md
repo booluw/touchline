@@ -183,16 +183,31 @@ Versions of the lifecycle: `active`/`open_beta` are playable, `paused` sleeps,
 the S02-03 scheduler reads.
 
 A manager's **first club must come from a job offer** — there is no
-auto-assignment. Before the S03-01 bootstrap generates leagues/clubs, create a
-club with its AI (policy-bot) manager and have an admin issue the offer:
+auto-assignment. While a world is still `provisioning`, an admin first runs the
+S03-01 bootstrap, which turns the empty world into an AI starter club with a
+policy-bot manager and a generated 24-player squad in one atomic operation:
 
 ```bash
-# scratch: an AI-managed club in the world (a real bootstrap replaces this in S03-01)
-psql "$DATABASE_URL" -Atqc "INSERT INTO club.clubs (world_id,name,short_name,country) VALUES ('<world-id>','AI Town','AT','tonga') RETURNING id"
-# …then set its current_manager_id to a policy-bot row (is_policy_bot=TRUE)
+# World clock resampling interval (default 15s)
+curl -b /tmp/jar -X POST localhost:8080/api/admin/worlds/<world-id>/bootstrap \
+  -H 'Content-Type: application/json' -d '{"name":"Harbour United","short_name":"HAR"}'
+# -> 201 with club_id, manager_id, random_seed, and the full squad
+```
+
+Then an admin issues a job offer for the AI club, exactly as before:
+
+```bash
 curl -b /tmp/jar -X POST localhost:8080/api/admin/offers \
   -H 'Content-Type: application/json' \
   -d '{"club_id":"<club-id>","manager_id":"<unemployed-manager-id>"}'
+```
+
+The generated club and squad are readable through the authenticated API
+(world-scoped to the caller's manager row, OPD-18(5)):
+
+```bash
+curl -b /tmp/jar localhost:8080/api/clubs
+curl -b /tmp/jar localhost:8080/api/clubs/<club-id>
 ```
 
 The candidate manager can then see, accept, decline, and resign:

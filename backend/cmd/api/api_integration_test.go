@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalauth "github.com/touchline/backend/internal/auth"
+	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
+	internalclub "github.com/touchline/backend/internal/club"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"
@@ -34,6 +36,8 @@ func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 		svc:           internalauth.NewService(pool, cfg),
 		worldSvc:      internalworld.NewService(pool, nil),
 		mgrSvc:        internalmanager.NewService(pool, nil),
+		clubSvc:       internalclub.NewService(pool),
+		bootSvc:       internalbootstrap.NewService(pool, nil),
 		jwtCfg:        cfg,
 		pool:          pool,
 		cookiesSecure: false,

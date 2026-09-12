@@ -3,12 +3,17 @@ package player
 import "github.com/google/uuid"
 
 type Player struct {
-	ID          uuid.UUID `json:"id"`
-	WorldID     uuid.UUID `json:"world_id"`
-	FirstName   string    `json:"first_name"`
-	LastName    string    `json:"last_name"`
-	Nationality string    `json:"nationality"`
-	DateOfBirth string    `json:"date_of_birth"`
+	ID              uuid.UUID  `json:"id"`
+	WorldID         uuid.UUID  `json:"world_id"`
+	ClubID          *uuid.UUID `json:"club_id"`
+	PersonID        uuid.UUID  `json:"person_id"`
+	FirstName       string     `json:"first_name"`
+	LastName        string     `json:"last_name"`
+	DisplayName     string     `json:"display_name"`
+	Nationality     string     `json:"nationality"`
+	DateOfBirth     string     `json:"date_of_birth"`
+	PrimaryPosition string     `json:"primary_position"`
+	SquadNumber     *int       `json:"squad_number"`
 }
 
 type PlayerAttributes struct {
@@ -31,29 +36,22 @@ type PlayerPersonality struct {
 }
 
 type PlayerHiddenTraits struct {
-	ID                 uuid.UUID `json:"id"`
-	PlayerID           uuid.UUID `json:"player_id"`
-	Potential          int       `json:"potential"`
-	Consistency        int       `json:"consistency"`
-	InjurySusceptibility int     `json:"injury_susceptibility"`
-	Adaptability       int       `json:"adaptability"`
-	Professionalism    int       `json:"professionalism"`
-	Ambition           int       `json:"ambition"`
-	Loyalty            int       `json:"loyalty"`
-	Temperament        int       `json:"temperament"`
-	PressureHandling   int       `json:"pressure_handling"`
-	LearningSpeed      int       `json:"learning_speed"`
+	ID                   uuid.UUID `json:"id"`
+	PlayerID             uuid.UUID `json:"player_id"`
+	Potential            int       `json:"potential"`
+	Consistency          int       `json:"consistency"`
+	InjurySusceptibility int       `json:"injury_susceptibility"`
+	Adaptability         int       `json:"adaptability"`
+	Professionalism      int       `json:"professionalism"`
+	Ambition             int       `json:"ambition"`
+	Loyalty              int       `json:"loyalty"`
+	Temperament          int       `json:"temperament"`
+	PressureHandling     int       `json:"pressure_handling"`
+	LearningSpeed        int       `json:"learning_speed"`
 }
 
 type EmotionalState struct {
 	PlayerID uuid.UUID `json:"player_id"`
 	State    string    `json:"state"` // happy, content, motivated, frustrated, anxious, angry, homesick, excited, betrayed, ambitious, confident, isolated
 	Cause    string    `json:"cause"`
-}
-
-type Service interface {
-	GetPlayer(id uuid.UUID) (*Player, error)
-	GetPlayerAttributes(playerID uuid.UUID) (*PlayerAttributes, error)
-	GetPlayerPersonality(playerID uuid.UUID) (*PlayerPersonality, error)
-	GetEmotionalState(playerID uuid.UUID) (*EmotionalState, error)
 }
