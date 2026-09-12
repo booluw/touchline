@@ -12,6 +12,7 @@ import (
 	internalauth "github.com/touchline/backend/internal/auth"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
+	internalcompetition "github.com/touchline/backend/internal/competition"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
@@ -24,6 +25,7 @@ type server struct {
 	mgrSvc        *internalmanager.Service
 	clubSvc       *internalclub.Service
 	bootSvc       *internalbootstrap.Service
+	compSvc       *internalcompetition.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -62,7 +64,8 @@ func main() {
 		worldSvc:      internalworld.NewService(pool, nil), // bus wiring lands with the S02-03 scheduler
 		mgrSvc:        internalmanager.NewService(pool, nil),
 		clubSvc:       internalclub.NewService(pool),
-		bootSvc:       internalbootstrap.NewService(pool, nil), // S03-01: events always land in the log; bus fan-out lands with engine wiring
+		bootSvc:       internalbootstrap.NewService(pool, nil),   // S03-01: events always land in the log; bus fan-out lands with engine wiring
+		compSvc:       internalcompetition.NewService(pool, nil), // S04-01: admin-declared per-country leagues
 		jwtCfg:        jwtCfg,
 		pool:          pool,
 		cookiesSecure: os.Getenv("ENV") != "development",

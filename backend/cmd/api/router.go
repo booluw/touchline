@@ -59,16 +59,33 @@ func (s *server) router() *gin.Engine {
 		api.POST("/offers/:id/accept", s.requireAuth, s.handleAcceptOffer)
 		api.POST("/offers/:id/decline", s.requireAuth, s.handleDeclineOffer)
 
-		// Admin: world lifecycle (S02-02), world bootstrap (S03-01), and
-		// game-start club->manager job offers.
+		// Admin: world lifecycle (S02-02), world bootstrap (S03-01),
+		// game-start club->manager job offers, and country-scoped league
+		// administration + seeding (S04-01).
 		admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
 		{
 			admin.POST("/worlds", s.handleCreateWorld)
 			admin.POST("/worlds/:id/status", s.handleWorldStatus)
 			admin.POST("/worlds/:id/config", s.handleWorldConfig)
 			admin.POST("/worlds/:id/bootstrap", s.handleBootstrap)
+			admin.POST("/worlds/:id/seed-competition", s.handleSeedCompetition)
 			admin.POST("/offers", s.handleCreateOffer)
+			admin.POST("/countries", s.handleCreateCountry)
+			admin.GET("/countries", s.handleListCountries)
+			admin.POST("/leagues", s.handleCreateLeague)
+			admin.GET("/leagues", s.handleListLeagues)
+			admin.PATCH("/leagues/:id/adjacency", s.handleUpdateAdjacency)
 		}
+
+		// Competition reads (S04-01): always scoped to the caller's world.
+		comp := api.Group("/countries", s.requireAuth)
+		{
+			comp.GET("", s.handleMyCountries)
+		}
+		api.GET("/competitions", s.requireAuth, s.handleMyCompetitions)
+		api.GET("/competitions/:id", s.requireAuth, s.handleGetCompetition)
+		api.GET("/competitions/:id/fixtures", s.requireAuth, s.handleGetFixtures)
+		api.GET("/competitions/:id/standings", s.requireAuth, s.handleGetStandings)
 	}
 
 	return r

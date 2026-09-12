@@ -109,6 +109,10 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0013 | `notification` | Per-category, per-channel notification preferences and dispatch log |
 | 0014 | `moderation` | Anti-abuse flags and device fingerprints |
 | 0016–0022 | `river` (event bus) | River v0.44.0 job-queue schema, exported one migration per river version |
+| 0023 | `manager` | Per-world manager rows (one per user per world; one active job platform-wide) |
+| 0024 | `manager` | Job offers (AI club → manager), club-while-active constraint, reputation categories |
+| 0025 | `competition` / `world` / `match` | Country-scoped leagues (tier, team count, P/R adjacency), live-match input log (S04) |
+| 0026 | `match` | Fixture results: `ht_score`, `at_score`, `completed_at` on `match.fixtures` (S04-01) |
 
 ### River migrations (0016–0022)
 

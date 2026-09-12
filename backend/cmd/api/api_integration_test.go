@@ -19,6 +19,7 @@ import (
 	internalauth "github.com/touchline/backend/internal/auth"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
+	internalcompetition "github.com/touchline/backend/internal/competition"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"
@@ -46,6 +47,7 @@ func newTestServer(t *testing.T) (*server, *pgxpool.Pool) {
 		mgrSvc:        internalmanager.NewService(pool, nil),
 		clubSvc:       internalclub.NewService(pool),
 		bootSvc:       internalbootstrap.NewService(pool, nil),
+		compSvc:       internalcompetition.NewService(pool, nil),
 		jwtCfg:        cfg,
 		pool:          pool,
 		cookiesSecure: false,

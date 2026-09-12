@@ -93,6 +93,18 @@ type Result struct {
 	Players    []SquadPlayer `json:"players"`
 }
 
+// GeneratedClub is the per-club material produced by GenerateAIClub. S04-01
+// league seeding calls GenerateAIClub once per additional AI team inside its
+// own transaction, so every league entry gets the same squad machinery the
+// starter club gets.
+type GeneratedClub struct {
+	ClubID    uuid.UUID     `json:"club_id"`
+	ClubName  string        `json:"club_name"`
+	ManagerID uuid.UUID     `json:"manager_id"`
+	SquadSize int           `json:"squad_size"`
+	Players   []SquadPlayer `json:"players"`
+}
+
 // Publishable mirrors the world/manager event sink. May be nil: the event log
 // (world.events) is always written transactionally regardless of the bus.
 type Publishable interface {
@@ -128,9 +140,6 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 	if clubName == "" {
 		return nil, ErrClubNameRequired
 	}
-	if clubShortName == "" {
-		clubShortName = shortName(clubName)
-	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -139,14 +148,11 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// Serialize on the world row; a provisioning world can only be bootstrapped once.
-	var (
-		worldStatus string
-		worldRef    time.Time // season reference date for date_of_birth derivation
-	)
+	var worldStatus string
 	err = tx.QueryRow(ctx,
-		`SELECT status, COALESCE(launched_at, created_at) FROM world.worlds WHERE id = $1 FOR UPDATE`,
+		`SELECT status FROM world.worlds WHERE id = $1 FOR UPDATE`,
 		worldID,
-	).Scan(&worldStatus, &worldRef)
+	).Scan(&worldStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWorldNotFound
 	}
@@ -167,7 +173,7 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 	}
 
 	// Runtime pools come from the reference data the ref-seed binary loaded.
-	generator, natPool, err := loadPools(ctx, tx)
+	generator, natPool, err := LoadPools(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -176,17 +182,95 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 	seed := s.seed()
 	registry := playergen.NewNameRegistry()
 	factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(seed))).WithRegistry(registry)
+
+	club, err := GenerateAIClub(ctx, tx, worldID, clubName, clubShortName, "england", factory)
+	if err != nil {
+		return nil, err
+	}
+
+	// The boot event names the seed that produced the whole world's first squad.
+	seedValue := seed
+	actor := "system"
+	bootEvent := &eventbus.Event{
+		WorldID:    worldID,
+		WorldTick:  0,
+		EventType:  "WORLD_BOOTSTRAPPED",
+		RandomSeed: &seedValue,
+		Payload: mustJSON(map[string]any{
+			"club_count":  1,
+			"squad_size":  club.SquadSize,
+			"random_seed": seed,
+		}),
+	}
+	bootEvent.ActorType = &actor
+	if err := recordEvent(ctx, tx, bootEvent); err != nil {
+		return nil, fmt.Errorf("record WORLD_BOOTSTRAPPED event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit bootstrap: %w", err)
+	}
+
+	// Record-then-publish: the log is authoritative; the bus fans out after
+	// commit so a transient publish failure never corrupts generated state.
+	if s.bus != nil {
+		if err := s.bus.Publish(ctx, bootEvent); err != nil {
+			return nil, fmt.Errorf("publish WORLD_BOOTSTRAPPED event: %w", err)
+		}
+	}
+
+	return &Result{
+		WorldID:    worldID,
+		ClubID:     club.ClubID,
+		ClubName:   club.ClubName,
+		ManagerID:  club.ManagerID,
+		SquadSize:  club.SquadSize,
+		RandomSeed: seed,
+		Players:    club.Players,
+	}, nil
+}
+
+// GenerateAIClub persists one AI-controlled club, its policy-bot manager, and a
+// generated squad inside the caller's transaction, and records the auditable
+// CLUB_CREATED event in the same tx (the log can never disagree with state).
+//
+// It is the smallest reusable unit of world materialization: BootstrapWorld
+// uses it for the starter club, and S04-01 league seeding calls it once per
+// additional AI team, always inside the caller's own transaction. The factory's
+// rng must be seeded deterministically per world/team for replayable output;
+// country is club.clubs.country free text (competition seeding passes the
+// league country).
+func GenerateAIClub(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, clubName, clubShortName, country string, factory *playergen.PlayerFactory) (*GeneratedClub, error) {
+	if clubName == "" {
+		return nil, ErrClubNameRequired
+	}
+	if clubShortName == "" {
+		clubShortName = shortName(clubName)
+	}
+
+	var worldRef time.Time // season reference date for date_of_birth derivation
+	err := tx.QueryRow(ctx,
+		`SELECT COALESCE(launched_at, created_at) FROM world.worlds WHERE id = $1`,
+		worldID,
+	).Scan(&worldRef)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrWorldNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load world: %w", err)
+	}
+
 	squad, err := generateSquad(factory, SquadSizeDefault)
 	if err != nil {
 		return nil, err
 	}
 
-	// 1. The starter club (AI-controlled from the start).
+	// 1. The AI-controlled club.
 	var clubID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO club.clubs (world_id, name, short_name, country, is_ai_controlled)
-		VALUES ($1, $2, $3, 'england', TRUE) RETURNING id`,
-		worldID, clubName, clubShortName,
+		VALUES ($1, $2, $3, $4, TRUE) RETURNING id`,
+		worldID, clubName, clubShortName, country,
 	).Scan(&clubID); err != nil {
 		return nil, fmt.Errorf("insert club: %w", err)
 	}
@@ -244,12 +328,10 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 		})
 	}
 
-	// 4. Auditable events (same tx, so the log can never disagree with state).
-	seedValue := seed
+	// 4. The auditable creation event (same tx).
 	actor := "system"
 	clubEvent := &eventbus.Event{
 		WorldID:   worldID,
-		WorldTick: 0,
 		EventType: "CLUB_CREATED",
 		Payload: mustJSON(map[string]any{
 			"club_id":    clubID,
@@ -258,53 +340,30 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 			"squad_size": len(players),
 		}),
 	}
-	bootEvent := &eventbus.Event{
-		WorldID:    worldID,
-		WorldTick:  0,
-		EventType:  "WORLD_BOOTSTRAPPED",
-		RandomSeed: &seedValue,
-		Payload: mustJSON(map[string]any{
-			"club_count":  1,
-			"squad_size":  len(players),
-			"random_seed": seed,
-		}),
-	}
-	events := []*eventbus.Event{}
-	for _, e := range []*eventbus.Event{clubEvent, bootEvent} {
-		e.ActorType = &actor
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO world.events (world_id, world_tick, event_type, actor_type, payload, random_seed)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, occurred_at`,
-			e.WorldID, e.WorldTick, e.EventType, actor, e.Payload, e.RandomSeed,
-		).Scan(&e.ID, &e.OccurredAt); err != nil {
-			return nil, fmt.Errorf("record %s event: %w", e.EventType, err)
-		}
-		events = append(events, e)
+	clubEvent.ActorType = &actor
+	if err := recordEvent(ctx, tx, clubEvent); err != nil {
+		return nil, fmt.Errorf("record CLUB_CREATED event: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit bootstrap: %w", err)
-	}
-
-	// Record-then-publish: the log is authoritative; the bus fans out after
-	// commit so a transient publish failure never corrupts generated state.
-	if s.bus != nil {
-		for _, e := range events {
-			if err := s.bus.Publish(ctx, e); err != nil {
-				return nil, fmt.Errorf("publish %s event: %w", e.EventType, err)
-			}
-		}
-	}
-
-	return &Result{
-		WorldID:    worldID,
-		ClubID:     clubID,
-		ClubName:   clubName,
-		ManagerID:  managerID,
-		SquadSize:  len(players),
-		RandomSeed: seed,
-		Players:    players,
+	return &GeneratedClub{
+		ClubID:    clubID,
+		ClubName:  clubName,
+		ManagerID: managerID,
+		SquadSize: len(players),
+		Players:   players,
 	}, nil
+}
+
+// recordEvent inserts one world.events row inside the caller's transaction and
+// returns it with ID/OccurredAt populated.
+func recordEvent(ctx context.Context, tx pgx.Tx, e *eventbus.Event) error {
+	actor := "system"
+	e.ActorType = &actor
+	return tx.QueryRow(ctx, `
+		INSERT INTO world.events (world_id, world_tick, event_type, actor_type, payload, random_seed)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, occurred_at`,
+		e.WorldID, e.WorldTick, e.EventType, actor, e.Payload, e.RandomSeed,
+	).Scan(&e.ID, &e.OccurredAt)
 }
 
 // seed returns a fresh crypto-random seed, or the injected one in tests.
@@ -321,11 +380,12 @@ func (s *Service) seed() int64 {
 	return int64(binary.LittleEndian.Uint64(b[:]))
 }
 
-// loadPools reads the runtime name/nationality pools from the reference data
+// LoadPools reads the runtime name/nationality pools from the reference data
 // (OPD-13: runtime squad generation reads the DB pools; pkg/playergen stays
 // DB-free). Only codes present in BOTH tables participate, so a nationality
-// can never be selected without usable names.
-func loadPools(ctx context.Context, tx pgx.Tx) (*playergen.PoolGenerator, *playergen.NationalityPool, error) {
+// can never be selected without usable names. It runs against a transaction so
+// S04-01 league seeding can generate squads inside its own atomic operation.
+func LoadPools(ctx context.Context, tx pgx.Tx) (*playergen.PoolGenerator, *playergen.NationalityPool, error) {
 	names := map[string][]string{} // code -> first names
 	surnames := map[string][]string{}
 	rows, err := tx.Query(ctx, `
