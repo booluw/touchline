@@ -27,6 +27,7 @@ var attributeKeys = map[string][]string{
 	"technical": {
 		"finishing", "passing", "dribbling", "crossing",
 		"long_shots", "heading", "free_kicks", "penalties", "first_touch",
+		"tackling",
 	},
 	"physical": {
 		"pace", "acceleration", "strength", "jumping",
@@ -35,12 +36,14 @@ var attributeKeys = map[string][]string{
 	"mental": {
 		"composure", "anticipation", "vision", "work_rate",
 		"concentration", "decision_making", "positioning", "off_the_ball",
+		"teamwork",
 	},
 	"tactical": {
 		"pressing", "creativity", "tempo_control", "defensive_awareness",
 	},
 	"positional": {
 		"versatility", "positional_instinct", "space_reading", "man_awareness",
+		"marking",
 	},
 	"goalkeeping": {
 		"handling", "reflexes", "diving", "one_on_ones",

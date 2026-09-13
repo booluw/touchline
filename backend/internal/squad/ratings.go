@@ -1,12 +1,14 @@
 // Position-weighted squad rating aggregation (matchsim addendum v1.4
-// Part 7/8). The per-position Attack/Defense weighting formula is PROPOSAL
-// data (PM open item 4, not yet signed off): it is exposed as versioned
-// PositionWeights so a recalibration is a data change only. Attribute
-// categories mirror the player.player_attributes EAV categories.
+// Part 7/8, + v1.5 style profiles). The per-position Attack/Defense weighting
+// formula is PROPOSAL data (PM open item 4, not yet signed off): it is exposed
+// as versioned PositionWeights so a recalibration is a data change only.
+// Attribute categories mirror the player.player_attributes EAV categories.
 package squad
 
 import (
 	"github.com/google/uuid"
+
+	"github.com/touchline/backend/pkg/matchsim"
 )
 
 // AttributeSnapshot is one player's persisted attribute categories as the
@@ -117,6 +119,78 @@ func BuildSquadRatings(xi []SquadMember, weights PositionWeights, factors map[uu
 
 var balancedWeights = CategoryWeights{
 	Technical: .5, Physical: .5, Mental: .5, Tactical: .5, Goalkeeping: .1, Positional: .5,
+}
+
+// StyleProfile is the per-style category-weight multiplier table layered over
+// DefaultPositionWeights when a side kicks off in that style (S05-01,
+// docs/design/tactics-training-numerics.md §1.4). A 0 in a scale slot means
+// "unchanged", so a style can tag only the categories it wants (proposal data —
+// a PM tuning pass can drop, add, or renumber any style).
+type StyleProfile struct {
+	AttackScale  CategoryWeights
+	DefenseScale CategoryWeights
+}
+
+// StyleProfiles maps each non-balanced style to its recipe skew. balanced has
+// no entry: identity = DefaultPositionWeights. (Keys surface matchsim's
+// canonical style constants.)
+var StyleProfiles = map[string]StyleProfile{
+	matchsim.StylePossession: {
+		AttackScale:  CategoryWeights{Technical: 1.10, Physical: 0.92, Mental: 1.10},
+		DefenseScale: CategoryWeights{Technical: 1.10, Physical: 0.92, Mental: 1.10},
+	},
+	matchsim.StyleGegenpress: {
+		AttackScale:  CategoryWeights{Physical: 1.12, Tactical: 1.10},
+		DefenseScale: CategoryWeights{Physical: 1.05},
+	},
+	matchsim.StyleLowBlock: {
+		AttackScale:  CategoryWeights{Physical: 1.08},
+		DefenseScale: CategoryWeights{Physical: 1.05, Tactical: 1.12},
+	},
+	matchsim.StyleDirect: {
+		AttackScale:  CategoryWeights{Technical: 1.06, Physical: 1.10},
+		DefenseScale: CategoryWeights{},
+	},
+}
+
+// WeightsForStyle returns the per-position recipe table a side plays in, i.e.
+// base (DefaultPositionWeights) with the style's category scales applied. An
+// unknown/empty style yields base unchanged. The returned table is a fresh
+// copy — callers may safely hand it to BuildSquadRatings without mutating the
+// shared default.
+func WeightsForStyle(style string, base PositionWeights) PositionWeights {
+	prof, ok := StyleProfiles[style]
+	if !ok {
+		return base
+	}
+	out := make(PositionWeights, len(base))
+	for pos, p := range base {
+		out[pos] = PositionProfile{
+			Attack:  scaleWeights(p.Attack, prof.AttackScale),
+			Defense: scaleWeights(p.Defense, prof.DefenseScale),
+		}
+	}
+	return out
+}
+
+// scaleWeights multiplies every category weight by its style scale; a 0 scale
+// (unset) is treated as 1 so partial profiles never zero a category.
+func scaleWeights(w, scale CategoryWeights) CategoryWeights {
+	return CategoryWeights{
+		Technical:   w.Technical * styleScale(scale.Technical),
+		Physical:    w.Physical * styleScale(scale.Physical),
+		Mental:      w.Mental * styleScale(scale.Mental),
+		Tactical:    w.Tactical * styleScale(scale.Tactical),
+		Goalkeeping: w.Goalkeeping * styleScale(scale.Goalkeeping),
+		Positional:  w.Positional * styleScale(scale.Positional),
+	}
+}
+
+func styleScale(f float64) float64 {
+	if f == 0 {
+		return 1
+	}
+	return f
 }
 
 // weightedScore is the category-weighted mean of an attribute snapshot. A

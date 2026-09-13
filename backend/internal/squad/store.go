@@ -170,8 +170,8 @@ func (s *Store) loadPlayerRows(ctx context.Context, clubID uuid.UUID, onDate tim
 	var out []LoadedPlayer
 	for rows.Next() {
 		var (
-			p   LoadedPlayer
-			open bool
+			p                                   LoadedPlayer
+			open                                bool
 			cons, temp, pres, prof, adapt, lead int
 		)
 		if err := rows.Scan(&p.PlayerID, &p.Position, &p.Status,
@@ -210,10 +210,10 @@ func (s *Store) attachAttributes(ctx context.Context, clubID uuid.UUID, players 
 	acc := make(map[uuid.UUID]map[string][]int)
 	for rows.Next() {
 		var (
-			pid  uuid.UUID
-			cat  string
-			key  string
-			val  int
+			pid uuid.UUID
+			cat string
+			key string
+			val int
 		)
 		if err := rows.Scan(&pid, &cat, &key, &val); err != nil {
 			return fmt.Errorf("scan attribute: %w", err)
@@ -364,4 +364,116 @@ func (s *Store) LoadLineup(ctx context.Context, clubID uuid.UUID) (map[int]uuid.
 		return nil, fmt.Errorf("iterate lineup: %w", err)
 	}
 	return out, nil
+}
+
+// TacticsRow is a club's saved Simple-Mode setup (club.club_tactics). An empty
+// Style/Formation means "never set" — ResolveTactics renders the row into a
+// playable style key and slot order with balanced/4-3-3 defaults. UpdatedAt is
+// the last write time, nil when never written.
+type TacticsRow struct {
+	Style     string
+	Formation string
+	UpdatedAt *time.Time
+}
+
+// LoadTactics reads a club's saved tactics row (if any). A missing row is not
+// an error: the club plays default balanced/4-3-3.
+func (s *Store) LoadTactics(ctx context.Context, clubID uuid.UUID) (TacticsRow, error) {
+	var t TacticsRow
+	var updatedAt *time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT style, formation, updated_at FROM club.club_tactics WHERE club_id = $1`, clubID).
+		Scan(&t.Style, &t.Formation, &updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TacticsRow{}, nil
+	}
+	if err != nil {
+		return TacticsRow{}, fmt.Errorf("load tactics: %w", err)
+	}
+	t.UpdatedAt = updatedAt
+	return t, nil
+}
+
+// PlayerCondition is one XI member's match-condition dims
+// (player.player_condition; S05-01). All values in [0,1].
+type PlayerCondition struct {
+	PlayerID            uuid.UUID
+	Fatigue             float64
+	Fitness             float64
+	Sharpness           float64
+	InjuryRisk          float64
+	TacticalFamiliarity float64
+}
+
+// LoadConditions reads condition rows for a set of players. Players without a
+// row are simply absent from the map (treated as neutral at matchday).
+func (s *Store) LoadConditions(ctx context.Context, playerIDs []uuid.UUID) (map[uuid.UUID]PlayerCondition, error) {
+	out := make(map[uuid.UUID]PlayerCondition, len(playerIDs))
+	if len(playerIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT player_id, fatigue, fitness, sharpness, injury_risk, tactical_familiarity
+		FROM player.player_condition
+		WHERE player_id = ANY($1)`, playerIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load conditions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c PlayerCondition
+		if err := rows.Scan(&c.PlayerID, &c.Fatigue, &c.Fitness, &c.Sharpness,
+			&c.InjuryRisk, &c.TacticalFamiliarity); err != nil {
+			return nil, fmt.Errorf("scan condition: %w", err)
+		}
+		out[c.PlayerID] = c
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate conditions: %w", err)
+	}
+	return out, nil
+}
+
+// ConditionFactor folds a player's sharpness/fatigue into their matchday
+// contribution (docs/design/tactics-training-numerics.md §2.4):
+// (0.9 + 0.4 × sharpness) × (1 − 0.3 × fatigue). A missing row (no Condition
+// supplied) is neutral 1.0.
+func ConditionFactor(c PlayerCondition) float64 {
+	return (0.9 + 0.4*clamp01(c.Sharpness)) * (1 - 0.3*clamp01(c.Fatigue))
+}
+
+// XIFitness is the XI's mean fitness — the engine's Team.Fitness seed. Fallback
+// 1.0 when no condition rows exist yet.
+func XIFitness(conds map[uuid.UUID]PlayerCondition, xi []SquadMember) float64 {
+	var sum float64
+	n := 0
+	for _, m := range xi {
+		if c, ok := conds[m.PlayerID]; ok {
+			sum += c.Fitness
+			n++
+		}
+	}
+	if n == 0 {
+		return 1
+	}
+	return clamp01(sum / float64(n))
+}
+
+func clamp01(f float64) float64 {
+	if f < 0 {
+		return 0
+	}
+	if f > 1 {
+		return 1
+	}
+	return f
+}
+
+// PlayerIDs extracts the id list of an XI for condition loading.
+func PlayerIDs(xi []SquadMember) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(xi))
+	for _, m := range xi {
+		out = append(out, m.PlayerID)
+	}
+	return out
 }

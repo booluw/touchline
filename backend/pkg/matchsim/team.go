@@ -3,7 +3,8 @@
 // produce byte-identical results. Persistence, live pacing, and result
 // application live in internal/match (S04-02).
 //
-// Spec: matchsim_addendum_v1.4.md (cumulative v1.1→v1.4, approved contract).
+// Spec: matchsim_addendum_v1.5.md (cumulative v1.1→v1.5; proposal until PM
+// tuning sign-off, balanced style = identity vs the v1.4 approved block).
 package matchsim
 
 import "math"
@@ -20,7 +21,7 @@ type Team struct {
 	// Attack/Defense are the two-sided ratings (spec §2.1, replacing the old
 	// single Ability). Attack feeds goal scaling when this side attacks,
 	// Defense when it defends.
-	Attack int
+	Attack  int
 	Defense int
 
 	// Multiplicative modifiers computed upstream: Form (EWMA, ±15%), Squad
@@ -41,12 +42,33 @@ type Team struct {
 	// [0,1], defaulting to the tuning baseline (0.78) when unset/invalid.
 	// Upstream clamps takers to [0.65, 0.88] (PM Part 7 §3).
 	PenaltyConversionRate float64
+
+	// Tactics is the club's Simple-Mode style (S05-01, addendum v1.5). It
+	// re-weights existing draws (possession, chances, conversion, cards,
+	// stamina); the default "balanced" is the identity block, so a tactics-less
+	// caller replays the v1.4 behavior exactly. Missing/unknown keys normalize
+	// to balanced at simulate time.
+	Tactics Tactics
+
+	// Fitness is the XI's matchday conditioning in [0,1] (mean
+	// player.player_condition.fitness). It seeds the engine's per-side stamina
+	// tank; values below 1 make the side measurably late-game worse through the
+	// post-75 fatigue penalty. <=0 means "not computed" and plays a fresh squad.
+	Fitness float64
+}
+
+// Tactics is the per-team tactical setup consumed by the engine (v1.5). Style
+// must be one of the S05-01 keys (StyleBalanced etc.); anything else falls back
+// through Tuning.DefaultStyle to the identity block.
+type Tactics struct {
+	Style string
 }
 
 // LiveInput is one ordered, minute-tagged manager input (spec §2.7, OPD-21).
-// When present at a substitution window it replaces the random sub draw;
-// tactic_change inputs are consumed and replayed but carry no numeric rating
-// effect in the approved v1.2 block (tactical modulation is upstream).
+// When present at a substitution window it replaces the random sub draw.
+// tactic_change inputs (Detail {"style": "<key>"}) actively switch the side's
+// style from their minute onward (addendum v1.5); they are consumed inside the
+// engine and never surface in the feed.
 type LiveInput struct {
 	Minute int
 	ClubID string
@@ -82,19 +104,19 @@ type MatchEvent struct {
 
 // Well-known event types — the approved subset of match_events.event_type.
 const (
-	EventKickoff         = "kickoff"
-	EventGoal            = "goal"
-	EventAssist          = "assist"
-	EventChance          = "chance_created"
-	EventYellowCard      = "yellow_card"
-	EventRedCard         = "red_card"
-	EventSubstitution    = "substitution"
-	EventInjury          = "injury"
-	EventPenaltyAwarded  = "penalty_awarded"
-	EventPenaltyScored   = "penalty_scored"
-	EventPenaltyMissed   = "penalty_missed"
-	EventHalfTime        = "half_time"
-	EventFullTime        = "full_time"
+	EventKickoff        = "kickoff"
+	EventGoal           = "goal"
+	EventAssist         = "assist"
+	EventChance         = "chance_created"
+	EventYellowCard     = "yellow_card"
+	EventRedCard        = "red_card"
+	EventSubstitution   = "substitution"
+	EventInjury         = "injury"
+	EventPenaltyAwarded = "penalty_awarded"
+	EventPenaltyScored  = "penalty_scored"
+	EventPenaltyMissed  = "penalty_missed"
+	EventHalfTime       = "half_time"
+	EventFullTime       = "full_time"
 )
 
 // MatchResult is the resolved outcome of a match.

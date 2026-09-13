@@ -49,6 +49,12 @@ func (s *server) router() *gin.Engine {
 		// Club reads (S03-01): the caller's own world only.
 		api.GET("/clubs", s.requireAuth, s.handleListClubs)
 		api.GET("/clubs/:id", s.requireAuth, s.handleGetClub)
+		api.GET("/clubs/:id/lineup", s.requireAuth, s.handleGetLineup)
+		api.PUT("/clubs/:id/lineup", s.requireAuth, s.handleSetLineup)
+		api.GET("/clubs/:id/tactics", s.requireAuth, s.handleGetTactics)
+		api.POST("/clubs/:id/tactics", s.requireAuth, s.handleSetTactics)
+		api.GET("/clubs/:id/training-plan", s.requireAuth, s.handleGetTrainingPlan)
+		api.POST("/clubs/:id/training-plan", s.requireAuth, s.handleSetTrainingPlan)
 
 		// Player: the manager's own offer inbox and career actions.
 		manager := api.Group("/managers", s.requireAuth)
@@ -94,6 +100,7 @@ func (s *server) router() *gin.Engine {
 		// the persisted event feed. Both are world-scoped to the caller.
 		api.GET("/fixtures/:id", s.requireAuth, s.handleGetFixture)
 		api.GET("/matches/:id/events", s.requireAuth, s.handleGetMatchEvents)
+		api.POST("/matches/:id/tactical", s.requireAuth, s.handleLiveTacticChange)
 	}
 
 	return r

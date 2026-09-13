@@ -4,10 +4,9 @@ package matchsim
 type emitFn func(minute int, typ, clubID, desc, detail string)
 
 // liveInputs indexes manager inputs for fast minute/club lookup during
-// simulation (spec §2.7). Only the current EngineVersion ("1.2-approved")
-// consumes substitution inputs numerically; tactic_change inputs are consumed
-// by the orchestration layer's recording gate and replayed into the feed with
-// no numeric effect in this block (tactical modulation is upstream).
+// simulation (spec §2.7). Substitutions replace the random sub draw at the
+// windows; tactic_change inputs switch the side's style from their minute
+// (v1.5) — both are consumed inside the engine with no RNG.
 type liveInputs map[int]map[string]LiveInput
 
 // indexLiveInputs builds the lookup index, discarding out-of-domain minutes.
@@ -33,4 +32,27 @@ func (idx liveInputs) substitutionAt(minute int, clubID string) *LiveInput {
 		}
 	}
 	return nil
+}
+
+// tacticAt returns the manager tactic_change for a minute/club, or nil (v1.5:
+// these now carry a numeric effect, consumed by the engine at the input's
+// minute).
+func (idx liveInputs) tacticAt(minute int, clubID string) *LiveInput {
+	if byMinute := idx[minute]; byMinute != nil {
+		if in, ok := byMinute[clubID]; ok && in.Kind == "tactic_change" {
+			return &in
+		}
+	}
+	return nil
+}
+
+// TacticStyle extracts the target style key from a tactic_change input's
+// Detail map ("style"), returning "" when absent/malformed so the caller's
+// DefaultStyle fallback applies.
+func (in LiveInput) TacticStyle() string {
+	if in.Detail == nil {
+		return ""
+	}
+	s, _ := in.Detail["style"].(string)
+	return s
 }

@@ -479,14 +479,19 @@ func (s *Service) buildTeam(ctx context.Context, f *Fixture, club squad.ClubRow,
 	}
 
 	var xi []squad.SquadMember
+	tactics, err := s.squad.LoadTactics(ctx, club.ID)
+	if err != nil {
+		return nil, err
+	}
+	style, order := squad.ResolveTactics(tactics)
 	if club.IsAIControlled {
-		xi = squad.SelectStartersForAI(players, seed, club.ID)
+		xi = squad.SelectStartersForAI(players, seed, club.ID, order)
 	} else {
 		lineup, err := s.squad.LoadLineup(ctx, club.ID)
 		if err != nil {
 			return nil, err
 		}
-		xi, err = squad.SelectStartersWithLineup(players, lineup)
+		xi, err = squad.SelectStartersWithLineup(players, lineup, order)
 		if err != nil {
 			return nil, err
 		}
@@ -499,15 +504,28 @@ func (s *Service) buildTeam(ctx context.Context, f *Fixture, club squad.ClubRow,
 	morale := squad.ComputeSquadMorale(moraleInputs(xi), squTuning)
 	mot := squad.ComputeMotivation(dna, fc, oppRep-club.Reputation, seed, squTuning)
 
+	// Condition folds every XI member's sharpness/fatigue into their matchday
+	// contribution (S05-01); key players layer the performance factor on top.
+	conds, err := s.squad.LoadConditions(ctx, squad.PlayerIDs(xi))
+	if err != nil {
+		return nil, err
+	}
 	factorMap := make(map[uuid.UUID]float64, len(xi))
+	for _, m := range xi {
+		factorMap[m.PlayerID] = squad.ConditionFactor(conds[m.PlayerID])
+	}
 	for _, in := range squad.SelectKeyPlayers(xi) {
 		pf := squad.ComputePlayerPerformanceFactor(in, fc, seed, squTuning)
-		factorMap[in.PlayerID] = pf.Factor
+		factorMap[in.PlayerID] *= pf.Factor
 		if w, ok := squad.LineupWarningFor(in, fc, pf, seed, squTuning, 0); ok {
 			p.warnings = append(p.warnings, w)
 		}
 	}
-	att, def := squad.BuildSquadRatings(xi, squad.DefaultPositionWeights, factorMap)
+	// The style's recipe skew reaches the ratings (possession = technical/
+	// mental-led, gegenpress = physical-press, low-block = defensive-tactical,
+	// direct = physical-attack); balanced uses the default recipe.
+	weights := squad.WeightsForStyle(style, squad.DefaultPositionWeights)
+	att, def := squad.BuildSquadRatings(xi, weights, factorMap)
 
 	takerRate := 0.0
 	if p.taker != nil {
@@ -534,6 +552,8 @@ func (s *Service) buildTeam(ctx context.Context, f *Fixture, club squad.ClubRow,
 		Aggression:            50, // generated clubs have no DNA aggression column (engine normalises 0 the same)
 		RivalryIntensity:      fc.DerbyIntensity,
 		PenaltyConversionRate: takerRate,
+		Tactics:               matchsim.Tactics{Style: style},
+		Fitness:               squad.XIFitness(conds, xi),
 	}
 	return p, nil
 }

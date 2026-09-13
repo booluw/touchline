@@ -17,6 +17,7 @@ earlier definition, the later one wins.
 | `matchsim_addendum_v1.2.md` | Approved baseline, tuned numbers, marginal referee events, penalty data model, postulate on variance band. |
 | `matchsim_addendum_v1.3.md` | Proposed Part 3: canonical replay draw order + red-card/substitution effects + penalty/award/reference scopes. |
 | `matchsim_addendum_v1.4.md` | APPROVED Part 4-6 block: final numbers, draw order, penalty/referee scopes; engine_version `1.2-approved`. |
+| `matchsim_addendum_v1.5.md` | PROPOSAL: five tactical styles (Simple Mode, S05-01), per-side stamina + post-75 fatigue, live `tactic_change` with a real effect. |
 
 Implementation interpretations fixed by this repo (posted in the addenda as
 proposals; where the spec does not say, the engine owner's interpretation below
@@ -31,8 +32,15 @@ is the contract):
 - **Home advantage**: the ×1.08 multiplier is applied to the HOME side's raw
   effective ratings at kickoff (before form→variance), feeding possession and
   goal scaling; red/subs subsequently act on the already-adjusted ratings.
-- **tactic_change LiveInputs** carry no numeric effect in v1.2 (recorded and
-  replayed); tactical modulation is upstream.
+- **tactic_change LiveInputs** carry a numeric effect from v1.5: a live
+  `{"style": "<key>"}` input switches the side to that style for the rest of the
+  match (possession/chance/conversion/cards/stamina re-weight existing draws,
+  never new RNG consumption); default `balanced` is the identity block, so a
+  tactics-less legacy call replays the v1.4 behavior exactly.
+- Post-75th-minute fatigue penalty applies when a side's stamina tank lags the
+  healthy norm (addendum v1.5): `deficit = max((90-minute)/90 - stamina, 0)`,
+  `eff = 1 - clamp(deficit × FatiguePenaltyScale, 0, FatiguePenaltyMax)`, gated
+  from `FatigueStartMinute`; substitutions restore the tank to `SubFitness`.
 - Late-game urgency / fatigue is **out of scope** for v1.2 (flat goal timing).
 
 ## Canonical draw order (replay contract, EngineVersion "1.2-approved")

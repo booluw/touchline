@@ -21,6 +21,7 @@ import (
 	"github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/matchday"
 	"github.com/touchline/backend/internal/squad"
+	"github.com/touchline/backend/internal/training"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/realtime"
 )
@@ -63,6 +64,7 @@ func main() {
 	// runs the live subsystem (advisory lock, see acquireMatchRunnerLock).
 	matches := match.NewService(pool, bus, squad.NewStore(pool), form.NewStore(pool))
 	compSvc := competition.NewService(pool, bus)
+	trainingSvc := training.NewService(pool, bus)
 	matchdayRunner := matchday.NewRunner(pool, matches, compSvc)
 	matchdayRunner.WithRealtime(realtimeBroker)
 
@@ -119,6 +121,11 @@ func main() {
 					log.Printf("world %s live runner: %v", ev.WorldID, err)
 				}
 			}()
+		}
+		if payload.Granularity == "weekly" {
+			if _, err := trainingSvc.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
+			}
 		}
 		return nil
 	}); err != nil {

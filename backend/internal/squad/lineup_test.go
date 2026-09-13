@@ -20,10 +20,10 @@ func mkPlayers(t *testing.T) []LoadedPlayer {
 	out := make([]LoadedPlayer, 0, len(spread))
 	for i, pos := range spread {
 		out = append(out, LoadedPlayer{
-			PlayerID:        uuid.New(),
-			Position:        pos,
-			Status:          "active",
-			Available:       true,
+			PlayerID:         uuid.New(),
+			Position:         pos,
+			Status:           "active",
+			Available:        true,
 			CurrentSentiment: 0,
 			Attributes: AttributeSnapshot{
 				Technical: 60 + (i % 30), Physical: 60 + (i % 20),
@@ -46,11 +46,11 @@ func idSet(ms []SquadMember) map[uuid.UUID]bool {
 func TestSelectStartersDeterministicAndLegal(t *testing.T) {
 	players := mkPlayers(t)
 
-	a, err := SelectStarters(players)
+	a, err := SelectStarters(players, DefaultFormation())
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
-	b, err := SelectStarters(players)
+	b, err := SelectStarters(players, DefaultFormation())
 	if err != nil {
 		t.Fatalf("select 2: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSelectStartersSkipsUnavailable(t *testing.T) {
 			players[i].Available = false
 		}
 	}
-	xi, err := SelectStarters(players)
+	xi, err := SelectStarters(players, DefaultFormation())
 	if err != nil {
 		t.Fatalf("select without GKs should still complete: %v", err)
 	}
@@ -103,8 +103,8 @@ func TestSelectStartersForAIDeterministicSeed(t *testing.T) {
 	players := mkPlayers(t)
 	club := uuid.New()
 
-	xiA := SelectStartersForAI(players, 42, club)
-	xiB := SelectStartersForAI(players, 42, club)
+	xiA := SelectStartersForAI(players, 42, club, DefaultFormation())
+	xiB := SelectStartersForAI(players, 42, club, DefaultFormation())
 	if len(xiA) != len(DefaultFormation()) {
 		t.Fatalf("AI XI size = %d, want %d", len(xiA), len(DefaultFormation()))
 	}
@@ -134,7 +134,7 @@ func TestSelectStartersForAIChangesWithSeed(t *testing.T) {
 	distinct := 0
 	for seed := int64(0); seed < 7; seed++ {
 		key := ""
-		for _, m := range SelectStartersForAI(players, seed, club) {
+		for _, m := range SelectStartersForAI(players, seed, club, DefaultFormation()) {
 			key += m.PlayerID.String() + ","
 		}
 		if !seen[key] {
@@ -158,7 +158,7 @@ func TestSelectStartersForAIExcludesUnavailable(t *testing.T) {
 	players[star].Available = false
 
 	for seed := int64(0); seed < 8; seed++ {
-		xi := SelectStartersForAI(players, seed, uuid.New())
+		xi := SelectStartersForAI(players, seed, uuid.New(), DefaultFormation())
 		for _, m := range xi {
 			if m.PlayerID == players[star].PlayerID {
 				t.Fatalf("injured striker %s started under seed %d", m.PlayerID, seed)
@@ -174,7 +174,7 @@ func TestSelectStartersForAIUnavailableGKNeverPlaysOutfield(t *testing.T) {
 			players[i].Available = false
 		}
 	}
-	xi := SelectStartersForAI(players, 7, uuid.New())
+	xi := SelectStartersForAI(players, 7, uuid.New(), DefaultFormation())
 	if xi[0].Position == "GK" {
 		t.Fatal("AI selector must not slot an outfielder into goal")
 	}
@@ -201,7 +201,7 @@ func TestSelectStartersWithLineupHonoursSlots(t *testing.T) {
 	players := mkPlayers(t)
 	lineup := lineupFor(players)
 
-	xi, err := SelectStartersWithLineup(players, lineup)
+	xi, err := SelectStartersWithLineup(players, lineup, DefaultFormation())
 	if err != nil {
 		t.Fatalf("select with lineup: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestSelectStartersWithLineupFallsBackWhenMissing(t *testing.T) {
 	lineup := lineupFor(players)
 	delete(lineup, 0) // no manager's GK pick: GK slot must fall back
 
-	xi, err := SelectStartersWithLineup(players, lineup)
+	xi, err := SelectStartersWithLineup(players, lineup, DefaultFormation())
 	if err != nil {
 		t.Fatalf("select with partial lineup: %v", err)
 	}

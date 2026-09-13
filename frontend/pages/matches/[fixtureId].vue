@@ -13,6 +13,18 @@ const matchStore = useMatchStore()
 const { fixture, match, events, error, stuck } = storeToRefs(matchStore)
 
 const fixtureId = computed(() => String(route.params.fixtureId))
+const liveStyle = ref('balanced')
+const tacticalError = ref('')
+
+async function changeStyle() {
+  if (!match.value) return
+  const { authedFetch } = useAuth()
+  const r = await authedFetch(`/api/matches/${match.value.id}/tactical`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ minute: match.value.minute + 1, style: liveStyle.value }),
+  })
+  tacticalError.value = r.ok ? '' : ((await r.json().catch(() => ({}))).error ?? 'Could not change style.')
+}
 
 const labels: Record<EventType, string> = {
   kickoff: 'Kick-off',
@@ -71,6 +83,12 @@ onUnmounted(() => matchStore.disconnect())
         </p>
 
         <section v-else class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+          <div v-if="match.status === 'in_progress'" class="mb-5 rounded border border-slate-700 bg-slate-900 p-3">
+            <label class="mr-3 text-sm font-medium">Live style
+              <select v-model="liveStyle" class="ml-2 rounded bg-slate-800 p-1 text-sm"><option value="balanced">Balanced</option><option value="possession">Possession</option><option value="gegenpress">Gegenpress</option><option value="low_block">Low-block</option><option value="direct">Direct</option></select>
+            </label><button @click="changeStyle" class="rounded bg-indigo-600 px-3 py-1 text-sm">Apply next minute</button>
+            <p v-if="tacticalError" class="mt-2 text-sm text-red-400">{{ tacticalError }}</p>
+          </div>
           <h2 class="text-lg font-semibold text-white mb-3">Match events</h2>
           <ul v-if="events.length" class="divide-y divide-slate-700">
             <li v-for="ev in events" :key="ev.id" class="flex items-start gap-3 py-2 text-sm">

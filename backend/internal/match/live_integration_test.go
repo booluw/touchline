@@ -361,11 +361,15 @@ func TestTacticChangeRecorded(t *testing.T) {
 			t.Fatalf("pace to 20: %v", err)
 		}
 	}
-	if err := svc.TacticChange(ctx, sess.MatchID, managerID, 20, map[string]any{"line": "deep"}); err != ErrMinuteClosed {
+	if err := svc.TacticChange(ctx, sess.MatchID, managerID, 20, map[string]any{"style": "low_block"}); err != ErrMinuteClosed {
 		t.Fatalf("closed-minute tactic change err = %v, want ErrMinuteClosed", err)
 	}
+	// Reject styles outside the approved catalogue.
+	if err := svc.TacticChange(ctx, sess.MatchID, managerID, 30, map[string]any{"style": "park_the_bus"}); err != ErrInvalidTacticStyle {
+		t.Fatalf("invalid style err = %v, want ErrInvalidTacticStyle", err)
+	}
 	// ...future minutes accept inputs into the ordered stream.
-	if err := svc.TacticChange(ctx, sess.MatchID, managerID, 30, map[string]any{"line": "high_press"}); err != nil {
+	if err := svc.TacticChange(ctx, sess.MatchID, managerID, 30, map[string]any{"style": "gegenpress"}); err != nil {
 		t.Fatalf("tactic change: %v", err)
 	}
 	var club string

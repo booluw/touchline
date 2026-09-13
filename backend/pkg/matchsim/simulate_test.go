@@ -304,3 +304,157 @@ func TestVarianceBand(t *testing.T) {
 		t.Fatalf("variance not centred on 1.0: mean ~%v", mean)
 	}
 }
+
+// styledOptions applies a style to the home side of the sample match.
+func styledOptions(seed int64, style string) Options {
+	opts := sampleOptions(seed)
+	opts.Home.Tactics = Tactics{Style: style}
+	opts.Tuning = DefaultTuning()
+	return opts
+}
+
+// firstSeedWhere finds a seed where home <style> plays differently from home
+// balanced, so style tests aren't vacuous.
+func firstSeedWhere(style string) int64 {
+	for seed := int64(0); seed < 200; seed++ {
+		if canonicalDigest(Simulate(styledOptions(seed, style))) != canonicalDigest(Simulate(styledOptions(seed, StyleBalanced))) {
+			return seed
+		}
+	}
+	return -1
+}
+
+func TestGoldenStyleIsIdentity(t *testing.T) {
+	// The default (no tactics set) path must equal an explicit balanced path:
+	// the v1.5 block is hidden behind an identity lever for default callers.
+	plain := sampleOptions(1234)
+	explicit := styledOptions(1234, StyleBalanced)
+	if canonicalDigest(Simulate(plain)) != canonicalDigest(Simulate(explicit)) {
+		t.Fatal("balanced must be numerically identical to the unset/default path")
+	}
+}
+
+func TestStylesChangeOutcome(t *testing.T) {
+	// Every non-balanced style must produce at least one observable difference
+	// from balanced across a seed sweep (the style levers are wired in).
+	for _, style := range []string{StylePossession, StyleGegenpress, StyleLowBlock, StyleDirect} {
+		if seed := firstSeedWhere(style); seed < 0 {
+			t.Fatalf("style %s never differed from balanced across 200 seeds", style)
+		} else {
+			t.Logf("%s diverges from balanced at seed %d", style, seed)
+		}
+	}
+}
+
+func TestPossessionStyleShiftsPossession(t *testing.T) {
+	pos, low, total := 0, 0, 0
+	const trials = 30
+	for i := 0; i < trials; i++ {
+		seed := int64(1000 + i)
+		pos += int(Simulate(styledOptions(seed, StylePossession)).HomePossession)
+		low += int(Simulate(styledOptions(seed, StyleLowBlock)).HomePossession)
+		total += int(Simulate(styledOptions(seed, StyleBalanced)).HomePossession)
+	}
+	avgPos := float64(pos) / trials
+	avgLow := float64(low) / trials
+	avgBase := float64(total) / trials
+	if avgPos <= avgBase {
+		t.Fatalf("possession style should raise home share: %.1f vs %.1f", avgPos, avgBase)
+	}
+	if avgLow >= avgBase {
+		t.Fatalf("low-block style should lower home share: %.1f vs %.1f", avgLow, avgBase)
+	}
+}
+
+func TestLiveTacticChangeReplaysStatic(t *testing.T) {
+	// A tactic_change LiveInput at minute 1 must produce the byte-identical
+	// match to kickoffing in that style (the switch happens before draw 1).
+	style := StyleLowBlock
+	static := styledOptions(3, style)
+	live := sampleOptions(3)
+	live.LiveInputs = []LiveInput{
+		{Minute: 1, ClubID: static.Home.ID, Kind: "tactic_change", Detail: map[string]any{"style": style}},
+	}
+	a := Simulate(static)
+	b := Simulate(live)
+	if canonicalDigest(a) != canonicalDigest(b) {
+		t.Fatalf("minute-1 tactic_change must equal a static kickoff in that style:\n%s\n%s",
+			canonicalDigest(a), canonicalDigest(b))
+	}
+}
+
+func TestLiveTacticChangeDeterministicOnReplay(t *testing.T) {
+	opts := sampleOptions(8)
+	inputs := []LiveInput{
+		{Minute: 40, ClubID: opts.Home.ID, Kind: "tactic_change", Detail: map[string]any{"style": StyleGegenpress}},
+		{Minute: 70, ClubID: opts.Away.ID, Kind: "tactic_change", Detail: map[string]any{"style": StyleLowBlock}},
+	}
+	reversed := []LiveInput{inputs[1], inputs[0]}
+	a := opts
+	a.LiveInputs = inputs
+	b := opts
+	b.LiveInputs = reversed
+	if canonicalDigest(Simulate(a)) != canonicalDigest(Simulate(b)) {
+		t.Fatal("tactic_change input ordering must not change the outcome")
+	}
+}
+
+func TestFitnessDrainsLateMatchOutput(t *testing.T) {
+	// A drained squad (Fitness 0.5, balanced) must underperform a fresh one
+	// over many forced-chance fixtures: the post-75 penalty slices conversion
+	// and possession momentum from minute 76. Forced high-volume tuning keeps
+	// the difference far outside seed noise.
+	hot := DefaultTuning()
+	hot.ChancesPerMatchMin = 60
+	hot.SubAutoFraction = 0 // no auto subs: the tank drains untouched
+	opt := sampleOptions(0)
+	opt.Tuning = hot
+	fresh := opt
+	fresh.Home.Fitness = 1.0
+	tired := opt
+	tired.Home.Fitness = 0.5
+
+	freshGoals, tiredGoals := 0, 0
+	const trials = 60
+	for i := 0; i < trials; i++ {
+		s := int64(500 + i)
+		f := fresh
+		f.Seed = s
+		t := tired
+		t.Seed = s
+		fr := Simulate(f)
+		tr := Simulate(t)
+		freshGoals += fr.HomeGoals
+		tiredGoals += tr.HomeGoals
+	}
+	if freshGoals-tiredGoals < trials/9 {
+		t.Fatalf("drained squads should score less than fresh ones: fresh=%d tired=%d over %d trials",
+			freshGoals, tiredGoals, trials)
+	}
+}
+
+func TestDefaultTuningStylesAreIsolated(t *testing.T) {
+	// Mutating a DefaultTuning copy must never leak into the shared proposal.
+	base := DefaultTuning()
+	mut := DefaultTuning()
+	mut.Styles[StylePossession] = StyleSpec{PossessionShift: 0.99, ChanceVolume: 3, StaminaDecay: 2}
+	if got := ProposedTuning.Styles[StylePossession].PossessionShift; got != 0.20 {
+		t.Fatalf("shared proposal mutated: possession shift now %v", got)
+	}
+	if got := base.Styles[StylePossession].StaminaDecay; got != 1.0 {
+		t.Fatalf("DefaultTuning call changed subsequent copies: %v", got)
+	}
+	if got := DefaultTuning().Styles[StylePossession].ChanceVolume; got != 0.90 {
+		t.Fatalf("proposal corrupted through mutual copy: %v", got)
+	}
+}
+
+func TestStyleEffectsAreDeterministic(t *testing.T) {
+	for _, style := range []string{StylePossession, StyleGegenpress, StyleLowBlock, StyleDirect} {
+		a := Simulate(styledOptions(101, style))
+		b := Simulate(styledOptions(101, style))
+		if canonicalDigest(a) != canonicalDigest(b) {
+			t.Fatalf("style %s not deterministic", style)
+		}
+	}
+}

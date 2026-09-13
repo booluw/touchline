@@ -114,6 +114,9 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0025 | `competition` / `world` / `match` | Country-scoped leagues (tier, team count, P/R adjacency), live-match input log (S04) |
 | 0026 | `match` | Fixture results: `ht_score`, `at_score`, `completed_at` on `match.fixtures` (S04-01) |
 | 0027 | `ref` | Global club name parts (`ref.club_name_parts`, stems + suffixes) for deterministic AI-club naming (S04-01, data-driven) |
+| 0028–0032 | `competition`/`world`/`match`/`club`/`manager` | Club names + world-scoping, fixture standings, match snapshot (`sim_inputs`), world calendar day (`current_day`) |
+| 0033 | `club` / `player` | Manager tactics + training plans (S05-01), new attribute keys backfill (`tackling`/`marking`/`teamwork`) |
+| 0034 | `player` | Match-condition trackers (`player.player_condition`: fatigue/fitness/sharpness/injury_risk/tactical_familiarity) |
 
 ### River migrations (0016–0022)
 

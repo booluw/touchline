@@ -6,9 +6,13 @@ export const useSquadStore = defineStore('squad', {
 
   actions: {
     async fetchSquad(clubId: string) {
-      const { public: { apiBase } } = useRuntimeConfig()
-      const { data } = await useFetch(`${apiBase}/api/clubs/${clubId}/squad`)
-      this.players = data.value as Record<string, unknown>[] ?? []
+      const { authedFetch } = useAuth()
+      // Club detail is the current server-owned squad read model. Keeping this
+      // through authedFetch preserves the httpOnly-cookie session contract.
+      const response = await authedFetch(`/api/clubs/${clubId}`)
+      if (!response.ok) throw new Error('Could not load squad.')
+      const detail = await response.json() as { squad?: Record<string, unknown>[] }
+      this.players = detail.squad ?? []
     },
   },
 })

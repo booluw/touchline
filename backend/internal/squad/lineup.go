@@ -18,6 +18,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+
+	"github.com/touchline/backend/pkg/matchsim"
 )
 
 // lineupTag separates the lineup draw's RNG domain from other per-club
@@ -32,18 +34,83 @@ func DefaultFormation() []string {
 	return []string{"GK", "LB", "CB", "CB", "RB", "CM", "CM", "CM", "RW", "ST", "LW"}
 }
 
+// ValidFormations are the MVP formation catalogue (docs/design
+// tactics-training-numerics.md §1.2). 4-3-3 is the default slot order.
+var ValidFormations = []string{
+	"4-3-3", "4-4-2", "4-2-3-1", "5-3-2",
+	"3-2-4-1", "5-4-1", "4-5-1", "3-5-2",
+}
+
+// formationOrders is the slot order per formation. Slot index i maps to
+// club.club_lineups.slot i.
+func formationOrders() map[string][]string {
+	return map[string][]string{
+		"4-3-3":   DefaultFormation(),
+		"4-4-2":   {"GK", "LB", "CB", "CB", "RB", "RM", "CM", "CM", "LM", "ST", "ST"},
+		"4-2-3-1": {"GK", "LB", "CB", "CB", "RB", "DM", "DM", "RM", "AM", "LM", "ST"},
+		"5-3-2":   {"GK", "CB", "CB", "CB", "LB", "RB", "CM", "CM", "CM", "ST", "ST"},
+		"3-2-4-1": {"GK", "CB", "CB", "CB", "DM", "DM", "RM", "AM", "AM", "LM", "ST"},
+		"5-4-1":   {"GK", "CB", "CB", "CB", "LB", "RB", "LM", "CM", "CM", "RM", "ST"},
+		"4-5-1":   {"GK", "LB", "CB", "CB", "RB", "LM", "CM", "CM", "CM", "RM", "ST"},
+		"3-5-2":   {"GK", "CB", "CB", "CB", "LB", "RB", "CM", "CM", "CM", "ST", "ST"},
+	}
+}
+
+// FormationFor returns a formation's 11-slot order; an unknown key falls back
+// to the default 4-3-3 order so a bad data row never breaks selection.
+func FormationFor(formation string) []string {
+	if order, ok := formationOrders()[formation]; ok {
+		return order
+	}
+	return DefaultFormation()
+}
+
+// AllowedFormations returns a style's permitted formations
+// (docs/design tactics-training-numerics.md §1.1), canonical/default first.
+// An unknown/empty style gets the balanced set.
+func AllowedFormations(style string) []string {
+	switch style {
+	case "possession":
+		return []string{"4-3-3", "3-2-4-1"}
+	case "gegenpress":
+		return []string{"4-3-3", "4-2-3-1"}
+	case "low_block":
+		return []string{"5-4-1", "4-5-1"}
+	case "direct":
+		return []string{"4-4-2", "3-5-2"}
+	default:
+		return []string{"4-3-3", "4-4-2", "4-2-3-1", "5-3-2"}
+	}
+}
+
+// ResolveTactics renders a persisted club setup into a playable style key and
+// slot order. Any invalid/missing data falls back to balanced + its default
+// formation (4-3-3) so a malformed row never breaks a matchday.
+func ResolveTactics(t TacticsRow) (style string, order []string) {
+	style = t.Style
+	if !matchsim.IsStyle(style) {
+		style = matchsim.StyleBalanced
+	}
+	formation := t.Formation
+	allowed := AllowedFormations(style)
+	if !containsString(allowed, formation) {
+		formation = allowed[0]
+	}
+	return style, FormationFor(formation)
+}
+
 // SelectStarters fills the formation deterministically from the best available
 // players: exact position matches first, then positional adjacency, then any
 // remaining available player. It is the universal fallback for human-club gaps
 // and the reference selector when no persisted lineup exists.
-func SelectStarters(players []LoadedPlayer) ([]SquadMember, error) {
+func SelectStarters(players []LoadedPlayer, order []string) ([]SquadMember, error) {
 	avail := availablePlayers(players)
-	if len(avail) < len(DefaultFormation()) {
-		return nil, fmt.Errorf("only %d available players for an %d-man XI", len(avail), len(DefaultFormation()))
+	if len(avail) < len(order) {
+		return nil, fmt.Errorf("only %d available players for an %d-man XI", len(avail), len(order))
 	}
 	taken := make(map[uuid.UUID]bool, len(avail))
-	xi := make([]SquadMember, 0, len(DefaultFormation()))
-	for _, slot := range DefaultFormation() {
+	xi := make([]SquadMember, 0, len(order))
+	for _, slot := range order {
 		best := pickBestFor(slot, avail, taken)
 		if best == nil {
 			best = pickBestForAny(avail, taken)
@@ -61,14 +128,14 @@ func SelectStarters(players []LoadedPlayer) ([]SquadMember, error) {
 // weighted random over available candidates for each slot, weight =
 // position-fit × sentiment nudge (an unhappy player starts less, an on-fire
 // one more) — the PM's "random, factoring injury and maybe morale". The draw
-// is deterministic for a fixed (squad, matchSeed, clubID).
-func SelectStartersForAI(players []LoadedPlayer, matchSeed int64, clubID uuid.UUID) []SquadMember {
+// is deterministic for a fixed (squad, matchSeed, clubID, formation order).
+func SelectStartersForAI(players []LoadedPlayer, matchSeed int64, clubID uuid.UUID, order []string) []SquadMember {
 	r := newRNG(matchSeed, hashClub(clubID)^lineupTag)
 	avail := availablePlayers(players)
 
 	taken := make(map[uuid.UUID]bool, len(avail))
-	xi := make([]SquadMember, 0, len(DefaultFormation()))
-	for _, slot := range DefaultFormation() {
+	xi := make([]SquadMember, 0, len(order))
+	for _, slot := range order {
 		cands := candidatesFor(slot, avail, taken)
 		if len(cands) == 0 {
 			cands = remainingAvailable(avail, taken)
@@ -83,7 +150,7 @@ func SelectStartersForAI(players []LoadedPlayer, matchSeed int64, clubID uuid.UU
 	// Defensive refill: a squad that somehow starves a slot mid-loop (e.g.
 	// fewer than 11 candidates) still finishes deterministic — no draw, best
 	// remaining by weight for each open slot.
-	for len(xi) < len(DefaultFormation()) {
+	for len(xi) < len(order) {
 		best := pickBestForAny(avail, taken)
 		if best == nil {
 			break
@@ -97,8 +164,9 @@ func SelectStartersForAI(players []LoadedPlayer, matchSeed int64, clubID uuid.UU
 // SelectStartersWithLineup honours a user-managed club's persisted XI: each
 // slot's chosen player starts when they exist in the squad and are available;
 // unavailable or absent slots fall back through the deterministic selector via
-// the remaining pool.
-func SelectStartersWithLineup(players []LoadedPlayer, lineup map[int]uuid.UUID) ([]SquadMember, error) {
+// the remaining pool. The order maps club.club_lineups.slot i to the slot's
+// required position.
+func SelectStartersWithLineup(players []LoadedPlayer, lineup map[int]uuid.UUID, order []string) ([]SquadMember, error) {
 	byID := make(map[uuid.UUID]LoadedPlayer, len(players))
 	for _, p := range players {
 		byID[p.PlayerID] = p
@@ -106,8 +174,8 @@ func SelectStartersWithLineup(players []LoadedPlayer, lineup map[int]uuid.UUID) 
 	avail := availablePlayers(players)
 
 	taken := make(map[uuid.UUID]bool, len(avail))
-	xi := make([]SquadMember, 0, len(DefaultFormation()))
-	for slot, slotPos := range DefaultFormation() {
+	xi := make([]SquadMember, 0, len(order))
+	for slot, slotPos := range order {
 		if pid, ok := lineup[slot]; ok {
 			if p, ok := byID[pid]; ok && p.Available && !taken[pid] {
 				taken[pid] = true
@@ -309,4 +377,13 @@ func isMidfield(pos string) bool {
 
 func isForward(pos string) bool {
 	return pos == "ST" || pos == "LW" || pos == "RW"
+}
+
+func containsString(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

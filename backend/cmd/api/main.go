@@ -17,8 +17,11 @@ import (
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
 	internalsquad "github.com/touchline/backend/internal/squad"
+	internaltactics "github.com/touchline/backend/internal/tactics"
+	internaltraining "github.com/touchline/backend/internal/training"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
+	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/realtime"
 )
 
@@ -30,6 +33,8 @@ type server struct {
 	bootSvc       *internalbootstrap.Service
 	compSvc       *internalcompetition.Service
 	matchSvc      *internalmatch.Service
+	tacticsSvc    *internaltactics.Service
+	trainingSvc   *internaltraining.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -63,14 +68,21 @@ func main() {
 
 	hub := newRealtimeHub(appOrigin)
 
+	bus, err := eventbus.NewRiverBus(pool, eventbus.RiverBusConfig{})
+	if err != nil {
+		log.Fatalf("init event bus: %v", err)
+	}
+	squadStore := internalsquad.NewStore(pool)
 	s := &server{
 		svc:           internalauth.NewService(pool, jwtCfg),
-		worldSvc:      internalworld.NewService(pool, nil), // bus wiring lands with the S02-03 scheduler
-		mgrSvc:        internalmanager.NewService(pool, nil),
+		worldSvc:      internalworld.NewService(pool, bus),
+		mgrSvc:        internalmanager.NewService(pool, bus),
 		clubSvc:       internalclub.NewService(pool),
-		bootSvc:       internalbootstrap.NewService(pool, nil),                                                        // S03-01: events always land in the log; bus fan-out lands with engine wiring
-		compSvc:       internalcompetition.NewService(pool, nil),                                                      // S04-01: admin-declared per-country leagues
-		matchSvc:      internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool)), // S04-03 feed reads
+		bootSvc:       internalbootstrap.NewService(pool, bus),
+		compSvc:       internalcompetition.NewService(pool, bus),
+		matchSvc:      internalmatch.NewService(pool, bus, squadStore, internalform.NewStore(pool)),
+		tacticsSvc:    internaltactics.NewService(pool, bus, squadStore),
+		trainingSvc:   internaltraining.NewService(pool, bus),
 		jwtCfg:        jwtCfg,
 		pool:          pool,
 		cookiesSecure: os.Getenv("ENV") != "development",

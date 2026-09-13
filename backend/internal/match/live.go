@@ -36,6 +36,7 @@ var (
 	ErrPlayerNotOnPitch   = errors.New("player is not on the pitch")
 	ErrPlayerNotOnBench   = errors.New("player is not on the bench")
 	ErrDuplicateWindowSub = errors.New("a substitution for this window is already set")
+	ErrInvalidTacticStyle = errors.New("tactic change must name one of the approved styles")
 )
 
 // liveCadenceKey is the world_config key carrying the per-minute pacing. It is
@@ -599,12 +600,19 @@ func (s *Service) Substitute(ctx context.Context, matchID, managerID uuid.UUID, 
 }
 
 // TacticChange records one manager tactic change into the ordered input
-// stream. The approved engine block consumes tactic_change inputs for replay
-// but applies no numeric effect (tactical modulation is upstream, S05-01);
-// validation mirrors Substitute minus the window restriction.
+// stream. The engine consumes tactic_change inputs for replay and switches the
+// side's style from that minute (v1.5). The stored payload is normalised to
+// {"club_id", "style"}; the kind is always written as tactic_change —
+// through the API the client submits "tactical_change" (spec S05-01 §2.2) and
+// this service normalises it on the way in. Validation mirrors Substitute
+// minus the window restriction, plus a style-key check.
 func (s *Service) TacticChange(ctx context.Context, matchID, managerID uuid.UUID, minute int, tactic map[string]any) error {
 	if tactic == nil {
 		return fmt.Errorf("tactic change: tactic required")
+	}
+	style, ok := tactic["style"].(string)
+	if !ok || !matchsim.IsStyle(style) {
+		return ErrInvalidTacticStyle
 	}
 	live, err := s.liveMatchContext(ctx, matchID, managerID)
 	if err != nil {
@@ -620,7 +628,7 @@ func (s *Service) TacticChange(ctx context.Context, matchID, managerID uuid.UUID
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"club_id": live.clubID.String(),
-		"tactic":  tactic,
+		"style":   style,
 	})
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO match.match_inputs (match_id, world_id, sequence, minute, kind, payload, created_by_manager_id)
@@ -736,6 +744,11 @@ func (s *Service) loadMatchInputs(ctx context.Context, matchID uuid.UUID) ([]mat
 		var detail map[string]any
 		if err := json.Unmarshal(raw, &detail); err != nil {
 			return nil, fmt.Errorf("load match inputs: payload: %w", err)
+		}
+		// Normalise the "tactical_change" spelling on ingress (defensive:
+		// through the API TacticChange already writes tactic_change).
+		if kind == "tactical_change" {
+			kind = "tactic_change"
 		}
 		clubID, _ := detail["club_id"].(string)
 		out = append(out, matchsim.LiveInput{Minute: minute, ClubID: clubID, Kind: kind, Detail: detail})

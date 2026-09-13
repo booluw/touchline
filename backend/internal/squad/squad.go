@@ -226,7 +226,7 @@ func ComputeMotivation(dna ClubDNAInput, fc FixtureContext, opponentReputationGa
 		}
 	}
 
-	if ambition < t.AmbitionForUpsetMax &&
+	if !fc.IsDeadRubber && ambition < t.AmbitionForUpsetMax &&
 		opponentReputationGap >= t.ReputationGapMin &&
 		newRNG(seed, hashClub(dna.ClubID)).nextFloat() < t.GiantKillingChance {
 		f = t.GrantUnderdogMax
