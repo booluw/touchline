@@ -37,3 +37,9 @@ This review records maintainability, correctness, and expansion risks for the en
 | P0 | Committed state changes can miss asynchronous event delivery permanently | `event-delivery-atomicity.md` |
 | P0 | Aggregate ticks are incorrectly used as a day counter for match scheduling | `world-calendar-tick-semantics.md` |
 | P1 | Competition lifecycle events are not consistently durable or dispatchable | `competition-event-spine.md` |
+| P0 | Outbox repair mistakes normal queue retention for failed delivery | `outbox-repair-redelivery-retention.md` |
+| P1 | API-originated state changes are configured as log-only events | `api-event-publisher-wiring.md` |
+
+## Follow-up review (2026-09-13)
+
+The original three findings were re-checked after S04-04. The transactional producer paths, calendar-day separation, and competition error propagation are now present with focused tests. The two remaining concerns above arise from the completed implementation's repair and process-wiring behavior.
