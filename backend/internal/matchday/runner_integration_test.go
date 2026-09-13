@@ -113,8 +113,8 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 	advance := func(days int) {
 		t.Helper()
 		if _, err := pool.Exec(ctx,
-			`UPDATE world.worlds SET current_tick = current_tick + $1 WHERE id = $2`, days, worldID); err != nil {
-			t.Fatalf("advance tick: %v", err)
+			`UPDATE world.worlds SET current_tick = current_tick + $1, current_day = current_day + $1 WHERE id = $2`, days, worldID); err != nil {
+			t.Fatalf("advance day: %v", err)
 		}
 	}
 
@@ -154,14 +154,14 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 			// Make matchday 2 due (extra scheduled fixture dated today), then
 			// deliver again without advancing the tick.
 			var ref time.Time
-			var tick int64
+			var day int64
 			if err := pool.QueryRow(ctx,
-				`SELECT COALESCE(launched_at, created_at), current_tick FROM world.worlds WHERE id = $1`, worldID).
-				Scan(&ref, &tick); err != nil {
+				`SELECT COALESCE(launched_at, created_at), current_day FROM world.worlds WHERE id = $1`, worldID).
+				Scan(&ref, &day); err != nil {
 				t.Fatalf("world date: %v", err)
 			}
 			y, m, d := ref.UTC().Date()
-			asOf := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(tick))
+			asOf := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(day))
 			var extra uuid.UUID
 			if err := pool.QueryRow(ctx, `
 				INSERT INTO match.fixtures (world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
@@ -217,7 +217,7 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 		FROM match.fixtures f
 		JOIN match.matches m ON m.fixture_id = f.id
 		WHERE f.ht_score IS DISTINCT FROM m.home_score OR f.at_score IS DISTINCT FROM m.away_score`,
-		).Scan(&scoreMismatch); err != nil {
+	).Scan(&scoreMismatch); err != nil {
 		t.Fatalf("score mirror: %v", err)
 	}
 	if scoreMismatch != 0 {

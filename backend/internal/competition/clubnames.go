@@ -115,28 +115,23 @@ func isUniqueViolation(err error) bool {
 	return false
 }
 
-func recordSeedEvent(ctx context.Context, tx pgx.Tx, ev *eventbus.Event) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO world.events
-			(world_id, world_tick, event_type, actor_type, payload, random_seed, occurred_at)
-		VALUES ($1, 0, $2, 'system', $3, $4, now())`,
-		ev.WorldID, ev.EventType, slice(ev.Payload), coalesceSeed(ev.RandomSeed))
-	if err != nil {
-		return fmt.Errorf("record %s event: %w", ev.EventType, err)
+// recordSeedEvent appends one world.events row inside the caller's transaction
+// and, when a bus is wired, enqueues its dispatch job in the same tx (the
+// transactional outbox, OPD-23). It stamps the world's real current_tick
+// (competition events carry the progression tick the seeding/rollover happens
+// on, not a hardcoded 0), so replay and downstream consumers see a truthful
+// timeline. Errors abort the enclosing tx — a swallowed write here previously
+// hid broken dispatch for an entire pyramid.
+func (s *Service) recordSeedEvent(ctx context.Context, tx pgx.Tx, ev *eventbus.Event) error {
+	var tick int64
+	if err := tx.QueryRow(ctx,
+		`SELECT current_tick FROM world.worlds WHERE id = $1`, ev.WorldID).Scan(&tick); err != nil {
+		return fmt.Errorf("load world tick for %s event: %w", ev.EventType, err)
 	}
-	return nil
-}
-
-func slice(b []byte) []byte {
-	if b == nil {
-		return []byte("{}")
+	if ev.ActorType == nil {
+		actor := "system"
+		ev.ActorType = &actor
 	}
-	return b
-}
-
-func coalesceSeed(seed *int64) any {
-	if seed == nil {
-		return int64(0)
-	}
-	return *seed
+	ev.WorldTick = tick
+	return eventbus.WriteTx(ctx, s.bus, tx, ev)
 }

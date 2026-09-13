@@ -61,8 +61,8 @@ func TestRunnerPublishesMatchTickFeed(t *testing.T) {
 	pool, worldID, compSvc := runnerWorld(t)
 	ctx := context.Background()
 	if _, err := pool.Exec(ctx,
-		`UPDATE world.worlds SET current_tick = current_tick + 1 WHERE id = $1`, worldID); err != nil {
-		t.Fatalf("advance tick: %v", err)
+		`UPDATE world.worlds SET current_tick = current_tick + 1, current_day = current_day + 1 WHERE id = $1`, worldID); err != nil {
+		t.Fatalf("advance day: %v", err)
 	}
 
 	matches := match.NewService(pool, nil, squad.NewStore(pool), form.NewStore(pool))

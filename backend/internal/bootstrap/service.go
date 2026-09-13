@@ -106,9 +106,10 @@ type GeneratedClub struct {
 }
 
 // Publishable mirrors the world/manager event sink. May be nil: the event log
-// (world.events) is always written transactionally regardless of the bus.
+// (world.events) is always written transactionally regardless of the bus. Only
+// the tx-scoped outbox method is required (OPD-23).
 type Publishable interface {
-	Publish(ctx context.Context, event *eventbus.Event) error
+	eventbus.Publisher
 }
 
 // Service orchestrates one bootstrap operation.
@@ -183,7 +184,7 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 	registry := playergen.NewNameRegistry()
 	factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(seed))).WithRegistry(registry)
 
-	club, err := GenerateAIClub(ctx, tx, worldID, clubName, clubShortName, "england", factory)
+	club, err := GenerateAIClub(ctx, s.bus, tx, worldID, clubName, clubShortName, "england", factory)
 	if err != nil {
 		return nil, err
 	}
@@ -203,20 +204,14 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 		}),
 	}
 	bootEvent.ActorType = &actor
-	if err := recordEvent(ctx, tx, bootEvent); err != nil {
+	// Record + enqueue in the same tx (the transactional outbox, OPD-23): the
+	// boot is never committed without its dispatch job.
+	if err := recordEvent(ctx, s.bus, tx, bootEvent); err != nil {
 		return nil, fmt.Errorf("record WORLD_BOOTSTRAPPED event: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit bootstrap: %w", err)
-	}
-
-	// Record-then-publish: the log is authoritative; the bus fans out after
-	// commit so a transient publish failure never corrupts generated state.
-	if s.bus != nil {
-		if err := s.bus.Publish(ctx, bootEvent); err != nil {
-			return nil, fmt.Errorf("publish WORLD_BOOTSTRAPPED event: %w", err)
-		}
 	}
 
 	return &Result{
@@ -240,7 +235,7 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 // rng must be seeded deterministically per world/team for replayable output;
 // country is club.clubs.country free text (competition seeding passes the
 // league country).
-func GenerateAIClub(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, clubName, clubShortName, country string, factory *playergen.PlayerFactory) (*GeneratedClub, error) {
+func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worldID uuid.UUID, clubName, clubShortName, country string, factory *playergen.PlayerFactory) (*GeneratedClub, error) {
 	if clubName == "" {
 		return nil, ErrClubNameRequired
 	}
@@ -347,7 +342,7 @@ func GenerateAIClub(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, clubName,
 		}),
 	}
 	clubEvent.ActorType = &actor
-	if err := recordEvent(ctx, tx, clubEvent); err != nil {
+	if err := recordEvent(ctx, pub, tx, clubEvent); err != nil {
 		return nil, fmt.Errorf("record CLUB_CREATED event: %w", err)
 	}
 
@@ -360,16 +355,12 @@ func GenerateAIClub(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, clubName,
 	}, nil
 }
 
-// recordEvent inserts one world.events row inside the caller's transaction and
-// returns it with ID/OccurredAt populated.
-func recordEvent(ctx context.Context, tx pgx.Tx, e *eventbus.Event) error {
+// recordEvent appends one world.events row inside the caller's transaction and,
+// when a publisher is wired, enqueues its dispatch job in the same tx (OPD-23).
+func recordEvent(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, e *eventbus.Event) error {
 	actor := "system"
 	e.ActorType = &actor
-	return tx.QueryRow(ctx, `
-		INSERT INTO world.events (world_id, world_tick, event_type, actor_type, payload, random_seed)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, occurred_at`,
-		e.WorldID, e.WorldTick, e.EventType, actor, e.Payload, e.RandomSeed,
-	).Scan(&e.ID, &e.OccurredAt)
+	return eventbus.WriteTx(ctx, pub, tx, e)
 }
 
 // seed returns a fresh crypto-random seed, or the injected one in tests.

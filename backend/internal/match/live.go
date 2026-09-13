@@ -239,21 +239,13 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 	now := time.Now().UTC()
 	warnings := s.lineupWarningEvents(f, homePlan, awayPlan, now)
 	for _, ev := range warnings {
-		if err := recordEvent(ctx, tx, ev); err != nil {
+		if err := s.recordEvent(ctx, tx, ev); err != nil {
 			return nil, fmt.Errorf("kickoff fixture: %w", err)
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("kickoff fixture: commit: %w", err)
-	}
-	if s.bus != nil {
-		for _, ev := range warnings {
-			if err := s.bus.Publish(ctx, ev); err != nil {
-				// Advisable only: the authoritative log is world.events.
-				return nil, fmt.Errorf("kickoff fixture: publish %s: %w", ev.EventType, err)
-			}
-		}
 	}
 
 	return &LiveSession{
@@ -448,17 +440,12 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 	}
 
 	ev := s.matchPlayedEvent(sess.WorldID, sess.worldTick, sess.FixtureID, sess.MatchID, sess.Seed, res, now)
-	if err := recordEvent(ctx, tx, ev); err != nil {
+	if err := s.recordEvent(ctx, tx, ev); err != nil {
 		return nil, fmt.Errorf("finalize: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("finalize: commit: %w", err)
-	}
-	if s.bus != nil {
-		if err := s.bus.Publish(ctx, ev); err != nil {
-			return nil, fmt.Errorf("finalize: publish %s: %w", ev.EventType, err)
-		}
 	}
 
 	return &MatchFinalized{

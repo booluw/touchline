@@ -303,7 +303,7 @@ func (s *Service) AcceptJobOffer(ctx context.Context, offerID, managerID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	eventID, err := recordEvent(ctx, tx, worldID, "JOB_OFFER_ACCEPTED", "manager", managerID, payload)
+	eventID, err := s.recordEvent(ctx, tx, worldID, "JOB_OFFER_ACCEPTED", "manager", managerID, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,6 @@ func (s *Service) AcceptJobOffer(ctx context.Context, offerID, managerID uuid.UU
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit acceptance: %w", err)
 	}
-	s.publish(ctx, worldID, "JOB_OFFER_ACCEPTED", "manager", managerID, eventID, payload)
 	return &JobOffer{ID: offerID, WorldID: worldID, ClubID: clubID, ClubName: clubName, ManagerID: managerID, Status: "accepted", CreatedAt: createdAt}, nil
 }
 
@@ -417,7 +416,7 @@ func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason
 	if err != nil {
 		return err
 	}
-	eventID, err := recordEvent(ctx, tx, worldID, eventType, actorType, managerID, payload)
+	eventID, err := s.recordEvent(ctx, tx, worldID, eventType, actorType, managerID, payload)
 	if err != nil {
 		return err
 	}
@@ -431,26 +430,27 @@ func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit end-assignment: %w", err)
 	}
-	s.publish(ctx, worldID, eventType, actorType, managerID, eventID, payload)
 	return nil
 }
 
-// publish fans an already-persisted event out to bus subscribers (best-effort;
-// the world.events row is the authoritative log and survives without a bus).
-func (s *Service) publish(ctx context.Context, worldID uuid.UUID, eventType, actorType string, actorID uuid.UUID, eventID *uuid.UUID, payload []byte) {
-	if s.bus == nil || eventID == nil {
-		return
-	}
+// recordEvent appends one world.events row inside the caller's transaction and,
+// when a bus is wired, enqueues its dispatch job in the same tx (the
+// transactional outbox, OPD-23). Dispatch can never be lost between a committed
+// state change and a separate publish call, and publish errors are never
+// silently swallowed — a failure aborts the enclosing tx.
+func (s *Service) recordEvent(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, eventType, actorType string, actorID uuid.UUID, payload []byte) (*uuid.UUID, error) {
 	actor := actorType
-	e := &eventbus.Event{
-		ID:        *eventID,
+	e := eventbus.Event{
 		WorldID:   worldID,
 		EventType: eventType,
 		ActorType: &actor,
 		ActorID:   &actorID,
 		Payload:   payload,
 	}
-	_ = s.bus.Publish(ctx, e) //nolint:errcheck
+	if err := eventbus.WriteTx(ctx, s.bus, tx, &e); err != nil {
+		return nil, fmt.Errorf("record %s event: %w", eventType, err)
+	}
+	return &e.ID, nil
 }
 
 // ListCareerHistory returns the manager's employment history (jobs + notes),
@@ -533,18 +533,6 @@ func playable(ctx context.Context, tx pgx.Tx, worldID uuid.UUID) (bool, error) {
 		return false, err
 	}
 	return status == "active" || status == "open_beta", nil
-}
-
-func recordEvent(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, eventType, actorType string, actorID uuid.UUID, payload []byte) (*uuid.UUID, error) {
-	var id uuid.UUID
-	err := tx.QueryRow(ctx, `
-		INSERT INTO world.events (world_id, world_tick, event_type, actor_type, actor_id, payload)
-		VALUES ($1, 0, $2, $3, $4, $5) RETURNING id`,
-		worldID, eventType, actorType, actorID, payload).Scan(&id)
-	if err != nil {
-		return nil, fmt.Errorf("record %s event: %w", eventType, err)
-	}
-	return &id, nil
 }
 
 func payloadJSON(kv ...any) ([]byte, error) {

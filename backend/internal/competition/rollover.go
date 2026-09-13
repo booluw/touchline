@@ -92,10 +92,14 @@ func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, count
 	for _, a := range actives {
 		l := a.league
 		for _, clubID := range promotedOut[l.ID] {
-			s.emitClubMoved(ctx, tx, worldID, a.season, "CLUB_PROMOTED", clubID, l.PromotesTo)
+			if err := s.emitClubMoved(ctx, tx, worldID, a.season, "CLUB_PROMOTED", clubID, l.PromotesTo); err != nil {
+				return err
+			}
 		}
 		for _, clubID := range relegatedOut[l.ID] {
-			s.emitClubMoved(ctx, tx, worldID, a.season, "CLUB_RELEGATED", clubID, l.RelegatesTo)
+			if err := s.emitClubMoved(ctx, tx, worldID, a.season, "CLUB_RELEGATED", clubID, l.RelegatesTo); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -118,7 +122,9 @@ func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, count
 		if err != nil {
 			return err
 		}
-		s.emitNextSeason(ctx, tx, worldID, l.ID, next, entries, count)
+		if err := s.emitNextSeason(ctx, tx, worldID, l.ID, next, entries, count); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -175,12 +181,12 @@ func (s *Service) lastScheduledDay(ctx context.Context, tx pgx.Tx, leagueID, wor
 	return last, nil
 }
 
-func (s *Service) emitSeasonCompleted(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, season *Season, order []uuid.UUID) {
+func (s *Service) emitSeasonCompleted(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, season *Season, order []uuid.UUID) error {
 	champion := uuid.Nil
 	if len(order) > 0 {
 		champion = order[0]
 	}
-	_ = recordSeedEvent(ctx, tx, &eventbus.Event{
+	return s.recordSeedEvent(ctx, tx, &eventbus.Event{
 		WorldID:   worldID,
 		EventType: "SEASON_COMPLETED",
 		Payload: mustJSON(map[string]any{
@@ -192,7 +198,7 @@ func (s *Service) emitSeasonCompleted(ctx context.Context, tx pgx.Tx, worldID uu
 }
 
 func (s *Service) emitClubMoved(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, season *Season,
-	eventType string, clubID uuid.UUID, dest *uuid.UUID) {
+	eventType string, clubID uuid.UUID, dest *uuid.UUID) error {
 	payload := map[string]any{
 		"club_id":        clubID,
 		"season_id":      season.ID,
@@ -201,7 +207,7 @@ func (s *Service) emitClubMoved(ctx context.Context, tx pgx.Tx, worldID uuid.UUI
 	if dest != nil {
 		payload["destination_id"] = *dest
 	}
-	_ = recordSeedEvent(ctx, tx, &eventbus.Event{
+	return s.recordSeedEvent(ctx, tx, &eventbus.Event{
 		WorldID:   worldID,
 		EventType: eventType,
 		Payload:   mustJSON(payload),
@@ -209,12 +215,12 @@ func (s *Service) emitClubMoved(ctx context.Context, tx pgx.Tx, worldID uuid.UUI
 }
 
 func (s *Service) emitNextSeason(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, leagueID uuid.UUID,
-	season *Season, entries []uuid.UUID, fixtureCount int) {
+	season *Season, entries []uuid.UUID, fixtureCount int) error {
 	clubIDs := make([]string, 0, len(entries))
 	for _, e := range entries {
 		clubIDs = append(clubIDs, e.String())
 	}
-	_ = recordSeedEvent(ctx, tx, &eventbus.Event{
+	return s.recordSeedEvent(ctx, tx, &eventbus.Event{
 		WorldID:   worldID,
 		EventType: "SEASON_CREATED",
 		Payload: mustJSON(map[string]any{

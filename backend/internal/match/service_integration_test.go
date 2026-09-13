@@ -92,7 +92,7 @@ func generateAIClub(t *testing.T, pool *pgxpool.Pool, ctx context.Context, world
 	}
 	factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(seed))).
 		WithRegistry(playergen.NewNameRegistry())
-	club, err := bootstrap.GenerateAIClub(ctx, tx, worldID, name, "", "england", factory)
+	club, err := bootstrap.GenerateAIClub(ctx, nil, tx, worldID, name, "", "england", factory)
 	if err != nil {
 		t.Fatalf("generate %s: %v", name, err)
 	}

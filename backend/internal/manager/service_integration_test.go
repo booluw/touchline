@@ -8,10 +8,29 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/testdb"
+	"github.com/touchline/backend/pkg/eventbus"
 )
+
+// failingBus is an EventBus whose PublishTx always fails — the OPD-23
+// fault-injection stand-in: an enqueue failure inside the state tx must abort
+// the whole state change, not leave a committed mutant behind.
+type failingBus struct{}
+
+func (failingBus) Publish(ctx context.Context, _ *eventbus.Event) error {
+	return errors.New("bus: injectable publish failure")
+}
+
+func (failingBus) PublishTx(context.Context, pgx.Tx, *eventbus.Event) error {
+	return errors.New("bus: injectable publish failure")
+}
+
+func (failingBus) Subscribe(context.Context, string, eventbus.EventHandler) error {
+	return nil
+}
 
 func newTestService(t *testing.T) (*Service, *pgxpool.Pool) {
 	t.Helper()
@@ -295,4 +314,73 @@ func managerIDOf(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID, worldID uui
 		t.Fatalf("load manager id: %v", err)
 	}
 	return id
+}
+
+// TestAcceptJobOfferEventFailureRollsBackState proves the producer-level
+// atomicity contract: when the JOB_OFFER_ACCEPTED enqueue fails, the whole
+// acceptance rolls back — no manager assignment, no club handover, no history
+// row, offer still pending, and no event row left behind.
+func TestAcceptJobOfferEventFailureRollsBackState(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	svc := NewService(pool, failingBus{})
+
+	w := testdb.CreateWorld(t, pool, "atomic-careers")
+	clubID, _ := testdb.CreateClubWithAIManager(t, pool, w)
+	candidate := testdb.CreateUser(t, pool, "atomic@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	managerRow := managerIDOf(t, pool, candidate, w)
+
+	o, err := svc.CreateJobOffer(ctx, clubID, managerRow)
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+
+	if _, err := svc.AcceptJobOffer(ctx, o.ID, managerRow); err == nil {
+		t.Fatal("accept must fail when the event enqueue fails")
+	}
+
+	var mStatus string
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM manager.managers WHERE id = $1`, managerRow).Scan(&mStatus); err != nil {
+		t.Fatalf("load manager: %v", err)
+	}
+	if mStatus == "active" {
+		t.Fatal("manager became active despite the acceptance rolling back")
+	}
+	var (
+		aiControl bool
+		cManager  *uuid.UUID
+	)
+	if err := pool.QueryRow(ctx,
+		`SELECT is_ai_controlled, current_manager_id FROM club.clubs WHERE id = $1`, clubID,
+	).Scan(&aiControl, &cManager); err != nil {
+		t.Fatalf("load club: %v", err)
+	}
+	if !aiControl || cManager == nil {
+		t.Fatal("club lost AI control despite the acceptance rolling back")
+	}
+	var offerStatus string
+	if err := pool.QueryRow(ctx,
+		`SELECT status FROM manager.job_offers WHERE id = $1`, o.ID).Scan(&offerStatus); err != nil {
+		t.Fatalf("load offer: %v", err)
+	}
+	if offerStatus != "proposed" {
+		t.Fatalf("offer status = %q, want still proposed", offerStatus)
+	}
+	var hist int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM manager.manager_history WHERE manager_id = $1`, managerRow).Scan(&hist); err != nil {
+		t.Fatalf("history count: %v", err)
+	}
+	if hist != 0 {
+		t.Fatalf("history rows = %d, want 0 after rolled-back acceptance", hist)
+	}
+	var events int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM world.events WHERE world_id = $1 AND event_type = 'JOB_OFFER_ACCEPTED'`, w).Scan(&events); err != nil {
+		t.Fatalf("event count: %v", err)
+	}
+	if events != 0 {
+		t.Fatalf("JOB_OFFER_ACCEPTED events = %d, want 0 after rollback", events)
+	}
 }

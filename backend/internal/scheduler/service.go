@@ -28,9 +28,10 @@ import (
 var WorldClockGranularities = []string{"hourly", "daily", "weekly", "monthly", "seasonal"}
 
 // Publishable is the event sink used to fan ticks out to subscribers. May be
-// nil: the authoritative log (world.events) is always written regardless.
+// nil: the authoritative log (world.events) is always written regardless. Only
+// the tx-scoped outbox method is required (OPD-23).
 type Publishable interface {
-	Publish(ctx context.Context, event *eventbus.Event) error
+	eventbus.Publisher
 }
 
 // JobScheduler registers cron specs. *cron.Cron satisfies it in production;
@@ -229,9 +230,15 @@ func (s *Service) fireScheduledTick(worldID uuid.UUID, granularity string) {
 }
 
 // FireTick advances a world's monotonic tick counter, records the WORLD_TICK
-// event in the event log, and publishes it to subscribers. Worlds that are no
+// event, and enqueues its dispatch in a single transaction. Worlds that are no
 // longer playable (paused/archived) are a no-op, so a stale cron entry can
 // never tick a world changed underneath the scheduler.
+//
+// Calendar semantics (OPD-24): the monotonic current_tick advances on every
+// granularity for event ordering/audit, but only WORLD_TICK{daily} advances
+// world.worlds.current_day — the canonical in-game day counter the matchday
+// runner derives fixture due-dates from. hourly/weekly/monthly/seasonal never
+// change the calendar.
 func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -251,6 +258,14 @@ func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity s
 		return fmt.Errorf("scheduler: advance world tick: %w", err)
 	}
 
+	if granularity == dailyGranularity {
+		if _, err := tx.Exec(ctx, `
+			UPDATE world.worlds SET current_day = current_day + 1
+			WHERE id = $1 AND status IN ('active', 'open_beta')`, worldID); err != nil {
+			return fmt.Errorf("scheduler: advance world calendar day: %w", err)
+		}
+	}
+
 	payload, _ := json.Marshal(map[string]string{"granularity": granularity})
 	actor := "system"
 	ev := eventbus.Event{
@@ -261,26 +276,21 @@ func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity s
 		ActorType: &actor,
 		Payload:   payload,
 	}
-	err = tx.QueryRow(ctx, `
-		INSERT INTO world.events (id, world_id, world_tick, event_type, actor_type, payload)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING occurred_at`, ev.ID, worldID, tick, "WORLD_TICK", "system", payload,
-	).Scan(&ev.OccurredAt)
-	if err != nil {
-		return fmt.Errorf("scheduler: record WORLD_TICK event: %w", err)
+	// Record + enqueue in the same tx (the transactional outbox): a committed
+	// tick is never left undispatched, even after a crash between commit and a
+	// hypothetical separate publish call.
+	if err := eventbus.WriteTx(ctx, s.bus, tx, &ev); err != nil {
+		return fmt.Errorf("scheduler: write WORLD_TICK event: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("scheduler: commit tick: %w", err)
 	}
-
-	if s.bus == nil {
-		return nil
-	}
-	if err := s.bus.Publish(ctx, &ev); err != nil {
-		return fmt.Errorf("scheduler: publish WORLD_TICK: %w", err)
-	}
 	return nil
 }
+
+// dailyGranularity is the only cadence that advances the world calendar
+// (world.worlds.current_day, OPD-24).
+const dailyGranularity = "daily"
 
 // granularityFromKey maps a world_config cadence key to a tick granularity.
 // Keys follow 'tick.<name>_cadence' (e.g. tick.daily_cadence -> daily). The

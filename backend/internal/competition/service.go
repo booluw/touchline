@@ -185,8 +185,9 @@ type Service struct {
 
 // Publishable mirrors the event sink used elsewhere. May be nil: the event
 // log (world.events) is always written transactionally regardless of the bus.
+// Only the tx-scoped outbox method is required (OPD-23).
 type Publishable interface {
-	Publish(ctx context.Context, event *eventbus.Event) error
+	eventbus.Publisher
 }
 
 // NewService builds the competition service.

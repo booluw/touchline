@@ -132,7 +132,7 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 				return nil, err
 			}
 			clubName := nextClubName(master, stems, suffixes, names)
-			generated, err := bootstrap.GenerateAIClub(ctx, tx, worldID, clubName, short(clubName), country.Name, factory)
+			generated, err := bootstrap.GenerateAIClub(ctx, s.bus, tx, worldID, clubName, short(clubName), country.Name, factory)
 			if err != nil {
 				return nil, fmt.Errorf("generate AI club for %s: %w", l.Name, err)
 			}
@@ -165,7 +165,7 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 				"matchdays":      matchdays,
 			}),
 		}
-		if err := recordSeedEvent(ctx, tx, seedEv); err != nil {
+		if err := s.recordSeedEvent(ctx, tx, seedEv); err != nil {
 			return nil, err
 		}
 
@@ -194,7 +194,7 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 			"leagues":    leagueSummaries(result),
 		}),
 	}
-	if err := recordSeedEvent(ctx, tx, countryEv); err != nil {
+	if err := s.recordSeedEvent(ctx, tx, countryEv); err != nil {
 		return nil, err
 	}
 

@@ -147,9 +147,9 @@ func TestStakesDeadRubberFabricated(t *testing.T) {
 		six, dead  bool
 	}
 	cases := []want{
-		{home: 0, away: 2, six: true, dead: false},  // promotion six-pointer
-		{home: 4, away: 5, six: false, dead: true},  // safe mid-table dead rubber
-		{home: 6, away: 7, six: true, dead: false},  // relegation six-pointer
+		{home: 0, away: 2, six: true, dead: false}, // promotion six-pointer
+		{home: 4, away: 5, six: false, dead: true}, // safe mid-table dead rubber
+		{home: 6, away: 7, six: true, dead: false}, // relegation six-pointer
 	}
 	base := time.Date(2030, 5, 10, 15, 0, 0, 0, time.UTC)
 	for i, c := range cases {
@@ -215,7 +215,7 @@ func genClubs(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worldID uui
 	for i := 0; i < n; i++ {
 		factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(int64(900+i)))).
 			WithRegistry(playergen.NewNameRegistry())
-		club, err := bootstrap.GenerateAIClub(ctx, tx, worldID, fmt.Sprintf("Fabricated FC %d", i+1), "", "england", factory)
+		club, err := bootstrap.GenerateAIClub(ctx, nil, tx, worldID, fmt.Sprintf("Fabricated FC %d", i+1), "", "england", factory)
 		if err != nil {
 			t.Fatalf("generate club %d: %v", i, err)
 		}

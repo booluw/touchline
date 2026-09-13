@@ -25,10 +25,13 @@ var (
 // defaultConfigKeys are the runtime cadences seeded at launch (S02-03 reads
 // these exact keys). Values are JSON-configurable per world, never compiled-in
 // — the scheduling contract lives in the DB, not the code.
+// tick.daily_cadence defaults to every 8 hours (00/08/16 UTC), i.e. ~3 in-game
+// days per real day: each WORLD_TICK{daily} emission advances the calendar by
+// exactly one game day (world.worlds.current_day, OPD-24).
 var defaultConfigKeys = map[string]any{
 	"tick.match_cadence":    "20s",
 	"tick.hourly_cadence":   "0 * * * *",
-	"tick.daily_cadence":    "0 0 * * *",
+	"tick.daily_cadence":    "0 */8 * * *",
 	"tick.weekly_cadence":   "0 0 * * 0",
 	"tick.monthly_cadence":  "0 0 1 * *",
 	"tick.seasonal_cadence": "0 0 1 1 *",
@@ -36,9 +39,10 @@ var defaultConfigKeys = map[string]any{
 
 // Publishable is the event sink used to fan lifecycle events out to
 // subscribers (S02-03 onwards). May be nil: the authoritative log (world.events)
-// is always written transactionally regardless of the bus.
+// is always written transactionally regardless of the bus. Only the tx-scoped
+// outbox method is required (OPD-23).
 type Publishable interface {
-	Publish(ctx context.Context, event *eventbus.Event) error
+	eventbus.Publisher
 }
 
 // Service owns the world lifecycle contract (S02-02): worlds are created in
@@ -68,8 +72,14 @@ func (s *Service) CreateWorld(ctx context.Context, name string) (*World, error) 
 		return nil, fmt.Errorf("world name is required")
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin create world tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	w := &World{}
-	err := s.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`INSERT INTO world.worlds (name, status) VALUES ($1, 'provisioning') RETURNING id, name, status, created_at`,
 		name,
 	).Scan(&w.ID, &w.Name, &w.Status, &w.CreatedAt)
@@ -80,8 +90,11 @@ func (s *Service) CreateWorld(ctx context.Context, name string) (*World, error) 
 		return nil, fmt.Errorf("create world: %w", err)
 	}
 
-	if err := s.writeEvent(ctx, w.ID, "WORLD_CREATED", systemActor, 0, nil); err != nil {
+	if err := s.record(ctx, tx, w.ID, "WORLD_CREATED", 0, nil); err != nil {
 		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create world: %w", err)
 	}
 	return w, nil
 }
@@ -165,10 +178,11 @@ func (s *Service) SetStatus(ctx context.Context, id uuid.UUID, to string) (*Worl
 	var (
 		from       string
 		launchedAt any
+		tick       int64
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT status, launched_at FROM world.worlds WHERE id = $1 FOR UPDATE`, id,
-	).Scan(&from, &launchedAt)
+		`SELECT status, launched_at, current_tick FROM world.worlds WHERE id = $1 FOR UPDATE`, id,
+	).Scan(&from, &launchedAt, &tick)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWorldNotFound
 	}
@@ -214,43 +228,34 @@ func (s *Service) SetStatus(ctx context.Context, id uuid.UUID, to string) (*Worl
 	}
 
 	eventType := "WORLD_" + toUpper(to)
+	// Record + enqueue inside the state tx (the transactional outbox, OPD-23):
+	// a committed transition is never left without its dispatch job.
+	if err := s.record(ctx, tx, id, eventType, tick, nil); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit transition: %w", err)
-	}
-
-	if err := s.writeEvent(ctx, id, eventType, systemActor, 0, nil); err != nil {
-		return nil, err
 	}
 	return s.GetWorld(ctx, id)
 }
 
-func (s *Service) writeEvent(ctx context.Context, worldID uuid.UUID, eventType, actorType string, worldTick int64, payload map[string]any) error {
+// record appends a lifecycle event to world.events and (when a bus is wired)
+// enqueues its dispatch, all inside tx, stamping the world's current tick.
+func (s *Service) record(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, eventType string, worldTick int64, payload map[string]any) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal event payload: %w", err)
 	}
-
-	var e eventbus.Event
-	err = s.pool.QueryRow(ctx, `
-		INSERT INTO world.events (world_id, world_tick, event_type, actor_type, payload)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id, occurred_at`,
-		worldID, worldTick, eventType, actorType, raw,
-	).Scan(&e.ID, &e.OccurredAt)
-	if err != nil {
+	actor := systemActor
+	e := eventbus.Event{
+		WorldID:   worldID,
+		WorldTick: worldTick,
+		EventType: eventType,
+		ActorType: &actor,
+		Payload:   raw,
+	}
+	if err := eventbus.WriteTx(ctx, s.bus, tx, &e); err != nil {
 		return fmt.Errorf("record %s event: %w", eventType, err)
-	}
-	e.WorldID = worldID
-	e.WorldTick = worldTick
-	e.EventType = eventType
-	e.Payload = raw
-	actor := actorType
-	e.ActorType = &actor
-
-	if s.bus == nil {
-		return nil
-	}
-	if err := s.bus.Publish(ctx, &e); err != nil {
-		return fmt.Errorf("publish %s event: %w", eventType, err)
 	}
 	return nil
 }

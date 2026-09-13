@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/touchline/backend/internal/competition"
+	"github.com/touchline/backend/internal/eventoutbox"
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/matchday"
@@ -128,6 +129,38 @@ func main() {
 		log.Fatalf("start worker: %v", err)
 	}
 	log.Printf("worker started; consuming events from the event bus")
+
+	// Outbox repair sweep (OPD-23): every committed world.events row must have a
+	// dispatch job. Producers write both in one tx, so this is defensive; it
+	// re-enqueues any row that slipped through (pre-migration history, pruned
+	// jobs, restored DBs) by its original id — idempotent via river's
+	// unique-by-args. event_repair_sweep is the operational signal.
+	go func() {
+		sweepInterval := 60 * time.Second
+		if raw := os.Getenv("EVENT_REPAIR_SWEEP_INTERVAL"); raw != "" {
+			if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+				sweepInterval = d
+			}
+		}
+		ticker := time.NewTicker(sweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				rep, err := eventoutbox.Sweep(ctx, pool, bus, eventoutbox.Options{})
+				if err != nil && !errors.Is(err, context.Canceled) {
+					log.Printf("event_repair_sweep: error: %v", err)
+					continue
+				}
+				if rep.Repaired > 0 || rep.OldestLagSeconds > 0 {
+					log.Printf("event_repair_sweep scanned=%d repaired=%d oldest_lag_s=%.0f",
+						rep.Scanned, rep.Repaired, rep.OldestLagSeconds)
+				}
+			}
+		}
+	}()
 
 	// Startup sweep (OPD-21 rehydration): a pod restart during a live match
 	// resumes every in-progress match of every world. The claim guard plus the

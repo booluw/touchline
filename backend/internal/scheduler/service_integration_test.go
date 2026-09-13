@@ -89,6 +89,16 @@ func currentTick(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) int64 {
 	return n
 }
 
+func currentDay(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) int64 {
+	t.Helper()
+	var n int64
+	if err := pool.QueryRow(context.Background(),
+		`SELECT current_day FROM world.worlds WHERE id = $1`, worldID).Scan(&n); err != nil {
+		t.Fatalf("load current_day: %v", err)
+	}
+	return n
+}
+
 // TestConfiguredDailyTickArrivesAtWorker proves AC5 end to end: a configured
 // daily cadence is read from world_config, registered by the scheduler, fired,
 // and delivered through the real river round-trip to a worker handler for the
@@ -229,6 +239,11 @@ func TestFireTickAdvancesCounterAndRecordsPayload(t *testing.T) {
 	if tick := currentTick(t, pool, w.ID); tick != 2 {
 		t.Fatalf("current_tick = %d, want 2 after two ticks", tick)
 	}
+	// OPD-24: only the daily emission advances the calendar. The weekly tick
+	// raises the monotonic counter but must not move the fixture date.
+	if day := currentDay(t, pool, w.ID); day != 1 {
+		t.Fatalf("current_day = %d, want 1 after one daily tick (weekly is rate-only)", day)
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT world_tick, event_type, actor_type, payload::text
@@ -301,5 +316,44 @@ func TestFireTickSkipsNonPlayableWorlds(t *testing.T) {
 	// A world that never existed is also a no-op rather than an error.
 	if err := clock.FireTick(ctx, uuid.New(), "daily"); err != nil {
 		t.Fatalf("fire tick on missing world: %v", err)
+	}
+}
+
+// TestFireTickAdvancesCalendarOnlyOnDaily is the OPD-24 granularity-neutrality
+// gate: with the full default granularity set enabled, only the daily emission
+// moves current_day (and therefore the fixture calendar). hourly/weekly/monthly/
+// seasonal raise current_tick for ordering but never change matches-due.
+func TestFireTickAdvancesCalendarOnlyOnDaily(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t)
+
+	worldSvc := internalworld.NewService(pool, nil)
+	clock := NewService(pool, nil)
+
+	w, err := worldSvc.CreateWorld(ctx, "calendar-neutrality")
+	if err != nil {
+		t.Fatalf("create world: %v", err)
+	}
+	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
+		t.Fatalf("launch world: %v", err)
+	}
+
+	for _, g := range []string{"hourly", "weekly", "monthly", "seasonal"} {
+		if err := clock.FireTick(ctx, w.ID, g); err != nil {
+			t.Fatalf("fire %s: %v", g, err)
+		}
+		if day := currentDay(t, pool, w.ID); day != 0 {
+			t.Fatalf("%s emission advanced current_day to %d (want 0)", g, day)
+		}
+	}
+
+	if err := clock.FireTick(ctx, w.ID, "daily"); err != nil {
+		t.Fatalf("fire daily: %v", err)
+	}
+	if day := currentDay(t, pool, w.ID); day != 1 {
+		t.Fatalf("daily emission advanced current_day to %d, want 1", day)
+	}
+	if tick := currentTick(t, pool, w.ID); tick != 5 {
+		t.Fatalf("current_tick = %d, want 5 (all emissions count for ordering)", tick)
 	}
 }

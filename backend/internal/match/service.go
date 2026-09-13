@@ -38,9 +38,10 @@ const (
 )
 
 // Publishable is the event sink (may be nil; the world.events log is the
-// authoritative store and is always written regardless).
+// authoritative store and is always written regardless). Only the tx-scoped
+// outbox method is required (OPD-23).
 type Publishable interface {
-	Publish(ctx context.Context, event *eventbus.Event) error
+	eventbus.Publisher
 }
 
 // StandingsContext lets PlayFixture ask the competition layer about
@@ -156,21 +157,13 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 
 	evs := s.worldEvents(f, homePlan, awayPlan, matchID, seed, res, now)
 	for _, ev := range evs {
-		if err := recordEvent(ctx, tx, ev); err != nil {
+		if err := s.recordEvent(ctx, tx, ev); err != nil {
 			return nil, fmt.Errorf("play fixture: %w", err)
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("play fixture: commit: %w", err)
-	}
-
-	for _, ev := range evs {
-		if s.bus != nil {
-			if err := s.bus.Publish(ctx, ev); err != nil {
-				return nil, fmt.Errorf("play fixture: publish %s: %w", ev.EventType, err)
-			}
-		}
 	}
 
 	return &MatchResult{
@@ -691,16 +684,12 @@ func (s *Service) matchPlayedEvent(worldID uuid.UUID, worldTick int64, fixtureID
 	}
 }
 
-func recordEvent(ctx context.Context, tx pgx.Tx, ev *eventbus.Event) error {
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO world.events
-			(id, world_id, world_tick, event_type, actor_type, actor_id, payload, explanation, random_seed)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		ev.ID, ev.WorldID, ev.WorldTick, ev.EventType, ev.ActorType, ev.ActorID,
-		ev.Payload, ev.Explanation, ev.RandomSeed); err != nil {
-		return fmt.Errorf("record world event: %w", err)
-	}
-	return nil
+// recordEvent appends one world.events row inside the caller's transaction and,
+// when a bus is wired, enqueues its dispatch job in the same tx (the
+// transactional outbox, OPD-23): a committed match can never be left
+// undispatched, and publish failures abort the enclosing tx.
+func (s *Service) recordEvent(ctx context.Context, tx pgx.Tx, ev *eventbus.Event) error {
+	return eventbus.WriteTx(ctx, s.bus, tx, ev)
 }
 
 // loadEvents reads the full typed, player-cast feed for a match.

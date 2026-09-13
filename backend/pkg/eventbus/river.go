@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -87,17 +86,11 @@ func NewRiverBus(db *pgxpool.Pool, cfg RiverBusConfig) (*RiverBus, error) {
 // single transaction. A nil or zero ID gets a fresh UUID; a zero OccurredAt
 // defaults to now.
 func (b *RiverBus) Publish(ctx context.Context, event *Event) error {
+	if err := validateBus(b); err != nil {
+		return err
+	}
 	if event == nil {
 		return errors.New("eventbus: publish nil event")
-	}
-	if b.db == nil {
-		return errors.New("eventbus: bus has no database pool")
-	}
-	if event.ID == uuid.Nil {
-		event.ID = uuid.New()
-	}
-	if event.OccurredAt.IsZero() {
-		event.OccurredAt = time.Now()
 	}
 
 	tx, err := b.db.Begin(ctx)
@@ -106,35 +99,85 @@ func (b *RiverBus) Publish(ctx context.Context, event *Event) error {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // commit decides the outcome
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO world.events
-			(id, world_id, world_tick, event_type, actor_type, actor_id,
-			 payload, explanation, caused_by_event_id, random_seed, occurred_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (id) DO NOTHING`,
-		event.ID,
-		event.WorldID,
-		event.WorldTick,
-		event.EventType,
-		event.ActorType,
-		event.ActorID,
-		json.RawMessage(event.Payload),
-		jsonOrNil(event.Explanation),
-		event.CausedByEventID,
-		event.RandomSeed,
-		event.OccurredAt,
-	); err != nil {
-		return fmt.Errorf("eventbus: insert event log: %w", err)
-	}
-
-	// EventJobArgs.InsertOpts makes the enqueue unique by args; passing nil opts
-	// lets the args' own InsertOpts apply.
-	if _, err := b.client.InsertTx(ctx, tx, &EventJobArgs{EventID: event.ID}, nil); err != nil {
-		return fmt.Errorf("eventbus: enqueue event job: %w", err)
+	if err := b.PublishTx(ctx, tx, event); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("eventbus: commit event: %w", err)
+	}
+	return nil
+}
+
+// PublishTx enqueues an event inside the caller's open transaction: it appends
+// the world.events row and inserts the touchline_event river job in the SAME
+// tx, so the record and its dispatch commit (or roll back) atomically with the
+// producer's business state. Producers pass the tx that already mutates state —
+// a committed event row can never exist without a queueable job (OPD-23). A
+// nil or zero ID gets a fresh UUID; a zero OccurredAt defaults to now, both
+// written back onto the in-memory event.
+func (b *RiverBus) PublishTx(ctx context.Context, tx pgx.Tx, event *Event) error {
+	if err := validateBus(b); err != nil {
+		return err
+	}
+	if event == nil {
+		return errors.New("eventbus: publish nil event")
+	}
+
+	normalizeEvent(event)
+
+	// Duplicate publishes of the same ID are idempotent: the log row is a no-op
+	// and the unique-by-args river job is deduped, so a re-publish (e.g. the
+	// repair sweep) never double-dispatches.
+	if err := RecordTx(ctx, tx, event); err != nil {
+		return fmt.Errorf("eventbus: insert event log: %w", err)
+	}
+
+	// Passing nil opts lets EventJobArgs' own InsertOpts (unique by args) apply.
+	if _, err := b.client.InsertTx(ctx, tx, &EventJobArgs{EventID: event.ID}, nil); err != nil {
+		return fmt.Errorf("eventbus: enqueue event job: %w", err)
+	}
+	return nil
+}
+
+// EnqueueRepair re-enqueues a touchline_event job for an event that is already
+// persisted in world.events but has never been dispatched (the repair sweep's
+// recreation path, OPD-23). It is idempotent: the job is unique by args, so an
+// event that already has a dispatch record is a no-op, and a second repair pass
+// never enqueues a duplicate. The event row is not rewritten here — it already
+// exists and is authoritative.
+func (b *RiverBus) EnqueueRepair(ctx context.Context, eventID uuid.UUID) error {
+	if err := validateBus(b); err != nil {
+		return err
+	}
+	// Never enqueue a job whose event row is missing: the worker would retry a
+	// load failure forever. The sweep and any manual repair see the truth.
+	var exists bool
+	if err := b.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM world.events WHERE id = $1)`, eventID).Scan(&exists); err != nil {
+		return fmt.Errorf("eventbus: check event %s: %w", eventID, err)
+	}
+	if !exists {
+		return fmt.Errorf("eventbus: cannot repair: event %s not found in world.events", eventID)
+	}
+	tx, err := b.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("eventbus: begin repair tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // commit decides the outcome
+
+	if _, err := b.client.InsertTx(ctx, tx, &EventJobArgs{EventID: eventID}, nil); err != nil {
+		return fmt.Errorf("eventbus: enqueue repair job: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("eventbus: commit repair tx: %w", err)
+	}
+	return nil
+}
+
+func validateBus(b *RiverBus) error {
+	if b == nil || b.db == nil || b.client == nil {
+		return errors.New("eventbus: bus has no database pool")
 	}
 	return nil
 }
@@ -163,9 +206,9 @@ func (b *RiverBus) Stop(ctx context.Context) error {
 // propagates to the river worker as a retryable failure.
 func (b *RiverBus) loadEvent(ctx context.Context, id uuid.UUID) (*Event, error) {
 	var (
-		e            Event
-		payload      json.RawMessage
-		explanation  json.RawMessage
+		e           Event
+		payload     json.RawMessage
+		explanation json.RawMessage
 	)
 	err := b.db.QueryRow(ctx, `
 		SELECT id, world_id, world_tick, event_type, actor_type, actor_id,
@@ -185,11 +228,4 @@ func (b *RiverBus) loadEvent(ctx context.Context, id uuid.UUID) (*Event, error) 
 	e.Payload = payload
 	e.Explanation = explanation
 	return &e, nil
-}
-
-func jsonOrNil(b []byte) json.RawMessage {
-	if len(b) == 0 {
-		return nil
-	}
-	return json.RawMessage(b)
 }

@@ -319,18 +319,20 @@ func (r *Runner) WorldsWithLiveMatches(ctx context.Context) ([]uuid.UUID, error)
 	return out, nil
 }
 
-// worldDate maps the world's monotonically increasing tick to its calendar
-// date: launch day (launched_at or created_at) plus one day per tick. The
-// scheduler advances the tick on the world's configured daily cadence, so the
-// mapping is deterministic and wall-clock-independent for tests.
+// worldDate maps the world's calendar day counter to its date: launch day
+// (launched_at or created_at) plus current_day days. only WORLD_TICK{daily}
+// emissions advance current_day (the scheduler does both in one tx, OPD-24), so
+// hourly/weekly/monthly/seasonal ticks never move the fixture calendar and the
+// mapping is deterministic and wall-clock-independent for tests. current_tick
+// stays the monotonic ordering counter and is deliberately not used here.
 func (r *Runner) worldDate(ctx context.Context, worldID uuid.UUID) (time.Time, error) {
 	var (
-		ref  time.Time
-		tick int64
+		ref time.Time
+		day int64
 	)
 	err := r.pool.QueryRow(ctx, `
-		SELECT COALESCE(launched_at, created_at), current_tick
-		FROM world.worlds WHERE id = $1`, worldID).Scan(&ref, &tick)
+		SELECT COALESCE(launched_at, created_at), current_day
+		FROM world.worlds WHERE id = $1`, worldID).Scan(&ref, &day)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, fmt.Errorf("matchday: world %s not found", worldID)
 	}
@@ -338,7 +340,7 @@ func (r *Runner) worldDate(ctx context.Context, worldID uuid.UUID) (time.Time, e
 		return time.Time{}, fmt.Errorf("matchday: world date: %w", err)
 	}
 	y, m, d := ref.UTC().Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(tick)), nil
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(day)), nil
 }
 
 // dueMatchdays lists the distinct matchdays with scheduled fixtures whose
