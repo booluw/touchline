@@ -56,6 +56,11 @@ const (
 	// granularity. It is the S02-04 proof event that exercises the full
 	// worker -> Redis -> API pod -> browser seam.
 	EventWorldTick = "world_tick"
+	// EventMatchTick is published by the matchday runner (S04-03) once per
+	// paced simulated minute and again at full time. Its payload carries the
+	// minute's persisted match_events rows plus the server-computed scoreline;
+	// the client renders it verbatim and never derives outcomes.
+	EventMatchTick = "match_tick"
 	// EventPong answers a client ping.
 	EventPong = "pong"
 	// EventError reports a client-side protocol problem (unknown type, malformed

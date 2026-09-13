@@ -89,6 +89,11 @@ func (s *server) router() *gin.Engine {
 		api.GET("/competitions/:id", s.requireAuth, s.handleGetCompetition)
 		api.GET("/competitions/:id/fixtures", s.requireAuth, s.handleGetFixtures)
 		api.GET("/competitions/:id/standings", s.requireAuth, s.handleGetStandings)
+
+		// Match feed (S04-03): the fixture header for the match screen and
+		// the persisted event feed. Both are world-scoped to the caller.
+		api.GET("/fixtures/:id", s.requireAuth, s.handleGetFixture)
+		api.GET("/matches/:id/events", s.requireAuth, s.handleGetMatchEvents)
 	}
 
 	return r

@@ -63,6 +63,7 @@ func main() {
 	matches := match.NewService(pool, bus, squad.NewStore(pool), form.NewStore(pool))
 	compSvc := competition.NewService(pool, bus)
 	matchdayRunner := matchday.NewRunner(pool, matches, compSvc)
+	matchdayRunner.WithRealtime(realtimeBroker)
 
 	runnerEnabled, releaseRunnerLock, err := acquireMatchRunnerLock(ctx, pool)
 	if err != nil {

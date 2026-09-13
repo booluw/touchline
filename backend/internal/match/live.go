@@ -67,27 +67,27 @@ type simInputs struct {
 // nextMinute is the next simulated minute to produce (1..90); a value above 90
 // means full time was reached and Finalize is pending.
 type LiveSession struct {
-	MatchID    uuid.UUID
-	FixtureID  uuid.UUID
-	WorldID    uuid.UUID
-	HomeClubID uuid.UUID
-	AwayClubID uuid.UUID
+	MatchID     uuid.UUID
+	FixtureID   uuid.UUID
+	WorldID     uuid.UUID
+	HomeClubID  uuid.UUID
+	AwayClubID  uuid.UUID
 	ScheduledAt time.Time
-	Seed       int64
-	Home       matchsim.Team
-	Away       matchsim.Team
-	homeXI     []squad.SquadMember
-	awayXI     []squad.SquadMember
-	homeBench  []squad.SquadMember
-	awayBench  []squad.SquadMember
-	homeTaker  *squad.SquadMember
-	awayTaker  *squad.SquadMember
-	formHome   form.FormState
-	formAway   form.FormState
-	fc         squad.FixtureContext
-	worldTick  int64
-	pacing     time.Duration
-	nextMinute int
+	Seed        int64
+	Home        matchsim.Team
+	Away        matchsim.Team
+	homeXI      []squad.SquadMember
+	awayXI      []squad.SquadMember
+	homeBench   []squad.SquadMember
+	awayBench   []squad.SquadMember
+	homeTaker   *squad.SquadMember
+	awayTaker   *squad.SquadMember
+	formHome    form.FormState
+	formAway    form.FormState
+	fc          squad.FixtureContext
+	worldTick   int64
+	pacing      time.Duration
+	nextMinute  int
 }
 
 // NextMinute reports the next simulated minute (1..90; >90 = full time).
@@ -257,27 +257,27 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 	}
 
 	return &LiveSession{
-		MatchID:    matchID,
-		FixtureID:  fixtureID,
-		WorldID:    f.WorldID,
-		HomeClubID: f.HomeClubID,
-		AwayClubID: f.AwayClubID,
+		MatchID:     matchID,
+		FixtureID:   fixtureID,
+		WorldID:     f.WorldID,
+		HomeClubID:  f.HomeClubID,
+		AwayClubID:  f.AwayClubID,
 		ScheduledAt: f.ScheduledAt,
-		Seed:       seed,
-		Home:       homePlan.team,
-		Away:       awayPlan.team,
-		homeXI:     homePlan.xi,
-		awayXI:     awayPlan.xi,
-		homeBench:  homePlan.bench,
-		awayBench:  awayPlan.bench,
-		homeTaker:  homePlan.taker,
-		awayTaker:  awayPlan.taker,
-		formHome:   homePlan.formState,
-		formAway:   awayPlan.formState,
-		fc:         fc,
-		worldTick:  tick,
-		pacing:     pacing,
-		nextMinute: 1,
+		Seed:        seed,
+		Home:        homePlan.team,
+		Away:        awayPlan.team,
+		homeXI:      homePlan.xi,
+		awayXI:      awayPlan.xi,
+		homeBench:   homePlan.bench,
+		awayBench:   awayPlan.bench,
+		homeTaker:   homePlan.taker,
+		awayTaker:   awayPlan.taker,
+		formHome:    homePlan.formState,
+		formAway:    awayPlan.formState,
+		fc:          fc,
+		worldTick:   tick,
+		pacing:      pacing,
+		nextMinute:  1,
 	}, nil
 }
 
@@ -308,16 +308,18 @@ func (s *Service) resolveMatchPacing(ctx context.Context, worldID uuid.UUID) tim
 // minute <= m). The casters are rebuilt from scratch every call and only the
 // tail beyond the last persisted sequence is written, so a crash can never
 // persist half a minute (one minute per tx) and the identical match resumes
-// from seed + snapshot + inputs. finished reports that full time was reached.
-func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) (bool, error) {
+// from seed + snapshot + inputs. The returned rows are exactly the persisted
+// feed for this minute (S04-03 publishes them as the live match_tick
+// envelope). finished reports that full time was reached.
+func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEventRow, bool, error) {
 	if sess.nextMinute > 90 {
-		return true, nil
+		return nil, true, nil
 	}
 	m := sess.nextMinute
 
 	inputs, err := s.loadMatchInputs(ctx, sess.MatchID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	res := matchsim.Simulate(matchsim.Options{
 		Seed:       sess.Seed,
@@ -339,7 +341,7 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) (bool, erro
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("pace minute: begin: %w", err)
+		return nil, false, fmt.Errorf("pace minute: begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
@@ -348,33 +350,34 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) (bool, erro
 	var lockID uuid.UUID
 	if err := tx.QueryRow(ctx,
 		`SELECT id FROM match.matches WHERE id = $1 FOR UPDATE`, sess.MatchID).Scan(&lockID); err != nil {
-		return false, fmt.Errorf("pace minute: lock match: %w", err)
+		return nil, false, fmt.Errorf("pace minute: lock match: %w", err)
 	}
 	var lastSeq int
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(MAX(sequence), 0) FROM match.match_events WHERE match_id = $1`, sess.MatchID).
 		Scan(&lastSeq); err != nil {
-		return false, fmt.Errorf("pace minute: last sequence: %w", err)
+		return nil, false, fmt.Errorf("pace minute: last sequence: %w", err)
 	}
 
 	casters := map[string]*sideCaster{
 		sess.HomeClubID.String(): newSideCaster(sess.Seed, sess.HomeClubID, sess.homeXI, sess.homeBench, sess.homeTaker),
 		sess.AwayClubID.String(): newSideCaster(sess.Seed, sess.AwayClubID, sess.awayXI, sess.awayBench, sess.awayTaker),
 	}
-	if err := persistEventsWithCasting(ctx, tx, sess.MatchID, minuteEvents, casters, lastSeq, forcedSubs(inputsUpTo(inputs, m))); err != nil {
-		return false, fmt.Errorf("pace minute: %w", err)
+	rows, err := persistEventsWithCasting(ctx, tx, sess.MatchID, minuteEvents, casters, lastSeq, forcedSubs(inputsUpTo(inputs, m)))
+	if err != nil {
+		return nil, false, fmt.Errorf("pace minute: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE match.matches SET current_minute = $2 WHERE id = $1`, sess.MatchID, m); err != nil {
-		return false, fmt.Errorf("pace minute: advance clock: %w", err)
+		return nil, false, fmt.Errorf("pace minute: advance clock: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("pace minute: commit: %w", err)
+		return nil, false, fmt.Errorf("pace minute: commit: %w", err)
 	}
 
 	sess.nextMinute = m + 1
-	return sess.nextMinute > 90, nil
+	return rows, sess.nextMinute > 90, nil
 }
 
 // Finalize completes a fully-paced live match: it re-runs the engine over the
@@ -484,10 +487,10 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 	for rows.Next() {
 		var (
 			fixtureID, matchID, homeClubID, awayClubID, worldIDX uuid.UUID
-			scheduledAt                                           time.Time
-			seed                                                  int64
-			raw                                                   []byte
-			pacingMillis, currentMinute                                 int
+			scheduledAt                                          time.Time
+			seed                                                 int64
+			raw                                                  []byte
+			pacingMillis, currentMinute                          int
 		)
 		if err := rows.Scan(&fixtureID, &worldIDX, &homeClubID, &awayClubID, &scheduledAt,
 			&matchID, &seed, &raw, &pacingMillis, &currentMinute); err != nil {
@@ -502,27 +505,27 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 			pacing = time.Duration(pacingMillis) * time.Millisecond
 		}
 		out = append(out, &LiveSession{
-			MatchID:    matchID,
-			FixtureID:  fixtureID,
-			WorldID:    worldIDX,
-			HomeClubID: homeClubID,
-			AwayClubID: awayClubID,
+			MatchID:     matchID,
+			FixtureID:   fixtureID,
+			WorldID:     worldIDX,
+			HomeClubID:  homeClubID,
+			AwayClubID:  awayClubID,
 			ScheduledAt: scheduledAt,
-			Seed:       seed,
-			Home:       snap.HomeTeam,
-			Away:       snap.AwayTeam,
-			homeXI:     snap.HomeXI,
-			awayXI:     snap.AwayXI,
-			homeBench:  snap.HomeBench,
-			awayBench:  snap.AwayBench,
-			homeTaker:  snap.HomeTaker,
-			awayTaker:  snap.AwayTaker,
-			formHome:   snap.FormHome,
-			formAway:   snap.FormAway,
-			fc:         snap.FixtureContext,
-			worldTick:  snap.WorldTick,
-pacing:     pacing,
-		nextMinute: currentMinute + 1,
+			Seed:        seed,
+			Home:        snap.HomeTeam,
+			Away:        snap.AwayTeam,
+			homeXI:      snap.HomeXI,
+			awayXI:      snap.AwayXI,
+			homeBench:   snap.HomeBench,
+			awayBench:   snap.AwayBench,
+			homeTaker:   snap.HomeTaker,
+			awayTaker:   snap.AwayTaker,
+			formHome:    snap.FormHome,
+			formAway:    snap.FormAway,
+			fc:          snap.FixtureContext,
+			worldTick:   snap.WorldTick,
+			pacing:      pacing,
+			nextMinute:  currentMinute + 1,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -654,11 +657,11 @@ type liveMatchContext struct {
 
 func (s *Service) liveMatchContext(ctx context.Context, matchID, managerID uuid.UUID) (*liveMatchContext, error) {
 	var (
-		status string
-		worldID uuid.UUID
-		home, away uuid.UUID
+		status        string
+		worldID       uuid.UUID
+		home, away    uuid.UUID
 		currentMinute int
-		raw    []byte
+		raw           []byte
 	)
 	err := s.pool.QueryRow(ctx, `
 		SELECT m.status, m.world_id, f.home_club_id, f.away_club_id, m.current_minute, m.sim_inputs

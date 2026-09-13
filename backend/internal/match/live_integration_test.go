@@ -66,7 +66,7 @@ func paceToFullTime(t *testing.T, svc *Service, sess *LiveSession) {
 	ctx := context.Background()
 	maxTries := 100
 	for sess.NextMinute() <= 90 && maxTries > 0 {
-		if _, err := svc.PaceMinute(ctx, sess); err != nil {
+		if _, _, err := svc.PaceMinute(ctx, sess); err != nil {
 			t.Fatalf("pace: %v", err)
 		}
 		maxTries--
@@ -176,7 +176,7 @@ func TestLiveSubstitutionReplay(t *testing.T) {
 	ctx := context.Background()
 	// Pace to just before the 60' window, then submit the manager's choice.
 	for sess.NextMinute() < 60 {
-		if _, err := svc.PaceMinute(ctx, sess); err != nil {
+		if _, _, err := svc.PaceMinute(ctx, sess); err != nil {
 			t.Fatalf("pace to 60: %v", err)
 		}
 	}
@@ -226,7 +226,7 @@ func TestRehydrateMidMatch(t *testing.T) {
 	ctx := context.Background()
 
 	for sess.NextMinute() <= 30 {
-		if _, err := svc.PaceMinute(ctx, sess); err != nil {
+		if _, _, err := svc.PaceMinute(ctx, sess); err != nil {
 			t.Fatalf("pace to 30: %v", err)
 		}
 	}
@@ -340,7 +340,7 @@ func TestSubstituteValidation(t *testing.T) {
 
 	// After the minute has passed (pace to 61'), a 60' input is closed.
 	for sess.NextMinute() < 61 {
-		if _, err := svc.PaceMinute(ctx, sess); err != nil {
+		if _, _, err := svc.PaceMinute(ctx, sess); err != nil {
 			t.Fatalf("pace: %v", err)
 		}
 	}
@@ -357,7 +357,7 @@ func TestTacticChangeRecorded(t *testing.T) {
 
 	// Past minutes are closed to new inputs...
 	for sess.NextMinute() < 21 {
-		if _, err := svc.PaceMinute(ctx, sess); err != nil {
+		if _, _, err := svc.PaceMinute(ctx, sess); err != nil {
 			t.Fatalf("pace to 20: %v", err)
 		}
 	}

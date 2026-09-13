@@ -24,6 +24,13 @@ const (
 	fixtureCompleted = "completed"
 )
 
+// Match statuses (match.matches.status).
+const (
+	MatchStatusPending    = "pending"
+	MatchStatusInProgress = "in_progress"
+	MatchStatusCompleted  = "completed"
+)
+
 // Event types for the world.events log emitted by PlayFixture.
 const (
 	EventLineupWarning = "LINEUP_WARNING"
@@ -134,7 +141,7 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 		f.HomeClubID.String(): newSideCaster(seed, f.HomeClubID, homePlan.xi, homePlan.bench, homePlan.taker),
 		f.AwayClubID.String(): newSideCaster(seed, f.AwayClubID, awayPlan.xi, awayPlan.bench, awayPlan.taker),
 	}
-	if err := persistEventsWithCasting(ctx, tx, matchID, res.Events, casters, 0, nil); err != nil {
+	if _, err := persistEventsWithCasting(ctx, tx, matchID, res.Events, casters, 0, nil); err != nil {
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}
 
@@ -267,7 +274,8 @@ func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, 
 	return id, now, err
 }
 
-func persistEventsWithCasting(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, casters map[string]*sideCaster, startSeq int, forced map[int]map[string]forcedSub) error {
+func persistEventsWithCasting(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, casters map[string]*sideCaster, startSeq int, forced map[int]map[string]forcedSub) ([]*MatchEventRow, error) {
+	out := make([]*MatchEventRow, 0, len(evs))
 	for i, ev := range evs {
 		var playerID, relatedID *uuid.UUID
 		if c, ok := casters[ev.ClubID]; ok {
@@ -299,17 +307,29 @@ func persistEventsWithCasting(ctx context.Context, tx pgx.Tx, matchID uuid.UUID,
 		}
 		detail, err := eventDetail(ev)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		rowID := uuid.New()
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO match.match_events
-				(match_id, sequence, minute, event_type, club_id, player_id, related_player_id, detail)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			matchID, ev.Sequence, ev.Minute, ev.Type, clubID, playerID, relatedID, detail); err != nil {
-			return fmt.Errorf("insert match event: %w", err)
+				(id, match_id, sequence, minute, event_type, club_id, player_id, related_player_id, detail)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			rowID, matchID, ev.Sequence, ev.Minute, ev.Type, clubID, playerID, relatedID, detail); err != nil {
+			return nil, fmt.Errorf("insert match event: %w", err)
 		}
+		out = append(out, &MatchEventRow{
+			ID:              rowID,
+			MatchID:         matchID,
+			Sequence:        ev.Sequence,
+			Minute:          ev.Minute,
+			Type:            ev.Type,
+			ClubID:          clubID,
+			PlayerID:        playerID,
+			RelatedPlayerID: relatedID,
+			Detail:          append(json.RawMessage(nil), detail...),
+		})
 	}
-	return nil
+	return out, nil
 }
 
 // eventDetail renders the engine's commentary as the match_events.detail JSONB
@@ -724,15 +744,56 @@ func (s *Service) GetFixture(ctx context.Context, id uuid.UUID) (*Fixture, error
 	defer conn.Release()
 	f := &Fixture{}
 	err = conn.QueryRow(ctx, `
-		SELECT id, world_id, competition_id, home_club_id, away_club_id,
-		       COALESCE(matchday, 0), scheduled_at, status
-		FROM match.fixtures WHERE id = $1`, id).
+		SELECT f.id, f.world_id, f.competition_id, f.home_club_id, f.away_club_id,
+		       COALESCE(f.matchday, 0), f.scheduled_at, f.status,
+		       hc.name, ac.name
+		FROM match.fixtures f
+		JOIN club.clubs hc ON hc.id = f.home_club_id
+		JOIN club.clubs ac ON ac.id = f.away_club_id
+		WHERE f.id = $1`, id).
 		Scan(&f.ID, &f.WorldID, &f.CompetitionID, &f.HomeClubID, &f.AwayClubID,
-			&f.Matchday, &f.ScheduledAt, &f.Status)
+			&f.Matchday, &f.ScheduledAt, &f.Status,
+			&f.HomeClubName, &f.AwayClubName)
 	if err != nil {
 		return nil, err
 	}
 	return f, nil
+}
+
+// GetFixtureMatch aggregates the match-screen header for a fixture: the fixture
+// with club names plus its match view (status, live clock, server-computed
+// scoreline), or a nil Match when the fixture has not kicked off yet.
+func (s *Service) GetFixtureMatch(ctx context.Context, fixtureID uuid.UUID) (*FixtureMatch, error) {
+	f, err := s.GetFixture(ctx, fixtureID)
+	if err != nil {
+		return nil, err
+	}
+	out := &FixtureMatch{Fixture: f}
+
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+	mv := &MatchView{}
+	err = conn.QueryRow(ctx, `
+		SELECT id, status, COALESCE(current_minute, 0), COALESCE(home_score, 0), COALESCE(away_score, 0)
+		FROM match.matches WHERE fixture_id = $1`, fixtureID).
+		Scan(&mv.ID, &mv.Status, &mv.Minute, &mv.HomeScore, &mv.AwayScore)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return out, nil // not kicked off yet
+		}
+		return nil, err
+	}
+	home, away, err := s.ScoreLine(ctx, mv.ID)
+	if err != nil {
+		return nil, err
+	}
+	mv.HomeScore = home
+	mv.AwayScore = away
+	out.Match = mv
+	return out, nil
 }
 
 // GetMatchEvents returns a completed match's full cast feed.
@@ -762,4 +823,78 @@ func (s *Service) GetMatchEvents(ctx context.Context, matchID uuid.UUID) ([]*Mat
 		return nil, err
 	}
 	return out, nil
+}
+
+// GetMatch returns a match row by id for the read/feed path.
+func (s *Service) GetMatch(ctx context.Context, id uuid.UUID) (*Match, error) {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+	m := &Match{}
+	err = conn.QueryRow(ctx, `
+		SELECT id, fixture_id, world_id, seed, engine_version,
+		       COALESCE(home_score, 0), COALESCE(away_score, 0), status, ended_at
+		FROM match.matches WHERE id = $1`, id).
+		Scan(&m.ID, &m.FixtureID, &m.WorldID, &m.Seed, &m.EngineVersion,
+			&m.HomeGoals, &m.AwayGoals, &m.Status, &m.EndedAt)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// CurrentMinute reads the live clock of a match (0 when never paced).
+func (s *Service) CurrentMinute(ctx context.Context, matchID uuid.UUID) (int, error) {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Release()
+	var minute int
+	if err := conn.QueryRow(ctx,
+		`SELECT COALESCE(current_minute, 0) FROM match.matches WHERE id = $1`, matchID).
+		Scan(&minute); err != nil {
+		return 0, err
+	}
+	return minute, nil
+}
+
+// ScoreLine returns a match's goal tally server-side. While live it aggregates
+// goal/penalty events from the same persisted feed the whole pipeline serves,
+// so the client never computes outcomes; at completion the stamped match
+// scorelines are returned directly. On sql.ErrNoRows the match does not exist.
+func (s *Service) ScoreLine(ctx context.Context, matchID uuid.UUID) (int, int, error) {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer conn.Release()
+
+	var status string
+	var stampedHome, stampedAway int
+	if err := conn.QueryRow(ctx, `
+		SELECT status, COALESCE(home_score, 0), COALESCE(away_score, 0)
+		FROM match.matches WHERE id = $1`, matchID).
+		Scan(&status, &stampedHome, &stampedAway); err != nil {
+		return 0, 0, err
+	}
+	if status == "completed" {
+		return stampedHome, stampedAway, nil
+	}
+
+	var home, away int
+	if err := conn.QueryRow(ctx, `
+		SELECT
+			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type IN ('goal', 'penalty_scored')),
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type IN ('goal', 'penalty_scored'))
+		FROM match.matches m
+		JOIN match.fixtures f ON f.id = m.fixture_id
+		LEFT JOIN match.match_events me ON me.match_id = m.id
+		WHERE m.id = $1
+		GROUP BY m.id`, matchID).Scan(&home, &away); err != nil {
+		return 0, 0, err
+	}
+	return home, away, nil
 }

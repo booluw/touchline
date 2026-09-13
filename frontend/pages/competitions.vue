@@ -123,9 +123,11 @@ onMounted(() => { load().catch(() => { error.value = 'Could not load your compet
           </div>
           <ul v-if="fixtures.length" class="divide-y divide-slate-700">
             <li v-for="f in fixtures" :key="f.id" class="py-2 flex items-center gap-3 text-sm">
-              <span class="text-right flex-1">{{ f.home_club_name ?? f.home_club_id.slice(0, 8) }}</span>
-              <span class="bg-slate-900 border border-slate-600 rounded px-3 py-1 font-bold text-center w-20">{{ score(f) }}</span>
-              <span class="flex-1">{{ f.away_club_name ?? f.away_club_id.slice(0, 8) }}</span>
+              <NuxtLink :to="`/matches/${f.id}`" class="flex-1 flex items-center gap-3 group">
+                <span class="text-right flex-1">{{ f.home_club_name ?? f.home_club_id.slice(0, 8) }}</span>
+                <span class="bg-slate-900 border border-slate-600 rounded px-3 py-1 font-bold text-center w-20 group-hover:border-indigo-500">{{ score(f) }}</span>
+                <span class="flex-1">{{ f.away_club_name ?? f.away_club_id.slice(0, 8) }}</span>
+              </NuxtLink>
               <span class="w-24 text-right" :class="f.status === 'completed' ? 'text-emerald-400' : 'text-slate-500'">
                 {{ f.status }}
               </span>

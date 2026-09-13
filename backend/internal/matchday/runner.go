@@ -22,6 +22,7 @@ import (
 
 	"github.com/touchline/backend/internal/competition"
 	"github.com/touchline/backend/internal/match"
+	"github.com/touchline/backend/pkg/realtime"
 )
 
 // Runner owns one world's kickoff + live pacing lifecycle.
@@ -29,6 +30,7 @@ type Runner struct {
 	pool    *pgxpool.Pool
 	matches *match.Service
 	comp    *competition.Service
+	rt      realtime.Broker // optional S04-03 live feed fan-out; nil disables pushes
 
 	mu     sync.Mutex
 	active map[uuid.UUID]bool // worlds with a live pacing goroutine already running
@@ -40,6 +42,14 @@ type Runner struct {
 func NewRunner(pool *pgxpool.Pool, matches *match.Service, comp *competition.Service) *Runner {
 	matches.WithStandingsContext(comp)
 	return &Runner{pool: pool, matches: matches, comp: comp, active: make(map[uuid.UUID]bool)}
+}
+
+// WithRealtime installs the realtime broker the pacing loop pushes match_tick
+// envelopes through (S04-03). It mirrors the optional-fan-out pattern of
+// WithStandingsContext: nil (the default) publishes nothing.
+func (r *Runner) WithRealtime(rt realtime.Broker) *Runner {
+	r.rt = rt
+	return r
 }
 
 // Summary reports one KickoffDue pass.
@@ -120,12 +130,19 @@ func (r *Runner) RunLive(ctx context.Context, worldID uuid.UUID) error {
 		pending := 0
 		minPacing := time.Duration(1<<63 - 1)
 		for _, sess := range sessions {
-			finished, err := r.matches.PaceMinute(ctx, sess)
+			rows, finished, err := r.matches.PaceMinute(ctx, sess)
 			if err != nil {
 				return err
 			}
+			if err := r.publishTick(ctx, sess, sess.NextMinute()-1, rows); err != nil {
+				return err
+			}
 			if finished {
-				if _, err := r.matches.Finalize(ctx, sess); err != nil {
+				res, err := r.matches.Finalize(ctx, sess)
+				if err != nil {
+					return err
+				}
+				if err := r.publishCompleted(ctx, sess, res); err != nil {
 					return err
 				}
 				continue
@@ -142,6 +159,57 @@ func (r *Runner) RunLive(ctx context.Context, worldID uuid.UUID) error {
 			return err
 		}
 	}
+}
+
+// publishTick pushes one match_tick envelope for a paced minute (S04-03).
+// rows are exactly the match_events persisted this minute; the scoreline is
+// computed by the match service so the client never derives it. Silent minutes
+// still emit a tick so the live clock advances. Nil broker = no-op.
+func (r *Runner) publishTick(ctx context.Context, sess *match.LiveSession, minute int, rows []*match.MatchEventRow) error {
+	if r.rt == nil {
+		return nil
+	}
+	home, away, err := r.matches.ScoreLine(ctx, sess.MatchID)
+	if err != nil {
+		return fmt.Errorf("match tick: scoreline: %w", err)
+	}
+	ev := realtime.MustEvent(realtime.EventMatchTick, sess.WorldID, match.MatchTickPayload{
+		MatchID:    sess.MatchID,
+		FixtureID:  sess.FixtureID,
+		Minute:     minute,
+		Status:     match.MatchStatusInProgress,
+		HomeClubID: sess.HomeClubID,
+		AwayClubID: sess.AwayClubID,
+		HomeScore:  home,
+		AwayScore:  away,
+		Events:     rows,
+	})
+	if err := r.rt.Publish(ctx, ev); err != nil {
+		return fmt.Errorf("match tick: publish: %w", err)
+	}
+	return nil
+}
+
+// publishCompleted emits the final match_tick after Finalize so clients see the
+// authoritative completion (final score, status completed).
+func (r *Runner) publishCompleted(ctx context.Context, sess *match.LiveSession, res *match.MatchFinalized) error {
+	if r.rt == nil {
+		return nil
+	}
+	ev := realtime.MustEvent(realtime.EventMatchTick, sess.WorldID, match.MatchTickPayload{
+		MatchID:    sess.MatchID,
+		FixtureID:  sess.FixtureID,
+		Minute:     90,
+		Status:     match.MatchStatusCompleted,
+		HomeClubID: sess.HomeClubID,
+		AwayClubID: sess.AwayClubID,
+		HomeScore:  res.HomeGoals,
+		AwayScore:  res.AwayGoals,
+	})
+	if err := r.rt.Publish(ctx, ev); err != nil {
+		return fmt.Errorf("match tick: publish completion: %w", err)
+	}
+	return nil
 }
 
 // reconcileApplied closes the crash window between Finalize (match + fixture
@@ -162,12 +230,12 @@ func (r *Runner) reconcileApplied(ctx context.Context, worldID uuid.UUID) error 
 	}
 	defer rows.Close()
 	var out []struct {
-		id       uuid.UUID
+		id         uuid.UUID
 		home, away int
 	}
 	for rows.Next() {
 		var f struct {
-			id       uuid.UUID
+			id         uuid.UUID
 			home, away int
 		}
 		if err := rows.Scan(&f.id, &f.home, &f.away); err != nil {

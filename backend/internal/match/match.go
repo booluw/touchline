@@ -9,6 +9,7 @@
 package match
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,22 +21,41 @@ type Fixture struct {
 	WorldID       uuid.UUID `json:"world_id"`
 	CompetitionID uuid.UUID `json:"competition_id"`
 	HomeClubID    uuid.UUID `json:"home_club_id"`
+	HomeClubName  string    `json:"home_club_name"`
 	AwayClubID    uuid.UUID `json:"away_club_id"`
+	AwayClubName  string    `json:"away_club_name"`
 	Matchday      int       `json:"matchday,omitempty"`
 	ScheduledAt   time.Time `json:"scheduled_at"`
 	Status        string    `json:"status"`
 }
 
+// MatchView is the match-screen header: the live clock, status, and the
+// server-computed scoreline (never derived by the client).
+type MatchView struct {
+	ID        uuid.UUID `json:"id"`
+	Status    string    `json:"status"`
+	Minute    int       `json:"minute"`
+	HomeScore int       `json:"home_score"`
+	AwayScore int       `json:"away_score"`
+}
+
+// FixtureMatch is the aggregated GET /api/fixtures/:id response: the fixture
+// header plus its match (nil until the fixture has kicked off).
+type FixtureMatch struct {
+	Fixture *Fixture   `json:"fixture"`
+	Match   *MatchView `json:"match,omitempty"`
+}
+
 // Match mirrors match.matches. Seed is the deterministic replay input.
 type Match struct {
-	ID            uuid.UUID `json:"id"`
-	FixtureID     uuid.UUID `json:"fixture_id"`
-	WorldID       uuid.UUID `json:"world_id"`
-	Seed          int64     `json:"seed"`
-	EngineVersion string    `json:"engine_version"`
-	HomeGoals     int       `json:"home_goals"`
-	AwayGoals     int       `json:"away_goals"`
-	Status        string    `json:"status"`
+	ID            uuid.UUID  `json:"id"`
+	FixtureID     uuid.UUID  `json:"fixture_id"`
+	WorldID       uuid.UUID  `json:"world_id"`
+	Seed          int64      `json:"seed"`
+	EngineVersion string     `json:"engine_version"`
+	HomeGoals     int        `json:"home_goals"`
+	AwayGoals     int        `json:"away_goals"`
+	Status        string     `json:"status"`
 	EndedAt       *time.Time `json:"ended_at,omitempty"`
 }
 
@@ -43,19 +63,36 @@ type Match struct {
 // pointers are nil when the engine event was a bare marker (kickoff/half/full
 // time) or carried no castable player.
 type MatchEventRow struct {
-	ID              uuid.UUID  `json:"id"`
-	MatchID         uuid.UUID  `json:"match_id"`
-	Sequence        int        `json:"sequence"`
-	Minute          int        `json:"minute"`
-	Type            string     `json:"type"`
-	ClubID          *uuid.UUID `json:"club_id,omitempty"`
-	PlayerID        *uuid.UUID `json:"player_id,omitempty"`
-	RelatedPlayerID *uuid.UUID `json:"related_player_id,omitempty"`
-	Detail          []byte     `json:"detail,omitempty"` // JSONB commentary
+	ID              uuid.UUID       `json:"id"`
+	MatchID         uuid.UUID       `json:"match_id"`
+	Sequence        int             `json:"sequence"`
+	Minute          int             `json:"minute"`
+	Type            string          `json:"type"`
+	ClubID          *uuid.UUID      `json:"club_id,omitempty"`
+	PlayerID        *uuid.UUID      `json:"player_id,omitempty"`
+	RelatedPlayerID *uuid.UUID      `json:"related_player_id,omitempty"`
+	Detail          json.RawMessage `json:"detail,omitempty"` // JSONB commentary
 }
 
 // MatchResult is the full outcome of one fixture.
 type MatchResult struct {
-	Match  *Match          `json:"match"`
+	Match  *Match           `json:"match"`
 	Events []*MatchEventRow `json:"events"`
+}
+
+// MatchTickPayload is the match_tick realtime envelope payload (S04-03). It
+// mirrors the persisted match_events rows plus the server-computed scoreline
+// and clock, so the client renders the feed verbatim and never calculates
+// outcomes. Events may be empty for silent minutes (the tick still advances
+// the clock and scoreline).
+type MatchTickPayload struct {
+	MatchID    uuid.UUID        `json:"match_id"`
+	FixtureID  uuid.UUID        `json:"fixture_id"`
+	Minute     int              `json:"minute"`
+	Status     string           `json:"status"`
+	HomeClubID uuid.UUID        `json:"home_club_id"`
+	AwayClubID uuid.UUID        `json:"away_club_id"`
+	HomeScore  int              `json:"home_score"`
+	AwayScore  int              `json:"away_score"`
+	Events     []*MatchEventRow `json:"events,omitempty"`
 }
