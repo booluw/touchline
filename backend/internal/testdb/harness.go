@@ -80,6 +80,7 @@ func New(t *testing.T) *pgxpool.Pool {
 		`TRUNCATE TABLE river.river_job, world.events, world.worlds, world.countries,
 		 manager.managers, manager.manager_history, manager.job_security_snapshots,
 		 manager.manager_reputation_events, manager.job_offers, club.clubs, club.club_dna,
+		 club.form_state,
 		 competition.competitions, competition.seasons, competition.standings,
 		 match.fixtures, match.matches, match.match_events, match.match_inputs,
 		 auth.sessions, auth.users RESTART IDENTITY CASCADE`); err != nil {

@@ -14,6 +14,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/internal/competition"
+	"github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/match"
+	"github.com/touchline/backend/internal/matchday"
+	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/realtime"
 )
@@ -47,6 +52,14 @@ func main() {
 	realtimeBroker := newRealtimeBroker(ctx)
 	defer realtimeBroker.Close()
 
+	// S04-02: the deterministic match engine consumes the daily world tick.
+	// Each daily tick advances the world's due matchdays and applies the
+	// simulated results to the standings. RunDue is idempotent, so river's
+	// at-least-once redelivery cannot double-advance a season.
+	matches := match.NewService(pool, bus, squad.NewStore(pool), form.NewStore(pool))
+	compSvc := competition.NewService(pool, bus)
+	matchdayRunner := matchday.NewRunner(pool, matches, compSvc)
+
 	// Phase 0 handler: proves the publish -> queue -> consume round-trip and
 	// demonstrates granularity-aware dispatch (S02-03). Engine handlers consume
 	// only the WORLD_TICK granularities they own by inspecting payload
@@ -71,6 +84,20 @@ func main() {
 		if err := realtimeBroker.Publish(ctx, tickEvent); err != nil {
 			log.Printf("world tick %s: realtime push failed (%v)", ev.ID, err)
 			return nil
+		}
+
+		if payload.Granularity == "daily" {
+			sum, err := matchdayRunner.RunDue(ctx, ev.WorldID)
+			if err != nil {
+				log.Printf("world %s daily tick: advance matchday: %v", ev.WorldID, err)
+				// Returning the error lets river retry the job; RunDue only
+				// touches fixtures still scheduled, so redelivery is safe.
+				return err
+			}
+			if sum != nil && (sum.Played > 0 || sum.Applied > 0) {
+				log.Printf("world %s daily tick: advanced %d matchday(s), played %d, applied %d",
+					ev.WorldID, sum.Matchdays, sum.Played, sum.Applied)
+			}
 		}
 		return nil
 	}); err != nil {

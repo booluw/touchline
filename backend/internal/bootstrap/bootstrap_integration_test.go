@@ -64,6 +64,29 @@ func TestBootstrapWorldCreatesMaterial(t *testing.T) {
 		t.Fatalf("players = %d, want %d", playersCount, SquadSizeDefault)
 	}
 
+	// Every squad member carries a full football profile: attribute EAV,
+	// hidden traits, personality, and the initial emotional state — all
+	// persisted inside the same club-creation transaction.
+	var attrRows, traitsRows, personalityRows, emotionRows int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM player.player_attributes pa JOIN player.players p ON p.id = pa.player_id WHERE p.club_id = $1),
+			(SELECT COUNT(*) FROM player.player_hidden_traits ht JOIN player.players p ON p.id = ht.player_id WHERE p.club_id = $1),
+			(SELECT COUNT(*) FROM player.player_personality pp JOIN player.players p ON p.id = pp.player_id WHERE p.club_id = $1),
+			(SELECT COUNT(*) FROM player.player_emotional_states es JOIN player.players p ON p.id = es.player_id WHERE p.club_id = $1)`,
+		res.ClubID).Scan(&attrRows, &traitsRows, &personalityRows, &emotionRows); err != nil {
+		t.Fatalf("count profile rows: %v", err)
+	}
+	if traitsRows != SquadSizeDefault || personalityRows != SquadSizeDefault || emotionRows != SquadSizeDefault {
+		t.Fatalf("profile rows: traits %d personality %d emotions %d, want %d each",
+			traitsRows, personalityRows, emotionRows, SquadSizeDefault)
+	}
+	// Outfielders carry 5 categories (~37 keys), GKs carry 5 with the
+	// goalkeeping set instead of technical: 24 players is easily 100+ rows.
+	if attrRows < SquadSizeDefault*4 {
+		t.Fatalf("attribute rows %d, want >= %d", attrRows, SquadSizeDefault*4)
+	}
+
 	var people int
 	if err := pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM person.people WHERE world_id = $1`, w.ID,

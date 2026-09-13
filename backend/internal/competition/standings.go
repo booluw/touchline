@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -92,8 +93,11 @@ func (s *Service) GetStandings(ctx context.Context, leagueID uuid.UUID, worldID 
 
 // ApplyResult records a completed match and rolls the competition forward.
 // The fixture row is locked so concurrent submissions cannot double-apply;
-// once the last fixture of every league in the country has a result, the
-// promotion/relegation cascade runs in the same transaction.
+// the guard is the fixture's standings_applied_at (a fixture simulated by the
+// deterministic match engine is already 'completed' when it reaches here —
+// the standings write is still first-and-only). Once the last fixture of
+// every league in the country has a result, the promotion/relegation cascade
+// runs in the same transaction.
 func (s *Service) ApplyResult(ctx context.Context, fixtureID uuid.UUID, homeScore, awayScore int) error {
 	if homeScore < 0 || awayScore < 0 {
 		return ErrInvalidResult
@@ -107,21 +111,24 @@ func (s *Service) ApplyResult(ctx context.Context, fixtureID uuid.UUID, homeScor
 
 	var (
 		worldID, countryID, leagueID, homeClub, awayClub uuid.UUID
-		status                                           string
+		applied                                          *time.Time
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT f.world_id, c.country_id, f.competition_id, f.home_club_id, f.away_club_id, f.status
+		SELECT f.world_id, c.country_id, f.competition_id, f.home_club_id, f.away_club_id, f.standings_applied_at
 		FROM match.fixtures f
 		JOIN competition.competitions c ON c.id = f.competition_id
 		WHERE f.id = $1 FOR UPDATE OF f`, fixtureID).
-		Scan(&worldID, &countryID, &leagueID, &homeClub, &awayClub, &status)
+		Scan(&worldID, &countryID, &leagueID, &homeClub, &awayClub, &applied)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrFixtureNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("lock fixture: %w", err)
 	}
-	if status == "completed" {
+	// A fixture's simulation may already be complete (the deterministic engine
+	// marks it 'completed' when PlayFixture runs); the standings write is
+	// single-application, guarded by when it was applied.
+	if applied != nil {
 		return ErrResultAlreadyApplied
 	}
 
@@ -132,7 +139,7 @@ func (s *Service) ApplyResult(ctx context.Context, fixtureID uuid.UUID, homeScor
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE match.fixtures SET status = 'completed', completed_at = now(),
-			ht_score = $2, at_score = $3
+			ht_score = $2, at_score = $3, standings_applied_at = now()
 		WHERE id = $1`, fixtureID, homeScore, awayScore); err != nil {
 		return fmt.Errorf("complete fixture: %w", err)
 	}
@@ -218,13 +225,17 @@ func (s *Service) activeSeason(ctx context.Context, tx pgx.Tx, leagueID, worldID
 
 // maybeCompleteSeason checks whether every league in the country is done for
 // its current season; when all are, seasons get completed and the cascade runs.
+// The completeness signal is the standings write, not the fixture status: the
+// deterministic engine marks fixtures 'completed' the moment it simulates
+// them, before the competition layer applies their results, so a full matchday
+// must be fully recorded before the cascade may run.
 func (s *Service) maybeCompleteSeason(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.UUID) error {
 	var remaining int
 	if err := tx.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM match.fixtures f
 		JOIN competition.competitions c ON c.id = f.competition_id
-		WHERE c.country_id = $1 AND f.world_id = $2 AND f.status <> 'completed'`,
+		WHERE c.country_id = $1 AND f.world_id = $2 AND f.standings_applied_at IS NULL`,
 		countryID, worldID).Scan(&remaining); err != nil {
 		return fmt.Errorf("count remaining fixtures: %w", err)
 	}

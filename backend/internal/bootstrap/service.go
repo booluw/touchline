@@ -314,6 +314,12 @@ func GenerateAIClub(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, clubName,
 			return nil, fmt.Errorf("insert player: %w", err)
 		}
 
+		// The player's football data (attribute EAV + traits + personality +
+		// initial emotional state) lands in the SAME club-creation tx.
+		if err := persistPlayerProfile(ctx, tx, playerID, gp); err != nil {
+			return nil, err
+		}
+
 		players = append(players, SquadPlayer{
 			ID:              playerID,
 			PersonID:        personID,

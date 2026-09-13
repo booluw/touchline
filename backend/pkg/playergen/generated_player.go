@@ -12,10 +12,51 @@ const (
 	maxAge = 33
 )
 
+// HiddenTraits is the persistence-free view of player.player_hidden_traits.
+// Every field is [1,100]; PotentialCeilingLocked reflects
+// potential_ceiling_locked, which is false at creation (potential still flexes).
+type HiddenTraits struct {
+	Potential            int
+	Consistency          int
+	InjurySusceptibility int
+	Adaptability         int
+	Professionalism      int
+	Ambition             int
+	Loyalty              int
+	Temperament          int
+	PressureHandling     int
+	LearningSpeed        int
+}
+
+// Personality is the persistence-free view of player.player_personality.
+// Fields mirror the hidden-trait names where the schema overlaps so the two
+// rows never disagree at creation.
+type Personality struct {
+	Professionalism     int
+	Ambition            int
+	Loyalty             int
+	Ego                 int
+	Sociability         int
+	Adaptability        int
+	Patience            int
+	Leadership          int
+	EmotionalVolatility int
+}
+
+// EmotionalState is the initial, pre-season emotional-state row: one neutral
+// 'content' state with a raw intensity. Matchday sentiment derivation is the
+// orchestration layer's job (internal/squad consumes the signed magnitude).
+type EmotionalState struct {
+	State     string
+	Cause     string
+	Intensity int
+}
+
 // GeneratedPlayer is the pure, persistence-free output of player generation.
 //
 // The team-creation / first-season flow — not this package — is responsible
-// for persisting a GeneratedPlayer as person.people + player.players rows.
+// for persisting a GeneratedPlayer as person.people + player.players rows, the
+// attribute EAV, hidden traits, personality, and the initial emotional state.
 // Age is expressed in years rather than a date because the creating layer
 // derives date_of_birth from the world's season reference date.
 type GeneratedPlayer struct {
@@ -25,4 +66,13 @@ type GeneratedPlayer struct {
 	NationalityCode string
 	Age             int
 	PrimaryPosition string
+
+	// Attributes is key → value for the player's position-relevant categories
+	// only (no goalkeeping keys for outfielders, no technical keys for GKs).
+	Attributes map[string]int
+	// HiddenTraits and Personality drive the per-player engine modifiers.
+	HiddenTraits HiddenTraits
+	Personality  Personality
+	// EmotionalState seeds the player's emotional row.
+	EmotionalState EmotionalState
 }

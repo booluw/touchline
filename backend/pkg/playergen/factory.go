@@ -60,13 +60,20 @@ func (f *PlayerFactory) CreatePlayer() (*GeneratedPlayer, error) {
 			return nil, err
 		}
 		if f.registry == nil || f.registry.Reserve(code, first, last) {
+			pos := ValidPositions[f.rng.Intn(len(ValidPositions))]
+			age := minAge + f.rng.Intn(maxAge-minAge+1)
+			ht, personality := generateTraitsAndPersonality(f.rng, age)
 			return &GeneratedPlayer{
 				FirstName:       first,
 				LastName:        last,
 				DisplayName:     displayName(first, last),
 				NationalityCode: code,
-				Age:             minAge + f.rng.Intn(maxAge-minAge+1),
-				PrimaryPosition: ValidPositions[f.rng.Intn(len(ValidPositions))],
+				Age:             age,
+				PrimaryPosition: pos,
+				Attributes:      generateAttributes(f.rng, pos),
+				HiddenTraits:    ht,
+				Personality:     personality,
+				EmotionalState:  neutralEmotionalState(f.rng),
 			}, nil
 		}
 	}
