@@ -119,6 +119,31 @@ func (c *sideCaster) resolve(ev matchsim.MatchEvent) (*uuid.UUID, *uuid.UUID) {
 	}
 }
 
+// resolveForced maps an engine substitution event using the manager's exact
+// chosen players (S04-02/OPD-21): subIn comes on, subOut leaves. It replaces
+// the bench draw so the feed links the players the manager actually picked.
+// Conveniently mirrors resolve's return convention: primary = the player
+// coming ON, related = the player replaced.
+func (c *sideCaster) resolveForced(ev matchsim.MatchEvent, subIn, subOut uuid.UUID) (*uuid.UUID, *uuid.UUID) {
+	if ev.Type != matchsim.EventSubstitution {
+		return c.resolve(ev)
+	}
+	c.pendingSub = nil
+	c.off[subOut] = true
+	c.leave(subOut)
+	for i := range c.bench {
+		if c.bench[i].PlayerID == subIn {
+			if !containsMember(c.onPitch, subIn) {
+				c.onPitch = append(c.onPitch, c.bench[i])
+			}
+			return &subIn, &subOut
+		}
+	}
+	// The chosen player is not on the snapshot bench (rare edge: e.g. already
+	// brought on mid-match); link their ids without on-pitch bookkeeping.
+	return &subIn, &subOut
+}
+
 // leave marks a player as no longer on the field.
 func (c *sideCaster) leave(id uuid.UUID) {
 	c.off[id] = true

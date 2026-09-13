@@ -134,7 +134,7 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 		f.HomeClubID.String(): newSideCaster(seed, f.HomeClubID, homePlan.xi, homePlan.bench, homePlan.taker),
 		f.AwayClubID.String(): newSideCaster(seed, f.AwayClubID, awayPlan.xi, awayPlan.bench, awayPlan.taker),
 	}
-	if err := persistEvents(ctx, tx, matchID, res.Events, casters); err != nil {
+	if err := persistEventsWithCasting(ctx, tx, matchID, res.Events, casters, 0, nil); err != nil {
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}
 
@@ -267,11 +267,29 @@ func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, 
 	return id, now, err
 }
 
-func persistEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, casters map[string]*sideCaster) error {
-	for _, ev := range evs {
+func persistEventsWithCasting(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, casters map[string]*sideCaster, startSeq int, forced map[int]map[string]forcedSub) error {
+	for i, ev := range evs {
 		var playerID, relatedID *uuid.UUID
 		if c, ok := casters[ev.ClubID]; ok {
-			playerID, relatedID = c.resolve(ev)
+			// A manager's chosen substitution replaces the caster's bench
+			// draw, EXCEPT when this substitution is the injury-forced one
+			// (preceded by an EventInjury for the same minute/club), which
+			// always keeps the injury's pending-sub player.
+			if ev.Type == matchsim.EventSubstitution {
+				injDerived := i > 0 &&
+					evs[i-1].Minute == ev.Minute &&
+					evs[i-1].ClubID == ev.ClubID &&
+					evs[i-1].Type == matchsim.EventInjury
+				if f, ok := forced[ev.Minute][ev.ClubID]; ok && !injDerived {
+					playerID, relatedID = c.resolveForced(ev, f.SubIn, f.SubOut)
+				}
+			}
+			if playerID == nil && relatedID == nil {
+				playerID, relatedID = c.resolve(ev)
+			}
+		}
+		if ev.Sequence <= startSeq {
+			continue // already persisted; the caster state still advanced above
 		}
 		var clubID *uuid.UUID
 		if ev.ClubID != "" {
@@ -307,7 +325,14 @@ func eventDetail(ev matchsim.MatchEvent) ([]byte, error) {
 // applyForm updates both clubs' rolling form from the result vs the
 // engine-mirrored expected margin (matchsim.GoalWeight incl. home advantage).
 func (s *Service) applyForm(ctx context.Context, tx pgx.Tx, home, away *teamPlan, res matchsim.MatchResult, tick int64) error {
-	expectedHome := expectedHomeGD(home.team, away.team, matchsim.DefaultTuning())
+	return applyFormStates(ctx, tx, home.formState, away.formState, home.team, away.team, res, tick)
+}
+
+// applyFormStates is the snapshot-based twin of applyForm: it extends the same
+// EWMA from frozen FormState values (the live path's sim_inputs snapshot) so
+// a rehydrated worker applies the identical form after a restart.
+func applyFormStates(ctx context.Context, tx pgx.Tx, homeFS, awayFS form.FormState, home, away matchsim.Team, res matchsim.MatchResult, tick int64) error {
+	expectedHome := expectedHomeGD(home, away, matchsim.DefaultTuning())
 
 	homeChar, awayChar := form.ResultWin, form.ResultDraw
 	switch {
@@ -317,15 +342,15 @@ func (s *Service) applyForm(ctx context.Context, tx pgx.Tx, home, away *teamPlan
 		homeChar, awayChar = form.ResultLoss, form.ResultWin
 	}
 
-	if err := updateFormFor(ctx, tx, home, float64(res.HomeGoals-res.AwayGoals)-expectedHome, tick, homeChar); err != nil {
+	if err := updateFormState(ctx, tx, homeFS, float64(res.HomeGoals-res.AwayGoals)-expectedHome, tick, homeChar); err != nil {
 		return err
 	}
-	return updateFormFor(ctx, tx, away, float64(res.AwayGoals-res.HomeGoals)+expectedHome, tick, awayChar)
+	return updateFormState(ctx, tx, awayFS, float64(res.AwayGoals-res.HomeGoals)+expectedHome, tick, awayChar)
 }
 
-func updateFormFor(ctx context.Context, tx pgx.Tx, p *teamPlan, delta float64, tick int64, result string) error {
-	next := form.Update(p.formState, form.ResultQualityDelta(delta), form.AlphaDefault, tick)
-	next.FormString = form.FormStringFromResults(form.AppendResult(formWindow(p.formState.FormString), result))
+func updateFormState(ctx context.Context, tx pgx.Tx, fs form.FormState, delta float64, tick int64, result string) error {
+	next := form.Update(fs, form.ResultQualityDelta(delta), form.AlphaDefault, tick)
+	next.FormString = form.FormStringFromResults(form.AppendResult(formWindow(fs.FormString), result))
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO club.form_state (club_id, current_rating, last_updated_tick, form_string)
 		VALUES ($1, $2, $3, $4)
@@ -576,10 +601,19 @@ func chooseTaker(xi []squad.SquadMember, pen map[uuid.UUID]int) *squad.SquadMemb
 // World events
 // ---------------------------------------------------------------------------
 
-// worldEvents builds the events emitted alongside one match: a LINEUP_WARNING
+// worldEvents builds the events emitted alongside one fixture: a LINEUP_WARNING
 // per flagged key player (actor = the club) and the MATCH_PLAYED summary
-// (actor = system).
+// (actor = system). The Quicksand path (PlayFixture) emits both together; the
+// live path emits warnings at kickoff and MATCH_PLAYED at full time.
 func (s *Service) worldEvents(f *Fixture, home, away *teamPlan, matchID uuid.UUID, seed int64, res matchsim.MatchResult, now time.Time) []*eventbus.Event {
+	out := s.lineupWarningEvents(f, home, away, now)
+	out = append(out, s.matchPlayedEvent(f.WorldID, home.worldTick, f.ID, matchID, seed, res, now))
+	return out
+}
+
+// lineupWarningEvents builds one LINEUP_WARNING event per flagged key player,
+// actored by the club (system when human-managed).
+func (s *Service) lineupWarningEvents(f *Fixture, home, away *teamPlan, now time.Time) []*eventbus.Event {
 	actorSystem := "system"
 	actorAI := "ai_club"
 
@@ -610,9 +644,14 @@ func (s *Service) worldEvents(f *Fixture, home, away *teamPlan, matchID uuid.UUI
 			})
 		}
 	}
+	return out
+}
 
+// matchPlayedEvent builds the MATCH_PLAYED summary event (actor = system).
+func (s *Service) matchPlayedEvent(worldID uuid.UUID, worldTick int64, fixtureID, matchID uuid.UUID, seed int64, res matchsim.MatchResult, now time.Time) *eventbus.Event {
+	actorSystem := "system"
 	mpPayload, _ := json.Marshal(map[string]any{
-		"fixture_id":      f.ID.String(),
+		"fixture_id":      fixtureID.String(),
 		"match_id":        matchID.String(),
 		"home_score":      res.HomeGoals,
 		"away_score":      res.AwayGoals,
@@ -620,17 +659,16 @@ func (s *Service) worldEvents(f *Fixture, home, away *teamPlan, matchID uuid.UUI
 		"engine_version":  matchsim.EngineVersion,
 	})
 	seedVal := seed
-	out = append(out, &eventbus.Event{
+	return &eventbus.Event{
 		ID:         uuid.New(),
-		WorldID:    f.WorldID,
-		WorldTick:  home.worldTick,
+		WorldID:    worldID,
+		WorldTick:  worldTick,
 		EventType:  EventMatchPlayed,
 		ActorType:  &actorSystem,
 		Payload:    mpPayload,
 		RandomSeed: &seedVal,
 		OccurredAt: now,
-	})
-	return out
+	}
 }
 
 func recordEvent(ctx context.Context, tx pgx.Tx, ev *eventbus.Event) error {

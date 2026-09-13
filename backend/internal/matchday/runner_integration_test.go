@@ -5,6 +5,7 @@ package matchday
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,8 +19,9 @@ import (
 	internalworld "github.com/touchline/backend/internal/world"
 )
 
-// runnerWorld returns a seeded two-tier world whose starter club is human
-// (with a full preferred lineup) and its competition service.
+// runnerWorld returns a launched two-tier world whose starter club is human
+// (with a full preferred lineup), paced at a fast tick.match_cadence, and its
+// competition service.
 func runnerWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, *competition.Service) {
 	t.Helper()
 	pool := testdb.New(t)
@@ -27,7 +29,8 @@ func runnerWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, *competition.Service) 
 	testdb.SeedClubNameParts(t, pool)
 	ctx := context.Background()
 
-	w, err := internalworld.NewService(pool, nil).CreateWorld(ctx, "matchday-it")
+	worldSvc := internalworld.NewService(pool, nil)
+	w, err := worldSvc.CreateWorld(ctx, "matchday-it")
 	if err != nil {
 		t.Fatalf("create world: %v", err)
 	}
@@ -36,6 +39,12 @@ func runnerWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, *competition.Service) 
 		t.Fatalf("bootstrap: %v", err)
 	}
 	starter := res.ClubID
+	if err := worldSvc.SetConfig(ctx, w.ID, "tick.match_cadence", "10ms"); err != nil {
+		t.Fatalf("set cadence: %v", err)
+	}
+	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
+		t.Fatalf("launch world: %v", err)
+	}
 
 	// The human club owns its XI.
 	if _, err := pool.Exec(ctx,
@@ -120,23 +129,68 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 	}
 
 	// Before any tick nothing is due.
-	sum, err := runner.RunDue(ctx, worldID)
+	sum, err := runner.KickoffDue(ctx, worldID)
 	if err != nil {
 		t.Fatalf("initial run: %v", err)
 	}
-	if sum.Played != 0 {
-		t.Fatalf("initial played = %d, want 0", sum.Played)
+	if sum.Kicked != 0 {
+		t.Fatalf("initial kicked = %d, want 0", sum.Kicked)
 	}
 
-	// One matchday per daily tick: 6 matchdays x 2 leagues x 2 fixtures.
+	// One matchday per daily tick: 6 matchdays x 2 leagues x 2 fixtures,
+	// each kicked off then paced to completion in real time.
 	for day := 1; day <= 6; day++ {
 		advance(1)
-		sum, err := runner.RunDue(ctx, worldID)
+		sum, err := runner.KickoffDue(ctx, worldID)
 		if err != nil {
 			t.Fatalf("day %d run: %v", day, err)
 		}
-		if sum.Played != 4 || sum.Applied != 4 {
-			t.Fatalf("day %d: played=%d applied=%d, want 4/4 (one matchday across both leagues)", day, sum.Played, sum.Applied)
+		if sum.Matchdays != 1 || sum.Kicked != 4 {
+			t.Fatalf("day %d: matchdays=%d kicked=%d, want 1/4 (one matchday across both leagues)", day, sum.Matchdays, sum.Kicked)
+		}
+		if day == 1 {
+			// No-overlap gate (OPD-21): a second delivery while a match is
+			// still live must skip the next due matchday, never double-kick.
+			// Make matchday 2 due (extra scheduled fixture dated today), then
+			// deliver again without advancing the tick.
+			var ref time.Time
+			var tick int64
+			if err := pool.QueryRow(ctx,
+				`SELECT COALESCE(launched_at, created_at), current_tick FROM world.worlds WHERE id = $1`, worldID).
+				Scan(&ref, &tick); err != nil {
+				t.Fatalf("world date: %v", err)
+			}
+			y, m, d := ref.UTC().Date()
+			asOf := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(tick))
+			var extra uuid.UUID
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO match.fixtures (world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
+				SELECT f.world_id, f.competition_id, f.home_club_id, f.away_club_id, 2, $2::date, 'scheduled'
+				FROM match.fixtures f WHERE f.world_id = $1 AND f.status = 'live' LIMIT 1
+				RETURNING id`, worldID, asOf).Scan(&extra); err != nil {
+				t.Fatalf("insert extra fixture: %v", err)
+			}
+			again, err := runner.KickoffDue(ctx, worldID)
+			if err != nil {
+				t.Fatalf("day %d overlap run: %v", day, err)
+			}
+			if again.Matchdays != 0 || again.Kicked != 0 || again.Skipped != 1 {
+				t.Fatalf("overlap matchdays=%d kicked=%d skipped=%d, want 0/0/1", again.Matchdays, again.Kicked, again.Skipped)
+			}
+			if _, err := pool.Exec(ctx, `DELETE FROM match.fixtures WHERE id = $1`, extra); err != nil {
+				t.Fatalf("drop extra fixture: %v", err)
+			}
+			var live int
+			if err := pool.QueryRow(ctx,
+				`SELECT COUNT(*) FROM match.fixtures WHERE world_id = $1 AND status = 'live'`, worldID).Scan(&live); err != nil {
+				t.Fatalf("count live: %v", err)
+			}
+			if live != 4 {
+				t.Fatalf("live fixtures at day %d = %d, want 4", day, live)
+			}
+		}
+		if err := runner.RunLive(ctx, worldID); err != nil {
+			t.Fatalf("day %d run live: %v", day, err)
 		}
 		if got := countCompleted(); got != day*4 {
 			t.Fatalf("day %d completed = %d, want %d", day, got, day*4)
@@ -145,7 +199,7 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 
 	// Every completed fixture carries the engine's scoreline and the
 	// standings write; the match row mirrors the fixture score.
-	var mismatch, noApply int
+	var noApply, mismatch int
 	if err := pool.QueryRow(ctx, `
 		SELECT
 			COUNT(*) FILTER (WHERE f.ht_score IS NULL OR f.at_score IS NULL),
@@ -191,22 +245,28 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 	}
 
 	// Redelivery at the same tick is a no-op.
-	sum, err = runner.RunDue(ctx, worldID)
+	sum, err = runner.KickoffDue(ctx, worldID)
 	if err != nil {
 		t.Fatalf("redelivery run: %v", err)
 	}
-	if sum.Played != 0 || sum.Applied != 0 {
-		t.Fatalf("redelivery played=%d applied=%d, want 0/0", sum.Played, sum.Applied)
+	if sum.Matchdays != 0 || sum.Kicked != 0 {
+		t.Fatalf("redelivery matchdays=%d kicked=%d, want 0/0", sum.Matchdays, sum.Kicked)
+	}
+	if err := runner.RunLive(ctx, worldID); err != nil {
+		t.Fatalf("redelivery live: %v", err)
 	}
 
 	// The next daily tick opens season 2: matchday 1 across both leagues.
 	advance(1)
-	sum, err = runner.RunDue(ctx, worldID)
+	sum, err = runner.KickoffDue(ctx, worldID)
 	if err != nil {
 		t.Fatalf("season 2 run: %v", err)
 	}
-	if sum.Played != 4 || sum.Applied != 4 {
-		t.Fatalf("season 2: played=%d applied=%d, want 4/4", sum.Played, sum.Applied)
+	if sum.Kicked != 4 {
+		t.Fatalf("season 2: kicked=%d, want 4", sum.Kicked)
+	}
+	if err := runner.RunLive(ctx, worldID); err != nil {
+		t.Fatalf("season 2 live: %v", err)
 	}
 	if got := countCompleted(); got != 28 {
 		t.Fatalf("completed = %d, want 28", got)
@@ -248,11 +308,11 @@ func TestRunnerNoFixturesIsNoop(t *testing.T) {
 	matches := match.NewService(pool, nil, squad.NewStore(pool), form.NewStore(pool))
 	runner := NewRunner(pool, matches, competition.NewService(pool, nil))
 
-	sum, err := runner.RunDue(ctx, w.ID)
+	sum, err := runner.KickoffDue(ctx, w.ID)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if sum.Played != 0 || sum.Applied != 0 || sum.Matchdays != 0 {
-		t.Fatalf("noop run played=%d applied=%d matchdays=%d, want 0/0/0", sum.Played, sum.Applied, sum.Matchdays)
+	if sum.Matchdays != 0 || sum.Kicked != 0 || sum.Skipped != 0 {
+		t.Fatalf("noop run matchdays=%d kicked=%d skipped=%d, want 0/0/0", sum.Matchdays, sum.Kicked, sum.Skipped)
 	}
 }

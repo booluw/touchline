@@ -1,16 +1,19 @@
-// Package matchday is the S04-02 bridge between the world clock and the
-// deterministic match engine. It runs a world's due matchdays — fixtures whose
-// kickoff the world's current date has passed — plays them through
-// internal/match, and pushes every result into the competition layer's
-// standings via ApplyResult. The whole step is idempotent: re-running the same
-// world date touches only fixtures still scheduled, so at-least-once event
-// delivery cannot double-advance a season.
+// Package matchday is the S04-02 bridge between the world clock and the live
+// match engine (OPD-21). A daily world tick kicks off every due matchday —
+// fixtures become 'live' in match.matches with a frozen simulation snapshot —
+// and a per-world goroutine then paces those matches in real time (one
+// simulated minute per tick.match_cadence), finalizes each at full time, and
+// pushes the result into the competition layer via ApplyResult. Live matches
+// never run on the world clock (OPD-17(2)); the pacing goroutine owns them.
+// Both steps are idempotent, so at-least-once event delivery cannot double
+// advance a match or season.
 package matchday
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,11 +24,14 @@ import (
 	"github.com/touchline/backend/internal/match"
 )
 
-// Runner plays a world's due matchdays and applies their results.
+// Runner owns one world's kickoff + live pacing lifecycle.
 type Runner struct {
 	pool    *pgxpool.Pool
 	matches *match.Service
 	comp    *competition.Service
+
+	mu     sync.Mutex
+	active map[uuid.UUID]bool // worlds with a live pacing goroutine already running
 }
 
 // NewRunner wires the match orchestration and competition services together
@@ -33,21 +39,23 @@ type Runner struct {
 // (six-pointer / dead-rubber input for the squad pipeline).
 func NewRunner(pool *pgxpool.Pool, matches *match.Service, comp *competition.Service) *Runner {
 	matches.WithStandingsContext(comp)
-	return &Runner{pool: pool, matches: matches, comp: comp}
+	return &Runner{pool: pool, matches: matches, comp: comp, active: make(map[uuid.UUID]bool)}
 }
 
-// Summary reports one RunDue pass.
+// Summary reports one KickoffDue pass.
 type Summary struct {
 	WorldID   uuid.UUID
-	Matchdays int // distinct matchdays advanced this pass
-	Played    int // fixtures newly simulated this pass
-	Applied   int // standings writes performed this pass
+	Matchdays int // distinct matchdays kicked off this pass
+	Kicked    int // fixtures newly kicked off this pass
+	Skipped   int // matchdays deferred because a match in the world is already live
 }
 
-// RunDue plays every matchday of a world whose kickoff date the world clock
-// has already passed and applies each result to the standings. Idempotent: on
-// redelivery only fixtures still marked scheduled play again.
-func (r *Runner) RunDue(ctx context.Context, worldID uuid.UUID) (*Summary, error) {
+// KickoffDue kicks off every matchday of a world whose kickoff date the world
+// clock has already passed: each scheduled fixture is frozen into a live match
+// (status 'live', snapshot persisted) awaiting the pacing goroutine. Idempotent:
+// on redelivery only fixtures still marked scheduled kick off again, and the
+// no-overlap gate defers a matchday while an earlier one is still live.
+func (r *Runner) KickoffDue(ctx context.Context, worldID uuid.UUID) (*Summary, error) {
 	asOf, err := r.worldDate(ctx, worldID)
 	if err != nil {
 		return nil, err
@@ -58,28 +66,189 @@ func (r *Runner) RunDue(ctx context.Context, worldID uuid.UUID) (*Summary, error
 	}
 
 	sum := &Summary{WorldID: worldID}
+	if len(matchdays) == 0 {
+		return sum, nil
+	}
+
+	// No-overlap gate (OPD-21): a world with a match still live must not kick
+	// off the next matchday; the pacing goroutine re-runs KickoffDue after
+	// completion. Without this, live matches would pile up across matchdays.
+	live, err := r.worldHasLive(ctx, worldID)
+	if err != nil {
+		return sum, err
+	}
+	if live {
+		sum.Skipped = len(matchdays)
+		return sum, nil
+	}
+
 	for _, md := range matchdays {
-		results, err := r.matches.PlayMatchday(ctx, worldID, md)
+		sessions, err := r.matches.KickoffMatchday(ctx, worldID, md)
 		if err != nil {
-			return sum, fmt.Errorf("matchday %d: %w", md, err)
+			return sum, fmt.Errorf("kickoff matchday: %w", err)
 		}
 		sum.Matchdays++
-		for _, res := range results {
-			if res.Match == nil {
-				continue
-			}
-			err := r.comp.ApplyResult(ctx, res.Match.FixtureID, res.Match.HomeGoals, res.Match.AwayGoals)
-			if errors.Is(err, competition.ErrResultAlreadyApplied) {
-				continue // an earlier/parallel pass already applied this fixture
-			}
-			if err != nil {
-				return sum, fmt.Errorf("apply result fixture %s: %w", res.Match.FixtureID, err)
-			}
-			sum.Played++
-			sum.Applied++
-		}
+		sum.Kicked += len(sessions)
 	}
 	return sum, nil
+}
+
+// RunLive paces every in-progress live match of a world to full time in real
+// time, finalizes each, and applies the result to the standings. It also
+// reconciles the crash window (fixture live + match completed + standings not
+// yet applied). It runs until no in-progress matches remain, sleeping the
+// smallest pacing across pending matches between simulated minutes. Only one
+// goroutine per world runs at a time (claim guard).
+func (r *Runner) RunLive(ctx context.Context, worldID uuid.UUID) error {
+	if !r.claim(ctx, worldID) {
+		return nil // another goroutine already paces this world
+	}
+	defer r.release(worldID)
+
+	for {
+		if err := r.reconcileApplied(ctx, worldID); err != nil {
+			return err
+		}
+		sessions, err := r.matches.LoadLiveSessions(ctx, worldID)
+		if err != nil {
+			return err
+		}
+		if len(sessions) == 0 {
+			return nil
+		}
+
+		pending := 0
+		minPacing := time.Duration(1<<63 - 1)
+		for _, sess := range sessions {
+			finished, err := r.matches.PaceMinute(ctx, sess)
+			if err != nil {
+				return err
+			}
+			if finished {
+				if _, err := r.matches.Finalize(ctx, sess); err != nil {
+					return err
+				}
+				continue
+			}
+			pending++
+			if p := sess.Pacing(); p < minPacing {
+				minPacing = p
+			}
+		}
+		if pending == 0 {
+			continue // finalize already ran; next loop reconciles + exits
+		}
+		if err := sleepCtx(ctx, minPacing); err != nil {
+			return err
+		}
+	}
+}
+
+// reconcileApplied closes the crash window between Finalize (match + fixture
+// completed, MATCH_PLAYED recorded) and the standings write: a completed
+// fixture whose standings were never applied gets its ApplyResult now.
+// Idempotent by design.
+func (r *Runner) reconcileApplied(ctx context.Context, worldID uuid.UUID) error {
+	rows, err := r.pool.Query(ctx, `
+		SELECT f.id, m.home_score, m.away_score
+		FROM match.fixtures f
+		JOIN match.matches m ON m.fixture_id = f.id
+		WHERE f.world_id = $1
+		  AND f.status = 'completed'
+		  AND f.standings_applied_at IS NULL
+		  AND m.status = 'completed'`, worldID)
+	if err != nil {
+		return fmt.Errorf("reconcile applied: %w", err)
+	}
+	defer rows.Close()
+	var out []struct {
+		id       uuid.UUID
+		home, away int
+	}
+	for rows.Next() {
+		var f struct {
+			id       uuid.UUID
+			home, away int
+		}
+		if err := rows.Scan(&f.id, &f.home, &f.away); err != nil {
+			return fmt.Errorf("reconcile applied: scan: %w", err)
+		}
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reconcile applied: iterate: %w", err)
+	}
+	for _, f := range out {
+		if err := r.applyResultOnce(ctx, f.id, f.home, f.away); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyResultOnce applies a finalized result to the standings, treating a
+// parallel already-applied write as success.
+func (r *Runner) applyResultOnce(ctx context.Context, fixtureID uuid.UUID, home, away int) error {
+	err := r.comp.ApplyResult(ctx, fixtureID, home, away)
+	if errors.Is(err, competition.ErrResultAlreadyApplied) {
+		return nil // an earlier/parallel pass already applied this fixture
+	}
+	if err != nil {
+		return fmt.Errorf("apply result fixture %s: %w", fixtureID, err)
+	}
+	return nil
+}
+
+// claim marks a world's pacing loop as owned; false when another goroutine
+// already runs it.
+func (r *Runner) claim(ctx context.Context, worldID uuid.UUID) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active[worldID] {
+		return false
+	}
+	r.active[worldID] = true
+	return true
+}
+
+// release returns the pacing claim.
+func (r *Runner) release(worldID uuid.UUID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.active, worldID)
+}
+
+// worldHasLive reports whether any fixture of the world is currently live.
+func (r *Runner) worldHasLive(ctx context.Context, worldID uuid.UUID) (bool, error) {
+	var n int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM match.fixtures WHERE world_id = $1 AND status = 'live'`, worldID).Scan(&n); err != nil {
+		return false, fmt.Errorf("matchday: live check: %w", err)
+	}
+	return n > 0, nil
+}
+
+// WorldsWithLiveMatches lists every world with at least one live fixture, for
+// the worker's startup rehydration sweep.
+func (r *Runner) WorldsWithLiveMatches(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT world_id FROM match.fixtures WHERE status = 'live' ORDER BY world_id`)
+	if err != nil {
+		return nil, fmt.Errorf("matchday: live worlds: %w", err)
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("matchday: live worlds: scan: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("matchday: live worlds: iterate: %w", err)
+	}
+	return out, nil
 }
 
 // worldDate maps the world's monotonically increasing tick to its calendar
@@ -130,4 +299,14 @@ func (r *Runner) dueMatchdays(ctx context.Context, worldID uuid.UUID, asOf time.
 		return nil, fmt.Errorf("matchday: iterate: %w", err)
 	}
 	return out, nil
+}
+
+// sleepCtx sleeps for d, aborting early when the context is done.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }

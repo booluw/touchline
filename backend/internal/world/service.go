@@ -26,7 +26,7 @@ var (
 // these exact keys). Values are JSON-configurable per world, never compiled-in
 // — the scheduling contract lives in the DB, not the code.
 var defaultConfigKeys = map[string]any{
-	"tick.match_cadence":    "*/15 * * * *",
+	"tick.match_cadence":    "20s",
 	"tick.hourly_cadence":   "0 * * * *",
 	"tick.daily_cadence":    "0 0 * * *",
 	"tick.weekly_cadence":   "0 0 * * 0",
