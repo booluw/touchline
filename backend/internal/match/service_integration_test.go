@@ -15,6 +15,7 @@ import (
 
 	"github.com/touchline/backend/internal/bootstrap"
 	"github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/playerpool"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"
@@ -77,8 +78,9 @@ func worldFor(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worldName, 
 	return worldID, homeID, awayID
 }
 
-// generateAIClub persists one AI club inside its own tx with a fixed factory
-// seed, so two calls with the same parameters produce identical squads.
+// generateAIClub persists one AI club inside its own tx from the world-level
+// free-agent pool, so two calls with the same parameters produce identical
+// squads.
 func generateAIClub(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worldID uuid.UUID, name string, seed int64) uuid.UUID {
 	t.Helper()
 	tx, err := pool.Begin(ctx)
@@ -92,7 +94,16 @@ func generateAIClub(t *testing.T, pool *pgxpool.Pool, ctx context.Context, world
 	}
 	factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(seed))).
 		WithRegistry(playergen.NewNameRegistry())
-	club, err := bootstrap.GenerateAIClub(ctx, nil, tx, worldID, name, "", "england", factory)
+	var ref time.Time
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(launched_at, created_at) FROM world.worlds WHERE id = $1`, worldID).Scan(&ref); err != nil {
+		t.Fatalf("load world ref: %v", err)
+	}
+	ref = time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, time.UTC)
+	if err := playerpool.ReplenishPool(ctx, tx, nil, worldID, nil, playerpool.PoolTargetSize, factory, ref); err != nil {
+		t.Fatalf("replenish pool: %v", err)
+	}
+	club, err := bootstrap.GenerateAIClub(ctx, nil, tx, worldID, name, "", "england", nil)
 	if err != nil {
 		t.Fatalf("generate %s: %v", name, err)
 	}

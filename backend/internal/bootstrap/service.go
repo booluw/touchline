@@ -1,6 +1,7 @@
 // Package bootstrap produces the material state of a new world (S03-01): an
-// AI starter club with its policy-bot manager and a procedurally generated
-// first squad, persisted via pkg/playergen under one world_id.
+// AI starter club with its policy-bot manager and a first squad drafted from
+// the world-level free-agent pool, persisted via pkg/playergen under one
+// world_id.
 //
 // Scope (approved for S03-01): a single starter club per bootstrap; no
 // competition structure — league composition/formats stay an open product
@@ -28,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/finance"
+	"github.com/touchline/backend/internal/playerpool"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/playergen"
 )
@@ -41,35 +43,12 @@ var (
 	ErrClubNameRequired     = errors.New("club name is required")
 )
 
-// SquadSizeDefault is the generated first-squad size (24: 2 GK / 7 DEF / 7 MID
-// / 6 FWD / 2 flexible). Data in code, matching the Phase-0 scope.
+// SquadSizeDefault is the drafted first-squad size (24: 2 GK / 7 DEF / 7 MID
+// / 6 FWD / 2 flexible). Data in code, matching the Phase-0 scope. The
+// position template that guides the draft lives in internal/playerpool.
 const SquadSizeDefault = 24
 
-// squadTemplateSlot associates a slot index with the primary positions it may
-// accept. GK is rigid; the flexible slots may take any outfield position.
-func squadTemplate(size int) [][]string {
-	template := [][]string{
-		{"GK"}, {"GK"},
-		{"CB", "LB", "RB"}, {"CB", "LB", "RB"}, {"CB", "LB", "RB"}, {"CB", "LB", "RB"},
-		{"CB", "LB", "RB"}, {"CB", "LB", "RB"}, {"CB", "LB", "RB"},
-		{"DM", "CM", "AM", "LM", "RM"}, {"DM", "CM", "AM", "LM", "RM"},
-		{"DM", "CM", "AM", "LM", "RM"}, {"DM", "CM", "AM", "LM", "RM"},
-		{"DM", "CM", "AM", "LM", "RM"}, {"DM", "CM", "AM", "LM", "RM"}, {"DM", "CM", "AM", "LM", "RM"},
-		{"LW", "RW", "ST"}, {"LW", "RW", "ST"}, {"LW", "RW", "ST"},
-		{"LW", "RW", "ST"}, {"LW", "RW", "ST"}, {"LW", "RW", "ST"},
-	}
-	out := make([][]string, 0, size)
-	for i := 0; len(out) < size; i++ {
-		slot := template[i%len(template)]
-		if i >= len(template) {
-			slot = []string{"CB", "LB", "RB", "DM", "CM", "AM", "LM", "RM", "LW", "RW", "ST"}
-		}
-		out = append(out, slot)
-	}
-	return out
-}
-
-// SquadPlayer is one generated, persisted squad member.
+// SquadPlayer is one drafted, persisted squad member.
 type SquadPlayer struct {
 	ID              uuid.UUID `json:"id"`
 	PersonID        uuid.UUID `json:"person_id"`
@@ -151,10 +130,11 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 
 	// Serialize on the world row; a provisioning world can only be bootstrapped once.
 	var worldStatus string
+	var worldRef time.Time // season reference date for date_of_birth derivation
 	err = tx.QueryRow(ctx,
-		`SELECT status FROM world.worlds WHERE id = $1 FOR UPDATE`,
+		`SELECT status, COALESCE(launched_at, created_at) FROM world.worlds WHERE id = $1 FOR UPDATE`,
 		worldID,
-	).Scan(&worldStatus)
+	).Scan(&worldStatus, &worldRef)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWorldNotFound
 	}
@@ -185,9 +165,22 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 	registry := playergen.NewNameRegistry()
 	factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(seed))).WithRegistry(registry)
 
-	club, err := GenerateAIClub(ctx, s.bus, tx, worldID, clubName, clubShortName, "england", factory)
+	// World-level free-agent pool (country_id NULL — the country isn't created
+	// until league seeding). The starter club drafts from it below; the pool
+	// is then replenished back to target so a signing market exists from day 0.
+	ref := daysTruncate(worldRef)
+	if _, err := playerpool.SeedPool(ctx, tx, s.bus, worldID, nil, playerpool.PoolTargetSize, factory, ref); err != nil {
+		return nil, fmt.Errorf("seed world pool: %w", err)
+	}
+
+	// The starter club drafts its 24 from the world-level pool, then the pool
+	// is topped back up for future activity.
+	club, err := GenerateAIClub(ctx, s.bus, tx, worldID, clubName, clubShortName, "england", nil)
 	if err != nil {
 		return nil, err
+	}
+	if err := playerpool.ReplenishPool(ctx, tx, s.bus, worldID, nil, playerpool.PoolTargetSize, factory, ref); err != nil {
+		return nil, fmt.Errorf("replenish world pool: %w", err)
 	}
 
 	// The boot event names the seed that produced the whole world's first squad.
@@ -227,16 +220,16 @@ func (s *Service) BootstrapWorld(ctx context.Context, worldID uuid.UUID, clubNam
 }
 
 // GenerateAIClub persists one AI-controlled club, its policy-bot manager, and a
-// generated squad inside the caller's transaction, and records the auditable
-// CLUB_CREATED event in the same tx (the log can never disagree with state).
+// squad drafted from the free-agent pool inside the caller's transaction, and
+// records the auditable CLUB_CREATED event in the same tx (the log can never
+// disagree with state).
 //
 // It is the smallest reusable unit of world materialization: BootstrapWorld
 // uses it for the starter club, and S04-01 league seeding calls it once per
-// additional AI team, always inside the caller's own transaction. The factory's
-// rng must be seeded deterministically per world/team for replayable output;
-// country is club.clubs.country free text (competition seeding passes the
-// league country).
-func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worldID uuid.UUID, clubName, clubShortName, country string, factory *playergen.PlayerFactory) (*GeneratedClub, error) {
+// additional AI team, always inside the caller's own transaction. The caller
+// is responsible for ensuring the pool is seeded/replenished before calling.
+// poolCountryID may be nil for the world-level bootstrap pool.
+func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worldID uuid.UUID, clubName, clubShortName, country string, poolCountryID *uuid.UUID) (*GeneratedClub, error) {
 	if clubName == "" {
 		return nil, ErrClubNameRequired
 	}
@@ -254,11 +247,6 @@ func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worl
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load world: %w", err)
-	}
-
-	squad, err := generateSquad(factory, SquadSizeDefault)
-	if err != nil {
-		return nil, err
 	}
 
 	// 1. The AI-controlled club.
@@ -285,66 +273,38 @@ func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worl
 		return nil, fmt.Errorf("assign manager: %w", err)
 	}
 
-	// 3. People + players.
+	// 3. Draft the squad from the free-agent pool.
 	ref := daysTruncate(worldRef)
-	players := make([]SquadPlayer, 0, len(squad))
-	seeds := make([]finance.ContractSeed, 0, len(squad))
-	for i, gp := range squad {
-		var personID uuid.UUID
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO person.people
-				(world_id, first_name, last_name, display_name, date_of_birth, nationality_code)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-			worldID, gp.FirstName, gp.LastName, gp.DisplayName, dobFor(ref, gp.Age), gp.NationalityCode,
-		).Scan(&personID); err != nil {
-			return nil, fmt.Errorf("insert person: %w", err)
-		}
-
-		var playerID uuid.UUID
-		number := i + 1
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO player.players
-				(world_id, person_id, club_id, primary_position, squad_number, status)
-			VALUES ($1, $2, $3, $4, $5, 'active') RETURNING id`,
-			worldID, personID, clubID, gp.PrimaryPosition, number,
-		).Scan(&playerID); err != nil {
-			return nil, fmt.Errorf("insert player: %w", err)
-		}
-
-		// The player's football data (attribute EAV + traits + personality +
-		// initial emotional state) lands in the SAME club-creation tx.
-		if err := persistPlayerProfile(ctx, tx, playerID, gp); err != nil {
-			return nil, err
-		}
-
-		players = append(players, SquadPlayer{
-			ID:              playerID,
-			PersonID:        personID,
-			FirstName:       gp.FirstName,
-			LastName:        gp.LastName,
-			DisplayName:     gp.DisplayName,
-			NationalityCode: gp.NationalityCode,
-			DateOfBirth:     dobFor(ref, gp.Age),
-			Age:             gp.Age,
-			PrimaryPosition: gp.PrimaryPosition,
-			SquadNumber:     number,
-		})
-		seeds = append(seeds, finance.ContractSeed{
-			PlayerID:   playerID,
-			Position:   gp.PrimaryPosition,
-			Age:        gp.Age,
-			Attributes: gp.Attributes,
-		})
+	draft, err := playerpool.DraftSquad(ctx, tx, pub, worldID, clubID, poolCountryID, ref, SquadSizeDefault)
+	if err != nil {
+		return nil, fmt.Errorf("draft squad: %w", err)
 	}
 
 	// 4. Financial genesis in the same tx: the ledger account and opening
 	// capital, the season's transfer + wage budgets, and a starter contract
 	// with wage commitment for the full squad (S05-02).
-	if err := finance.BootstrapClub(ctx, tx, worldID, clubID, ref, seeds); err != nil {
+	if err := finance.BootstrapClub(ctx, tx, worldID, clubID, ref, draft.Seeds); err != nil {
 		return nil, fmt.Errorf("seed club finances: %w", err)
 	}
 
-	// 5. The auditable creation event (same tx).
+	// 5. Build the SquadPlayer slice from the draft for the return value.
+	players := make([]SquadPlayer, 0, len(draft.Players))
+	for _, d := range draft.Players {
+		players = append(players, SquadPlayer{
+			ID:              d.PlayerID,
+			PersonID:        d.PersonID,
+			FirstName:       d.FirstName,
+			LastName:        d.LastName,
+			DisplayName:     d.DisplayName,
+			NationalityCode: d.NationalityCode,
+			DateOfBirth:     d.DateOfBirth,
+			Age:             d.Age,
+			PrimaryPosition: d.PrimaryPosition,
+			SquadNumber:     d.SquadNumber,
+		})
+	}
+
+	// 6. The auditable creation event (same tx).
 	actor := "system"
 	clubEvent := &eventbus.Event{
 		WorldID:   worldID,
@@ -354,7 +314,7 @@ func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worl
 			"club_name":      clubName,
 			"manager_id":     managerID,
 			"squad_size":     len(players),
-			"contract_count": len(seeds),
+			"contract_count": len(draft.Seeds),
 		}),
 	}
 	clubEvent.ActorType = &actor
@@ -460,47 +420,6 @@ func LoadPools(ctx context.Context, tx pgx.Tx) (*playergen.PoolGenerator, *playe
 	return generator, natPool, nil
 }
 
-// generateSquad builds a squad respecting the position template by rejection
-// sampling: a player is accepted when its primary position fits the slot, with
-// a bounded retry budget per slot to avoid pathological loops.
-func generateSquad(factory *playergen.PlayerFactory, size int) ([]*playergen.GeneratedPlayer, error) {
-	template := squadTemplate(size)
-	out := make([]*playergen.GeneratedPlayer, 0, size)
-	for _, allowed := range template {
-		gp, err := generateForPosition(factory, allowed)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, gp)
-	}
-	return out, nil
-}
-
-// generateForPosition draws players until one matches the slot's allowed set.
-// Every draw has a positive probability of matching, so this terminates almost
-// surely; a bounded "accept anything" fallback would silently degrade the
-// position balance (e.g. a rare goalkeeper slot landing on an outfielder).
-func generateForPosition(factory *playergen.PlayerFactory, allowed []string) (*playergen.GeneratedPlayer, error) {
-	for {
-		gp, err := factory.CreatePlayer()
-		if err != nil {
-			return nil, fmt.Errorf("generate player: %w", err)
-		}
-		if contains(allowed, gp.PrimaryPosition) {
-			return gp, nil
-		}
-	}
-}
-
-func contains(list []string, v string) bool {
-	for _, s := range list {
-		if s == v {
-			return true
-		}
-	}
-	return false
-}
-
 // shortName derives a default abbreviation (e.g. "Harbour City FC" -> "Har").
 func shortName(name string) string {
 	const n = 3
@@ -517,11 +436,6 @@ func shortName(name string) string {
 func daysTruncate(t time.Time) time.Time {
 	y, m, d := t.UTC().Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-}
-
-// dobFor derives the player's date_of_birth from the world reference date.
-func dobFor(seasonRef time.Time, age int) time.Time {
-	return seasonRef.AddDate(-age, 0, 0)
 }
 
 func mustJSON(v map[string]any) []byte {

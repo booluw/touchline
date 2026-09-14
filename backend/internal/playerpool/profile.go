@@ -1,19 +1,65 @@
-package bootstrap
+package playerpool
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
 	"github.com/touchline/backend/pkg/playergen"
 )
 
+// persistGeneratedPlayer writes one generated player as person.people +
+// player.players rows plus the full football profile (attribute EAV, hidden
+// traits, personality, initial emotional state) inside the caller's tx. It is
+// the single place pool free agents and academy/street intakes are persisted,
+// so person/player/game-profile material always lands together. clubID nil
+// means the player is created as a free agent (status 'free_agent');
+// otherwise status is 'active' and squad_number may be set.
+func persistGeneratedPlayer(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, clubID, countryID *uuid.UUID, squadNumber int, gp *playergen.GeneratedPlayer, ref time.Time) (playerID, personID uuid.UUID, err error) {
+	var pid uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO person.people
+			(world_id, first_name, last_name, display_name, date_of_birth, nationality_code)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		worldID, gp.FirstName, gp.LastName, gp.DisplayName, dobFor(ref, gp.Age), gp.NationalityCode,
+	).Scan(&pid); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("insert person: %w", err)
+	}
+
+	status := "free_agent"
+	if clubID != nil {
+		status = "active"
+	}
+
+	var num *int
+	if clubID != nil {
+		num = &squadNumber
+	}
+
+	var plID uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO player.players
+			(world_id, person_id, club_id, primary_position, squad_number, status,
+			 is_academy_product, origin, country_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+		worldID, pid, clubID, gp.PrimaryPosition, num, status,
+		gp.AcademyProduct, gp.Origin, countryID,
+	).Scan(&plID); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("insert player: %w", err)
+	}
+
+	if err := persistPlayerProfile(ctx, tx, plID, gp); err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	return plID, pid, nil
+}
+
 // persistPlayerProfile writes a generated player's football data — the
 // attribute EAV, hidden traits, personality, and the initial emotional state —
-// inside the caller's transaction. It is called once per squad member by
-// GenerateAIClub so person/player/game-profile material always lands together
-// (the club-creation tx can never half-materialise a squad).
+// inside the caller's transaction.
 func persistPlayerProfile(ctx context.Context, tx pgx.Tx, playerID uuid.UUID, gp *playergen.GeneratedPlayer) error {
 	if err := persistAttributes(ctx, tx, playerID, gp.Attributes); err != nil {
 		return err
@@ -103,4 +149,23 @@ func persistEmotionalState(ctx context.Context, tx pgx.Tx, playerID uuid.UUID, e
 		return fmt.Errorf("insert emotional state: %w", err)
 	}
 	return nil
+}
+
+// daysTruncate strips the time component of the world's season reference date,
+// using the UTC calendar day so the anchor is timezone-independent and matches
+// the matchday world-day counter (see matchday.worldDate).
+func daysTruncate(t time.Time) time.Time {
+	y, m, d := t.UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// dobFor derives the player's date_of_birth from the world reference date.
+func dobFor(seasonRef time.Time, age int) time.Time {
+	return seasonRef.AddDate(-age, 0, 0)
+}
+
+// ageFor derives a player's age in years from the world reference date. It is
+// exact for players whose DOB was derived via dobFor.
+func ageFor(ref time.Time, dob time.Time) int {
+	return ref.Year() - dob.Year()
 }

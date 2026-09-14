@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/touchline/backend/internal/bootstrap"
+	"github.com/touchline/backend/internal/playerpool"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/playergen"
 )
@@ -93,6 +94,20 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 		return nil, err
 	}
 	master := rand.New(rand.NewSource(worldSeed))
+	ref := daysTruncate(bootRef)
+
+	// One country-scoped free-agent pool drives this whole seeding run. A
+	// single factory (one rng + registry) produces every pool player, so names
+	// are unique across the country and the output is replayable. Clubs draft
+	// from the pool; the pool is replenished after each club so the market
+	// never empties through a big multi-league seed.
+	poolFactory, err := squadFactory(ctx, tx, master.Int63())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := playerpool.SeedPool(ctx, tx, s.bus, worldID, &countryID, playerpool.PoolTargetSize, poolFactory, ref); err != nil {
+		return nil, fmt.Errorf("seed country pool: %w", err)
+	}
 
 	// Club name pools come from the global reference data (data-driven, OPD-13
 	// analogue): admins extend ref.club_name_parts via the dashboard or JSON.
@@ -126,19 +141,20 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 			clubSeeds = append(clubSeeds, ClubSeed{ID: clubID, Name: anyName})
 		}
 		for len(entries) < l.TeamCount {
-			subSeed := master.Int63()
-			factory, err := squadFactory(ctx, tx, subSeed)
-			if err != nil {
-				return nil, err
-			}
 			clubName := nextClubName(master, stems, suffixes, names)
-			generated, err := bootstrap.GenerateAIClub(ctx, s.bus, tx, worldID, clubName, short(clubName), country.Name, factory)
+			generated, err := bootstrap.GenerateAIClub(ctx, s.bus, tx, worldID, clubName, short(clubName), country.Name, &countryID)
 			if err != nil {
 				return nil, fmt.Errorf("generate AI club for %s: %w", l.Name, err)
 			}
 			entries = append(entries, generated.ClubID)
 			names[clubName] = true
 			clubSeeds = append(clubSeeds, ClubSeed{ID: generated.ClubID, Name: generated.ClubName})
+
+			// The draft consumed 24 players; top the country pool back up so
+			// later clubs (and the signing market) still have supply.
+			if err := playerpool.ReplenishPool(ctx, tx, s.bus, worldID, &countryID, playerpool.PoolTargetSize, poolFactory, ref); err != nil {
+				return nil, fmt.Errorf("replenish country pool: %w", err)
+			}
 		}
 
 		season, err := s.createSeason(ctx, tx, worldID, l.ID, bootRef, entries)

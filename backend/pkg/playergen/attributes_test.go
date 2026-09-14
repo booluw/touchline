@@ -10,8 +10,8 @@ func newTestFactory(seed int64) *PlayerFactory {
 }
 
 func TestGeneratedAttributesDeterministic(t *testing.T) {
-	a := generateAttributes(newTestFactory(7).rng, "ST")
-	b := generateAttributes(newTestFactory(7).rng, "ST")
+	a := generateAttributes(newTestFactory(7).rng, "ST", 0)
+	b := generateAttributes(newTestFactory(7).rng, "ST", 0)
 	if len(a) != len(b) {
 		t.Fatalf("attribute count differs: %d vs %d", len(a), len(b))
 	}
@@ -24,7 +24,7 @@ func TestGeneratedAttributesDeterministic(t *testing.T) {
 
 func TestGeneratedAttributesInRangeAndComplete(t *testing.T) {
 	for _, pos := range ValidPositions {
-		attrs := generateAttributes(newTestFactory(11).rng, pos)
+		attrs := generateAttributes(newTestFactory(11).rng, pos, 0)
 		want := 0
 		for _, cat := range categoriesForPosition(pos) {
 			want += len(attributeKeys[cat])
@@ -45,7 +45,7 @@ func TestGeneratedAttributesInRangeAndComplete(t *testing.T) {
 
 func TestGeneratedAttributesPositionFilter(t *testing.T) {
 	for _, pos := range ValidPositions {
-		attrs := generateAttributes(newTestFactory(3).rng, pos)
+		attrs := generateAttributes(newTestFactory(3).rng, pos, 0)
 		if pos == "GK" {
 			for _, k := range attributeKeys["technical"] {
 				if _, ok := attrs[k]; ok {
@@ -81,8 +81,8 @@ func TestGeneratedAttributesStrikerFinishingRanks(t *testing.T) {
 	sumFinish, sumCross := 0, 0
 	const n = 200
 	for i := 0; i < n; i++ {
-		sumFinish += generateAttributes(f.rng, "ST")["finishing"]
-		sumCross += generateAttributes(f.rng, "ST")["crossing"]
+		sumFinish += generateAttributes(f.rng, "ST", 0)["finishing"]
+		sumCross += generateAttributes(f.rng, "ST", 0)["crossing"]
 	}
 	if float64(sumFinish)/n <= float64(sumCross)/n {
 		t.Fatalf("ST finishing avg %v must exceed crossing avg %v", float64(sumFinish)/n, float64(sumCross)/n)
@@ -153,7 +153,7 @@ func TestCategoryAverageRollup(t *testing.T) {
 	sum := 0
 	const n = 100
 	for i := 0; i < n; i++ {
-		sum += CategoryAverage(generateAttributes(f.rng, "ST"), "technical")
+		sum += CategoryAverage(generateAttributes(f.rng, "ST", 0), "technical")
 	}
 	avg := float64(sum) / n
 	// ST technical mean is 66: jitter (width 8+~8) pulls the roll-up near it.
@@ -162,10 +162,10 @@ func TestCategoryAverageRollup(t *testing.T) {
 	}
 
 	// GK: no categories produced the mean; asking for technical must read 0.
-	if got := CategoryAverage(generateAttributes(f.rng, "GK"), "technical"); got != 0 {
+	if got := CategoryAverage(generateAttributes(f.rng, "GK", 0), "technical"); got != 0 {
 		t.Fatalf("GK technical roll-up = %d, want 0", got)
 	}
-	if got := CategoryAverage(generateAttributes(f.rng, "GK"), "goalkeeping"); got == 0 {
+	if got := CategoryAverage(generateAttributes(f.rng, "GK", 0), "goalkeeping"); got == 0 {
 		t.Fatal("GK goalkeeping roll-up must be present")
 	}
 }

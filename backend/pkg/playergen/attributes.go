@@ -116,13 +116,22 @@ func categoriesForPosition(pos string) []string {
 
 // generateAttributes produces the position-anchored attribute set for a
 // GeneratedPlayer from the factory's seeded rng. The output is deterministic
-// for a fixed seed and always within [1, 100].
-func generateAttributes(rng *rand.Rand, pos string) map[string]int {
+// for a fixed seed and always within [1, 100]. qualityOffset shifts all
+// category means by the given integer (-20..+20) before jitter is applied;
+// pass 0 for the original baseline.
+func generateAttributes(rng *rand.Rand, pos string, qualityOffset int) map[string]int {
 	out := make(map[string]int)
 	for _, cat := range categoriesForPosition(pos) {
 		mean := 50
 		if m, ok := categoryMeans[pos][cat]; ok {
 			mean = m
+		}
+		mean += qualityOffset
+		if mean < 10 {
+			mean = 10
+		}
+		if mean > 95 {
+			mean = 95
 		}
 		for _, key := range attributeKeys[cat] {
 			base := mean + keyAdjust[key]

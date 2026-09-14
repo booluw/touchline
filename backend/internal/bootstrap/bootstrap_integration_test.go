@@ -93,8 +93,24 @@ func TestBootstrapWorldCreatesMaterial(t *testing.T) {
 	).Scan(&people); err != nil {
 		t.Fatalf("count people: %v", err)
 	}
-	if people != SquadSizeDefault {
-		t.Fatalf("people = %d, want %d", people, SquadSizeDefault)
+	// Bootstrap seeds a world-level free-agent pool (PoolTargetSize) plus the
+	// 24 drafted squad members are re-seeded by the replenish step: total =
+	// PoolTargetSize + SquadSizeDefault.
+	if people != playerpool.PoolTargetSize+SquadSizeDefault {
+		t.Fatalf("people = %d, want %d", people, playerpool.PoolTargetSize+SquadSizeDefault)
+	}
+
+	// The world-level free-agent pool stays at its target after the starter
+	// drafted from it.
+	var freeAgents int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM player.players
+		WHERE world_id = $1 AND club_id IS NULL AND status = 'free_agent' AND country_id IS NULL`,
+		w.ID).Scan(&freeAgents); err != nil {
+		t.Fatalf("count free agents: %v", err)
+	}
+	if freeAgents != playerpool.PoolTargetSize {
+		t.Fatalf("free agents = %d, want %d", freeAgents, playerpool.PoolTargetSize)
 	}
 
 	var badPositions int

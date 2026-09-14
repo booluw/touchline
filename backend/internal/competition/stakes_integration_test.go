@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/bootstrap"
+	"github.com/touchline/backend/internal/playerpool"
 	"github.com/touchline/backend/pkg/playergen"
 )
 
@@ -122,7 +123,7 @@ func TestStakesDeadRubberFabricated(t *testing.T) {
 		t.Fatalf("create league: %v", err)
 	}
 
-	clubs := genClubs(t, pool, ctx, worldID, 8)
+	clubs := genClubs(t, pool, ctx, worldID, countryID, 8)
 	season := fabricateSeason(t, pool, ctx, worldID, league.ID, clubs)
 
 	// Table (points): S1=10 S2=9 S3=8 S4=5 S5=4 S6=3 S7=2 S8=1.
@@ -199,8 +200,9 @@ func fabricateSeason(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worl
 	return seasonID
 }
 
-// genClubs persists n brand-new AI clubs with deterministic squads.
-func genClubs(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worldID uuid.UUID, n int) []uuid.UUID {
+// genClubs persists n brand-new AI clubs with squads drafted from the
+// country's free-agent pool.
+func genClubs(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worldID, countryID uuid.UUID, n int) []uuid.UUID {
 	t.Helper()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -211,15 +213,29 @@ func genClubs(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worldID uui
 	if err != nil {
 		t.Fatalf("load pools: %v", err)
 	}
+	var ref time.Time
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(launched_at, created_at) FROM world.worlds WHERE id = $1`, worldID).Scan(&ref); err != nil {
+		t.Fatalf("load world ref: %v", err)
+	}
+	ref = time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, time.UTC)
+
+	factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(int64(3000)))).
+		WithRegistry(playergen.NewNameRegistry())
+	if _, err := playerpool.SeedPool(ctx, tx, nil, worldID, &countryID, playerpool.PoolTargetSize, factory, ref); err != nil {
+		t.Fatalf("seed countries pool: %v", err)
+	}
+
 	out := make([]uuid.UUID, 0, n)
 	for i := 0; i < n; i++ {
-		factory := playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(int64(900+i)))).
-			WithRegistry(playergen.NewNameRegistry())
-		club, err := bootstrap.GenerateAIClub(ctx, nil, tx, worldID, fmt.Sprintf("Fabricated FC %d", i+1), "", "england", factory)
+		club, err := bootstrap.GenerateAIClub(ctx, nil, tx, worldID, fmt.Sprintf("Fabricated FC %d", i+1), "", "england", &countryID)
 		if err != nil {
 			t.Fatalf("generate club %d: %v", i, err)
 		}
 		out = append(out, club.ClubID)
+		if err := playerpool.ReplenishPool(ctx, tx, nil, worldID, &countryID, playerpool.PoolTargetSize, factory, ref); err != nil {
+			t.Fatalf("replenish pool: %v", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit clubs: %v", err)
