@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/touchline/backend/internal/auth"
 	"github.com/touchline/backend/internal/testdb"
 	pkgauth "github.com/touchline/backend/pkg/auth"
@@ -21,25 +23,28 @@ func testCfg() pkgauth.JWTConfig {
 	}
 }
 
-func TestLogin_SingleActiveWorld(t *testing.T) {
+func TestLogin_AdminSession(t *testing.T) {
 	pool := testdb.New(t)
 	svc := auth.NewService(pool, testCfg())
 
 	w := testdb.CreateWorld(t, pool, "W-A")
-	testdb.CreateUser(t, pool, "single@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	userID := testdb.CreateUser(t, pool, "admin@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	testdb.MakeAdmin(t, pool, userID)
 
-	res, err := svc.Login(context.Background(), auth.LoginParams{Email: "single@example.com", Password: "s3cret"})
+	res, err := svc.Login(context.Background(), auth.LoginParams{Email: "admin@example.com", Password: "s3cret"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if res.Worlds != nil {
-		t.Fatalf("unexpected world list, want a session: %+v", res.Worlds)
-	}
 	if res.Identity == nil || res.TokenPair == nil {
-		t.Fatal("expected a session")
+		t.Fatal("expected a console session")
 	}
-	if res.Identity.WorldID != w {
-		t.Errorf("WorldID = %v, want %v", res.Identity.WorldID, w)
+	// An admin session is world-less: admins run the global console, not a
+	// manager's world.
+	if res.Identity.WorldID != uuid.Nil || res.Identity.ManagerID != uuid.Nil {
+		t.Errorf("console identity must be world-less, got %+v", res.Identity)
+	}
+	if res.Identity.UserID != userID {
+		t.Errorf("UserID = %v, want %v", res.Identity.UserID, userID)
 	}
 
 	var n int
@@ -63,56 +68,42 @@ func TestLogin_SingleActiveWorld(t *testing.T) {
 	}
 }
 
-func TestLogin_JobWorldWinsOverActive(t *testing.T) {
+func TestLogin_AdminWithoutWorld(t *testing.T) {
 	pool := testdb.New(t)
 	svc := auth.NewService(pool, testCfg())
 
-	worldA := testdb.CreateWorld(t, pool, "W-A") // active but jobless
-	worldB := testdb.CreateWorld(t, pool, "W-B") // employed
-	testdb.CreateUser(t, pool, "job@example.com", "s3cret", []testdb.Join{
-		{WorldID: worldA, Status: "active"},
-		{WorldID: worldB, Employed: true},
-	})
+	// The launch sequence: cmd/user-create creates the first admin on an empty
+	// DB (no -world-id), so there is no manager row to resolve.
+	userID := testdb.CreateUser(t, pool, "root@example.com", "s3cret", nil)
+	testdb.MakeAdmin(t, pool, userID)
 
-	res, err := svc.Login(context.Background(), auth.LoginParams{Email: "job@example.com", Password: "s3cret"})
+	res, err := svc.Login(context.Background(), auth.LoginParams{Email: "root@example.com", Password: "s3cret"})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if res.Identity.WorldID != worldB {
-		t.Errorf("login must default to the job world, got %v want %v", res.Identity.WorldID, worldB)
+	if res.Identity == nil || res.Identity.WorldID != uuid.Nil {
+		t.Errorf("world-less admin login, got %+v", res.Identity)
 	}
 }
 
-func TestLogin_MultiActiveWorlds_ReturnsPicker(t *testing.T) {
+func TestLogin_NonAdminBlocked(t *testing.T) {
 	pool := testdb.New(t)
 	svc := auth.NewService(pool, testCfg())
 
-	worldA := testdb.CreateWorld(t, pool, "W-A")
-	worldB := testdb.CreateWorld(t, pool, "W-B")
-	testdb.CreateUser(t, pool, "multi@example.com", "s3cret", []testdb.Join{
-		{WorldID: worldA, Status: "active"},
-		{WorldID: worldB, Status: "active"},
-	})
+	testdb.CreateUser(t, pool, "pro@example.com", "s3cret", nil)
 
-	res, err := svc.Login(context.Background(), auth.LoginParams{Email: "multi@example.com", Password: "s3cret"})
-	if err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	if res.TokenPair != nil || res.Identity != nil {
-		t.Fatal("jobless multi-world must NOT mint a session")
-	}
-	if len(res.Worlds) != 2 {
-		t.Fatalf("want 2 world options, got %+v", res.Worlds)
+	_, err := svc.Login(context.Background(), auth.LoginParams{Email: "pro@example.com", Password: "s3cret"})
+	if !errors.Is(err, auth.ErrNotAuthorized) {
+		t.Errorf("got %v, want ErrNotAuthorized", err)
 	}
 
-	// An explicit pick binds the session to the chosen world.
-	wid := worldA
-	res, err = svc.Login(context.Background(), auth.LoginParams{Email: "multi@example.com", Password: "s3cret", WorldID: &wid})
-	if err != nil {
-		t.Fatalf("login with pick: %v", err)
+	// A rejected login must not create a session.
+	var n int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM auth.sessions`).Scan(&n); err != nil {
+		t.Fatalf("count sessions: %v", err)
 	}
-	if res.Identity == nil || res.Identity.WorldID != worldA {
-		t.Errorf("picked world must be %v, got %+v", worldA, res.Identity)
+	if n != 0 {
+		t.Errorf("blocked login created %d sessions", n)
 	}
 }
 
@@ -120,8 +111,8 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 	pool := testdb.New(t)
 	svc := auth.NewService(pool, testCfg())
 
-	w := testdb.CreateWorld(t, pool, "W-A")
-	testdb.CreateUser(t, pool, "creds@example.com", "right-pass", []testdb.Join{{WorldID: w}})
+	userID := testdb.CreateUser(t, pool, "creds@example.com", "right-pass", nil)
+	testdb.MakeAdmin(t, pool, userID)
 
 	if _, err := svc.Login(context.Background(), auth.LoginParams{Email: "creds@example.com", Password: "wrong"}); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Errorf("wrong password: got %v, want ErrInvalidCredentials", err)
@@ -137,18 +128,6 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("failed logins created %d sessions", n)
-	}
-}
-
-func TestLogin_NoManager(t *testing.T) {
-	pool := testdb.New(t)
-	svc := auth.NewService(pool, testCfg())
-
-	testdb.CreateUser(t, pool, "none@example.com", "s3cret", nil)
-
-	_, err := svc.Login(context.Background(), auth.LoginParams{Email: "none@example.com", Password: "s3cret"})
-	if !errors.Is(err, auth.ErrNoManager) {
-		t.Errorf("got %v, want ErrNoManager", err)
 	}
 }
 
@@ -197,8 +176,8 @@ func TestRefresh_RotatesAndRevokes(t *testing.T) {
 	pool := testdb.New(t)
 	svc := auth.NewService(pool, testCfg())
 
-	w := testdb.CreateWorld(t, pool, "W-A")
-	testdb.CreateUser(t, pool, "rot@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	userID := testdb.CreateUser(t, pool, "rot@example.com", "s3cret", nil)
+	testdb.MakeAdmin(t, pool, userID)
 
 	first, err := svc.Login(context.Background(), auth.LoginParams{Email: "rot@example.com", Password: "s3cret"})
 	if err != nil {
@@ -209,8 +188,8 @@ func TestRefresh_RotatesAndRevokes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
-	if refreshed.Identity.WorldID != w {
-		t.Errorf("refresh must stay in the login world, got %v", refreshed.Identity.WorldID)
+	if refreshed.Identity.WorldID != uuid.Nil {
+		t.Errorf("admin refresh must stay world-less, got %v", refreshed.Identity.WorldID)
 	}
 
 	// The old refresh token must now be rejected (rotation).
@@ -230,6 +209,30 @@ func TestRefresh_RotatesAndRevokes(t *testing.T) {
 	}
 	if live != 1 {
 		t.Errorf("live sessions = %d, want 1", live)
+	}
+}
+
+func TestRefresh_RevokedAdminBlocked(t *testing.T) {
+	pool := testdb.New(t)
+	svc := auth.NewService(pool, testCfg())
+
+	userID := testdb.CreateUser(t, pool, "rev@example.com", "s3cret", nil)
+	testdb.MakeAdmin(t, pool, userID)
+
+	first, err := svc.Login(context.Background(), auth.LoginParams{Email: "rev@example.com", Password: "s3cret"})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	// Admin rights revoked: a live session must stop refreshing, not carry on
+	// as an admin forever.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE auth.users SET is_admin = FALSE WHERE id = $1`, userID); err != nil {
+		t.Fatalf("revoke admin: %v", err)
+	}
+
+	if _, err := svc.Refresh(context.Background(), first.TokenPair.RefreshToken, nil, ""); !errors.Is(err, auth.ErrNotAuthorized) {
+		t.Errorf("got %v, want ErrNotAuthorized after admin revocation", err)
 	}
 }
 

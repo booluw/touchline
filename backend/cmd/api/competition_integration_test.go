@@ -17,15 +17,15 @@ import (
 )
 
 // TestHTTPCompetitionAdminAndReads covers the S04-01 API surface: admin
-// country+league creation and seeding, plus world-scoped manager reads of
-// competitions, fixtures and standings — the full admin->seed->schedule loop.
+// country+league creation and whole-world seeding, plus world-scoped manager
+// reads of competitions, fixtures and standings — the full admin->seed loop.
 func TestHTTPCompetitionAdminAndReads(t *testing.T) {
 	ts, pool := testHTTPServer(t)
 	testdb.SeedRefData(t, pool)
 	testdb.SeedClubNameParts(t, pool)
 	client := ts.Client()
 
-	// Provisioning world + admin with a manager row in it.
+	// Provisioning world + admin.
 	var worldID string
 	if err := pool.QueryRow(context.Background(), `
 		INSERT INTO world.worlds (id, name, status) VALUES ($1, $2, 'provisioning') RETURNING id`,
@@ -34,32 +34,23 @@ func TestHTTPCompetitionAdminAndReads(t *testing.T) {
 	}
 	admin := testdb.CreateUser(t, pool, "leagueadmin@example.com", "s3cret", nil)
 	testdb.MakeAdmin(t, pool, admin)
-	if _, err := pool.Exec(context.Background(), `
-		INSERT INTO manager.managers (world_id, user_id, is_policy_bot, status)
-		VALUES ($1, $2, FALSE, 'active')`, worldID, admin); err != nil {
-		t.Fatalf("insert admin manager: %v", err)
-	}
 	plain := testdb.CreateUser(t, pool, "leagueplain@example.com", "s3cret", []testdb.Join{{WorldID: mustParseUUID(t, worldID)}})
-	_ = plain
 	adminCookies := login(t, ts, client, "leagueadmin@example.com", "s3cret")
-	plainCookies := login(t, ts, client, "leagueplain@example.com", "s3cret")
 
-	// Bootstrap the starter club + seed material.
-	resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/bootstrap",
-		`{"name":"Harbour Railway","short_name":"HAR"}`, adminCookies)
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("bootstrap = %d, want 201", resp.StatusCode)
+	// Non-admins cannot login at all (launch gate) — the console is admin-only.
+	if resp := post(t, ts, client, "/api/auth/login",
+		`{"email":"leagueplain@example.com","password":"s3cret"}`, ""); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("plain login = %d, want 403", resp.StatusCode)
 	}
-	resp.Body.Close()
 
-	// Non-admins cannot create countries or seed.
-	if r := post(t, ts, client, "/api/admin/countries",
-		`{"world_id":"`+worldID+`","code":"eng","name":"England"}`, plainCookies); r.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin country = %d, want 403", r.StatusCode)
+	// Unauthenticated admin routes are 401.
+	if resp := post(t, ts, client, "/api/admin/countries",
+		`{"world_id":"`+worldID+`","code":"eng","name":"England"}`, ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous country = %d, want 401", resp.StatusCode)
 	}
 
 	// Admin creates the country.
-	resp = post(t, ts, client, "/api/admin/countries",
+	resp := post(t, ts, client, "/api/admin/countries",
 		`{"world_id":"`+worldID+`","code":"eng","name":"England"}`, adminCookies)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create country = %d, want 201", resp.StatusCode)
@@ -95,68 +86,64 @@ func TestHTTPCompetitionAdminAndReads(t *testing.T) {
 		t.Fatalf("link champion = %d, want 204", resp.StatusCode)
 	}
 
-	// Seed the country with the premier league hosting the starter club.
-	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed-competition",
-		`{"country_id":"`+countryID+`","starter_league_id":"`+premierID+`"}`, adminCookies)
-	if resp.StatusCode != http.StatusCreated {
+	// Seed the whole world: clubs + players + memberships only, no seasons.
+	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed", "", adminCookies)
+	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		t.Fatalf("seed = %d, want 201 (%s)", resp.StatusCode, string(raw))
+		t.Fatalf("seed = %d, want 200 (%s)", resp.StatusCode, string(raw))
 	}
 	seed := decodeMap(t, resp)
-	leagues := seed["leagues"].([]any)
+	if int(seed["new_clubs"].(float64)) != 8 {
+		t.Fatalf("seed new_clubs = %v, want 8", seed["new_clubs"])
+	}
+	if int(seed["league_count"].(float64)) != 2 {
+		t.Fatalf("seed league_count = %v, want 2", seed["league_count"])
+	}
+	countries := seed["countries"].([]any)
+	if len(countries) != 1 {
+		t.Fatalf("seeded countries = %d, want 1", len(countries))
+	}
+	leagues := countries[0].(map[string]any)["leagues"].([]any)
 	if len(leagues) != 2 {
 		t.Fatalf("seeded leagues = %d, want 2", len(leagues))
 	}
 	for _, l := range leagues {
 		l := l.(map[string]any)
-		if int(l["team_count"].(float64)) != 4 || int(l["matchdays"].(float64)) != 6 {
-			t.Fatalf("league seed = %v, want 4 teams / 6 matchdays", l)
+		if int(l["team_count"].(float64)) != 4 || int(l["new_clubs"].(float64)) != 4 {
+			t.Fatalf("league seed = %v, want 4 team_count / 4 new_clubs", l)
 		}
 	}
 
-	// A second seed of the country is rejected as already seeded.
-	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed-competition",
-		`{"country_id":"`+countryID+`","starter_league_id":"`+premierID+`"}`, adminCookies)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("re-seed = %d, want 409", resp.StatusCode)
-	}
-
-	// Manager reads: competitions, fixtures, standings.
-	resp = get(t, ts, client, "/api/competitions", plainCookies)
+	// A second seed is an idempotent no-op (200, zero new clubs) — the launch
+	// model lets admins re-run after adding leagues.
+	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed", "", adminCookies)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list competitions = %d, want 200", resp.StatusCode)
+		t.Fatalf("re-seed = %d, want 200", resp.StatusCode)
 	}
-	comps := decodeMap(t, resp)["competitions"].([]any)
-	if len(comps) != 2 {
-		t.Fatalf("competitions = %d, want 2", len(comps))
-	}
-
-	resp = get(t, ts, client, "/api/competitions/"+premierID+"/fixtures?matchday=1", plainCookies)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("fixtures = %d, want 200", resp.StatusCode)
-	}
-	fixtures := decodeMap(t, resp)["fixtures"].([]any)
-	if len(fixtures) != 2 {
-		t.Fatalf("matchday 1 fixtures = %d, want 2", len(fixtures))
+	if n := int(decodeMap(t, resp)["new_clubs"].(float64)); n != 0 {
+		t.Fatalf("re-seed new_clubs = %d, want 0", n)
 	}
 
+	// Manager reads: the plain manager is still a valid manager row, but the
+	// login gate only admits admins. Mint a session for the manager directly so
+	// the world-scoped read surface keeps its coverage independent of the gate.
+	var plainManager uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM manager.managers WHERE user_id = $1`, plain).Scan(&plainManager); err != nil {
+		t.Fatalf("plain manager id: %v", err)
+	}
+	plainCookies := managerCookies(t, ts, pool, plainManager, plain)
+
+	// Seeding created no seasons — standings are empty, fixtures are gone.
 	resp = get(t, ts, client, "/api/competitions/"+premierID+"/standings", plainCookies)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("standings = %d, want 200", resp.StatusCode)
-	}
-	standing := decodeMap(t, resp)
-	if standing["season_number"].(float64) != 1 || len(standing["rows"].([]any)) != 0 {
-		t.Fatalf("initial standings = %v, want empty season 1", standing)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("standings before season = %d, want 404", resp.StatusCode)
 	}
 
-	// Cross-world isolation: the plain manager's world has no countries but
-	// the admin's provisioning world does — reads are always world-scoped.
+	// The admin console session is world-less: manager-scoped reads are 403.
 	resp = get(t, ts, client, "/api/competitions", adminCookies)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("admin competitions = %d, want 200", resp.StatusCode)
-	}
-	if n := len(decodeMap(t, resp)["competitions"].([]any)); n != 2 {
-		t.Fatalf("admin-world competitions = %d, want 2", n)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("admin competitions = %d, want 403 (no world context)", resp.StatusCode)
 	}
 }
 

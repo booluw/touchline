@@ -2,9 +2,12 @@ package competition
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math/rand"
 	"time"
 
@@ -17,25 +20,39 @@ import (
 	"github.com/touchline/backend/pkg/playergen"
 )
 
-// SeedCompetition materializes the admin's league declaration for a country:
-// for every league in the country it guarantees team_count entries (reusing
-// clubs that are not yet entered, starting with the world's starter club in
-// starterLeagueID), generates the remaining AI clubs with squads, creates a
-// season, and schedules the deterministic double round-robin fixture list.
+// SeedWorld materializes the admin's world declaration (launch model): for
+// every country, for every league, it guarantees team_count member clubs with
+// generated squads and records each club's season-independent membership in
+// competition.club_competitions.
 //
-// One seed per league is allowed: any league that already has a season is a
-// 409 ErrLeagueAlreadySeeded. The whole run is one transaction and is
-// deterministic — a single seeded rand.Rand derived from the world's
-// WORLD_BOOTSTRAPPED.random_seed drives names, squads, and fixture order.
-func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, starterLeagueID uuid.UUID) (*SeedResult, error) {
+// It is strictly incremental and idempotent: leagues that already hold
+// team_count members are reported as full and skipped, so running it again
+// after an admin adds more leagues (or countries) fills only the new ones
+// without touching anything already materialized. It creates NO seasons and NO
+// fixtures — running a season is the separate StartSeason step.
+//
+// Determinism: the run draws from one world seed minted on the FIRST
+// successful seed of a world and stored in world.worlds.world_seed (recorded
+// on the WORLD_SEEDED event; later runs reuse it). Per-league club naming
+// draws from rand.New(rand.NewSource(seed ⊕ leagueID)) so a league added and
+// seeded later is reproducible regardless of the overall run history. The
+// whole run is one transaction.
+func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin seed tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var worldStatus string
-	err = tx.QueryRow(ctx, `SELECT status FROM world.worlds WHERE id = $1 FOR UPDATE`, worldID).Scan(&worldStatus)
+	var (
+		worldStatus string
+		worldSeed   *int64
+		worldRef    time.Time
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT status, world_seed, COALESCE(launched_at, created_at)
+		FROM world.worlds WHERE id = $1 FOR UPDATE`, worldID,
+	).Scan(&worldStatus, &worldSeed, &worldRef)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWorldNotFound
 	}
@@ -46,171 +63,182 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 		return nil, ErrWorldArchived
 	}
 
-	var country Country
-	err = tx.QueryRow(ctx,
-		`SELECT id, world_id, code, name FROM world.countries WHERE id = $1`, countryID).
-		Scan(&country.ID, &country.WorldID, &country.Code, &country.Name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrCountryNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load country: %w", err)
-	}
-	if country.WorldID != worldID {
-		return nil, ErrCountryWorldMismatch
-	}
-
-	leagues, err := s.leaguesByCountry(ctx, tx, countryID)
-	if err != nil {
-		return nil, err
-	}
-	if len(leagues) == 0 {
-		return nil, ErrCountryHasNoLeagues
-	}
-	if err := validateAdjacency(leagues); err != nil {
-		return nil, err
-	}
-
-	starterOK := false
-	for _, l := range leagues {
-		if l.ID == starterLeagueID {
-			starterOK = true
+	// Mint the world's replay seed on first seed; reuse it on every later run
+	// so incremental seeding stays reproducible. A failed first run rolls back
+	// with the enclosing tx (the WORLD_SEEDED event and the world_seed write
+	// are committed atomically with the seeded content, or not at all).
+	if worldSeed == nil {
+		v := cryptoSeed()
+		if _, err := tx.Exec(ctx,
+			`UPDATE world.worlds SET world_seed = $2 WHERE id = $1`, worldID, v); err != nil {
+			return nil, fmt.Errorf("store world seed: %w", err)
 		}
-		seeded, err := leagueHasSeason(ctx, tx, l.ID)
-		if err != nil {
+		seedValue := v
+		if err := s.recordSeedEvent(ctx, tx, &eventbus.Event{
+			WorldID:    worldID,
+			EventType:  "WORLD_SEEDED",
+			RandomSeed: &seedValue,
+			Payload: mustJSON(map[string]any{
+				"seed": v,
+			}),
+		}); err != nil {
 			return nil, err
 		}
-		if seeded {
-			return nil, ErrLeagueAlreadySeeded
-		}
+		worldSeed = &v
 	}
-	if !starterOK {
-		return nil, ErrCompetitionNotFound
-	}
+	seed := *worldSeed
+	ref := daysTruncate(worldRef)
 
-	// Determinism: one master rng seeded from the world bootstrap seed.
-	worldSeed, bootRef, err := bootstrapSeed(ctx, tx, worldID)
-	if err != nil {
-		return nil, err
-	}
-	master := rand.New(rand.NewSource(worldSeed))
-	ref := daysTruncate(bootRef)
-
-	// One country-scoped free-agent pool drives this whole seeding run. A
-	// single factory (one rng + registry) produces every pool player, so names
-	// are unique across the country and the output is replayable. Clubs draft
-	// from the pool; the pool is replenished after each club so the market
-	// never empties through a big multi-league seed.
-	poolFactory, err := squadFactory(ctx, tx, master.Int63())
-	if err != nil {
-		return nil, err
-	}
-	if _, err := playerpool.SeedPool(ctx, tx, s.bus, worldID, &countryID, playerpool.PoolTargetSize, poolFactory, ref); err != nil {
-		return nil, fmt.Errorf("seed country pool: %w", err)
-	}
-
-	// Club name pools come from the global reference data (data-driven, OPD-13
+	// Global club-name pools come from the reference data (data-driven, OPD-13
 	// analogue): admins extend ref.club_name_parts via the dashboard or JSON.
 	stems, suffixes, err := bootstrap.LoadClubNameParts(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	freeClubs, err := clubsWithoutEntries(ctx, tx, worldID)
+	// Club names must be unique within the world; seed against the existing set.
+	used := map[string]bool{}
+	rows, err := tx.Query(ctx, `SELECT name FROM club.clubs WHERE world_id = $1`, worldID)
+	if err != nil {
+		return nil, fmt.Errorf("load existing club names: %w", err)
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan club name: %w", err)
+		}
+		used[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate club names: %w", err)
+	}
+
+	// One master factory seeds each country's free-agent pool; the pool is
+	// replenished after each club so the market never empties through a big
+	// multi-league seed. ReplenishPool is idempotent — it only tops up.
+	poolFactory, err := squadFactory(ctx, tx, hashMix(seed, worldID))
 	if err != nil {
 		return nil, err
 	}
 
-	result := &SeedResult{WorldID: worldID, CountryID: countryID}
-	for _, l := range leagues {
-		entries := []uuid.UUID{}
-		if l.ID == starterLeagueID {
-			take := min(len(freeClubs), l.TeamCount)
-			entries = append(entries, freeClubs[:take]...)
-			freeClubs = freeClubs[take:]
+	result := &SeedResult{WorldID: worldID, RandomSeed: seed}
+	countries, err := tx.Query(ctx, `
+		SELECT id, name FROM world.countries WHERE world_id = $1 ORDER BY id`, worldID)
+	if err != nil {
+		return nil, fmt.Errorf("list countries: %w", err)
+	}
+	type countryRow struct {
+		id   uuid.UUID
+		name string
+	}
+	var countryRows []countryRow
+	for countries.Next() {
+		var c countryRow
+		if err := countries.Scan(&c.id, &c.name); err != nil {
+			countries.Close()
+			return nil, fmt.Errorf("scan country: %w", err)
+		}
+		countryRows = append(countryRows, c)
+	}
+	countries.Close()
+	if err := countries.Err(); err != nil {
+		return nil, fmt.Errorf("iterate countries: %w", err)
+	}
+
+	for _, country := range countryRows {
+		leagues, err := s.leaguesByCountry(ctx, tx, country.id)
+		if err != nil {
+			return nil, err
+		}
+		if len(leagues) == 0 {
+			continue // country declared but not yet structured — a later seed fills it
 		}
 
-		clubSeeds := []ClubSeed{}
-		names := map[string]bool{}
-		var anyName string
-		for _, clubID := range entries {
-			if err := tx.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1`, clubID).Scan(&anyName); err != nil {
-				return nil, fmt.Errorf("load club name: %w", err)
-			}
-			names[anyName] = true
-			clubSeeds = append(clubSeeds, ClubSeed{ID: clubID, Name: anyName})
-		}
-		for len(entries) < l.TeamCount {
-			clubName := nextClubName(master, stems, suffixes, names)
-			generated, err := bootstrap.GenerateAIClub(ctx, s.bus, tx, worldID, clubName, short(clubName), country.Name, &countryID)
+		seeded := make([]LeagueSeed, 0, len(leagues))
+		for _, l := range leagues {
+			result.LeagueCount++
+			members, err := leagueMembers(ctx, tx, l.ID)
 			if err != nil {
-				return nil, fmt.Errorf("generate AI club for %s: %w", l.Name, err)
+				return nil, err
 			}
-			entries = append(entries, generated.ClubID)
-			names[clubName] = true
-			clubSeeds = append(clubSeeds, ClubSeed{ID: generated.ClubID, Name: generated.ClubName})
 
-			// The draft consumed 24 players; top the country pool back up so
-			// later clubs (and the signing market) still have supply.
-			if err := playerpool.ReplenishPool(ctx, tx, s.bus, worldID, &countryID, playerpool.PoolTargetSize, poolFactory, ref); err != nil {
-				return nil, fmt.Errorf("replenish country pool: %w", err)
+			need := l.TeamCount - len(members)
+			if need <= 0 {
+				seeded = append(seeded, LeagueSeed{
+					LeagueID:  l.ID,
+					Name:      l.Name,
+					Tier:      l.Tier,
+					TeamCount: l.TeamCount,
+					NewClubs:  0,
+					Clubs:     clubSeeds(ctx, tx, members), //nolint:errcheck
+				})
+				continue
 			}
+
+			// Per-league name stream: deterministic in the league, independent
+			// of how many other leagues the world has already seeded.
+			lrng := rand.New(rand.NewSource(hashMix(seed, l.ID)))
+			created := make([]uuid.UUID, 0, need)
+			names := map[string]bool{}
+			for i := 0; i < need; i++ {
+				name := nextClubName(lrng, stems, suffixes, used)
+				generated, err := bootstrap.GenerateAIClub(ctx, s.bus, tx, worldID, name, short(name), country.name, &country.id)
+				if err != nil {
+					return nil, fmt.Errorf("generate AI club for %s: %w", l.Name, err)
+				}
+				created = append(created, generated.ClubID)
+				used[name] = true
+				names[generated.ClubName] = true
+
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO competition.club_competitions (world_id, club_id, competition_id, role)
+					VALUES ($1, $2, $3, 'league')`,
+					worldID, generated.ClubID, l.ID); err != nil {
+					return nil, fmt.Errorf("record league membership for %s: %w", generated.ClubName, err)
+				}
+
+				// The draft consumed 24 players; top the country pool back up
+				// so later clubs (and the signing market) still have supply.
+				if err := playerpool.ReplenishPool(ctx, tx, s.bus, worldID, &country.id, playerpool.PoolTargetSize, poolFactory, ref); err != nil {
+					return nil, fmt.Errorf("replenish country pool: %w", err)
+				}
+			}
+
+			members = append(members, created...)
+			seeded = append(seeded, LeagueSeed{
+				LeagueID:  l.ID,
+				Name:      l.Name,
+				Tier:      l.Tier,
+				TeamCount: l.TeamCount,
+				NewClubs:  need,
+				Clubs:     clubSeeds(ctx, tx, members), //nolint:errcheck
+			})
+			result.NewClubs += need
 		}
 
-		season, err := s.createSeason(ctx, tx, worldID, l.ID, bootRef, entries)
-		if err != nil {
-			return nil, err
-		}
-
-		fixtureCount, matchdays, err := s.createFixtures(ctx, tx, worldID, l.ID, entries, bootRef)
-		if err != nil {
-			return nil, err
-		}
-
-		seedEv := &eventbus.Event{
-			WorldID:    worldID,
-			EventType:  "SEASON_CREATED",
-			RandomSeed: &worldSeed,
-			Payload: mustJSON(map[string]any{
-				"competition_id": l.ID,
-				"season_id":      season.ID,
-				"season_label":   season.SeasonLabel,
-				"season_number":  season.SeasonNumber,
-				"team_count":     len(entries),
-				"fixture_count":  fixtureCount,
-				"matchdays":      matchdays,
-			}),
-		}
-		if err := s.recordSeedEvent(ctx, tx, seedEv); err != nil {
-			return nil, err
-		}
-
-		result.Leagues = append(result.Leagues, LeagueSeed{
-			LeagueID:     l.ID,
-			Name:         l.Name,
-			Tier:         l.Tier,
-			TeamCount:    len(entries),
-			SeasonID:     season.ID,
-			SeasonLabel:  season.SeasonLabel,
-			FixtureCount: fixtureCount,
-			Matchdays:    matchdays,
-			Clubs:        clubSeeds,
+		result.Countries = append(result.Countries, CountrySeed{
+			CountryID:   country.id,
+			CountryName: country.name,
+			Leagues:     seeded,
 		})
 	}
 
-	if len(freeClubs) > 0 {
-		return nil, ErrNoStarterClub
+	if result.LeagueCount == 0 {
+		return nil, ErrWorldHasNoLeagues
 	}
 
-	countryEv := &eventbus.Event{
+	if err := s.recordSeedEvent(ctx, tx, &eventbus.Event{
 		WorldID:   worldID,
 		EventType: "COMPETITION_SEEDED",
 		Payload: mustJSON(map[string]any{
-			"country_id": countryID,
-			"leagues":    leagueSummaries(result),
+			"world_id":      worldID,
+			"country_count": len(result.Countries),
+			"league_count":  result.LeagueCount,
+			"new_clubs":     result.NewClubs,
 		}),
-	}
-	if err := s.recordSeedEvent(ctx, tx, countryEv); err != nil {
+	}); err != nil {
 		return nil, err
 	}
 
@@ -218,6 +246,100 @@ func (s *Service) SeedCompetition(ctx context.Context, worldID, countryID, start
 		return nil, fmt.Errorf("commit seed: %w", err)
 	}
 	return result, nil
+}
+
+// StartSeason materializes the next season for a competition from its current
+// league memberships: the season row, its competition_entries, and the
+// deterministic double round-robin fixture list begun at the world's season
+// reference date. It is the launcher for a playable year — separate from
+// SeedWorld, which only guarantees clubs + members.
+func (s *Service) StartSeason(ctx context.Context, worldID, competitionID uuid.UUID) (*Season, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin start-season tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var worldStatus string
+	var worldRef time.Time
+	err = tx.QueryRow(ctx,
+		`SELECT status, COALESCE(launched_at, created_at) FROM world.worlds WHERE id = $1 FOR UPDATE`, worldID).
+		Scan(&worldStatus, &worldRef)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrWorldNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load world: %w", err)
+	}
+	if worldStatus == "archived" {
+		return nil, ErrWorldArchived
+	}
+
+	var compWorld uuid.UUID
+	err = tx.QueryRow(ctx,
+		`SELECT world_id FROM competition.competitions WHERE id = $1`, competitionID).Scan(&compWorld)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCompetitionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load competition: %w", err)
+	}
+	if compWorld != worldID {
+		return nil, ErrCompetitionWorldMismatch
+	}
+
+	seeded, err := leagueHasSeason(ctx, tx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if seeded {
+		return nil, ErrLeagueAlreadySeeded
+	}
+
+	members, err := leagueMembers(ctx, tx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return nil, ErrCompetitionNotSeeded
+	}
+
+	season, err := s.createSeason(ctx, tx, worldID, competitionID, worldRef, members)
+	if err != nil {
+		return nil, err
+	}
+
+	fixtureCount, matchdays, err := s.createFixtures(ctx, tx, worldID, competitionID, members, worldRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var seedPtr *int64
+	if err := tx.QueryRow(ctx, `SELECT world_seed FROM world.worlds WHERE id = $1`, worldID).Scan(&seedPtr); err != nil {
+		return nil, fmt.Errorf("load world seed: %w", err)
+	}
+	seedEvent := &eventbus.Event{
+		WorldID:    worldID,
+		EventType:  "SEASON_CREATED",
+		RandomSeed: seedPtr,
+		Payload: mustJSON(map[string]any{
+			"competition_id": competitionID,
+			"season_id":      season.ID,
+			"season_label":   season.SeasonLabel,
+			"season_number":  season.SeasonNumber,
+			"team_count":     len(members),
+			"fixture_count":  fixtureCount,
+			"matchdays":      matchdays,
+		}),
+	}
+	if err := s.recordSeedEvent(ctx, tx, seedEvent); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit start-season: %w", err)
+	}
+	return season, nil
 }
 
 // createSeason inserts the next season for a league with its entries.
@@ -278,28 +400,53 @@ func (s *Service) createFixtures(ctx context.Context, tx pgx.Tx, worldID, league
 	return count, len(rounds), nil
 }
 
-// bootstrapSeed returns the world's replay seed and its season reference date.
-// The seed comes from the WORLD_BOOTSTRAPPED event; without one the world has
-// no starter material to build on.
-func bootstrapSeed(ctx context.Context, tx pgx.Tx, worldID uuid.UUID) (int64, time.Time, error) {
-	var (
-		seedPtr *int64
-		ref     time.Time
-	)
-	err := tx.QueryRow(ctx, `
-		SELECT
-			(SELECT e.random_seed FROM world.events e
-			 WHERE e.world_id = w.id AND e.event_type = 'WORLD_BOOTSTRAPPED'
-			 ORDER BY e.occurred_at LIMIT 1),
-			COALESCE(w.launched_at, w.created_at)
-		FROM world.worlds w WHERE w.id = $1`, worldID).Scan(&seedPtr, &ref)
+// leagueMembers returns a competition's current league-role member club ids,
+// in deterministic joined order (stable replay).
+func leagueMembers(ctx context.Context, tx pgx.Tx, competitionID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT club_id FROM competition.club_competitions
+		WHERE competition_id = $1 AND role = 'league'
+		ORDER BY joined_at, club_id`, competitionID)
 	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("load bootstrap seed: %w", err)
+		return nil, fmt.Errorf("league members: %w", err)
 	}
-	if seedPtr == nil {
-		return 0, time.Time{}, ErrWorldNotBootstrapped
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan league member: %w", err)
+		}
+		out = append(out, id)
 	}
-	return *seedPtr, ref, nil
+	return out, rows.Err()
+}
+
+// clubSeeds resolves club ids to their names for a seed response.
+func clubSeeds(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) []ClubSeed {
+	if len(ids) == 0 {
+		return []ClubSeed{}
+	}
+	names := map[uuid.UUID]string{}
+	rows, err := tx.Query(ctx,
+		`SELECT id, name FROM club.clubs WHERE id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return []ClubSeed{} // response enrichment is best-effort
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			continue
+		}
+		names[id] = name
+	}
+	out := make([]ClubSeed, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, ClubSeed{ID: id, Name: names[id]})
+	}
+	return out
 }
 
 // leaguesByCountry loads the country's leagues ordered by tier (ascending).
@@ -325,32 +472,6 @@ func leagueHasSeason(ctx context.Context, tx pgx.Tx, leagueID uuid.UUID) (bool, 
 	return has, err
 }
 
-// clubsWithoutEntries returns clubs in the world that are not yet entered in
-// any league season (ordered by creation).
-func clubsWithoutEntries(ctx context.Context, tx pgx.Tx, worldID uuid.UUID) ([]uuid.UUID, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT c.id FROM club.clubs c
-		WHERE c.world_id = $1
-		  AND NOT EXISTS (
-			SELECT 1 FROM competition.competition_entries e
-			JOIN competition.seasons s ON s.id = e.season_id
-			WHERE e.club_id = c.id AND s.world_id = c.world_id)
-		ORDER BY c.created_at`, worldID)
-	if err != nil {
-		return nil, fmt.Errorf("clubs without entries: %w", err)
-	}
-	defer rows.Close()
-	out := []uuid.UUID{}
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan club: %w", err)
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
 // squadFactory builds a deterministic player factory from a sub-seed, drawing
 // name/nationality pools from the reference data inside the caller's tx.
 func squadFactory(ctx context.Context, tx pgx.Tx, seed int64) (*playergen.PlayerFactory, error) {
@@ -362,16 +483,21 @@ func squadFactory(ctx context.Context, tx pgx.Tx, seed int64) (*playergen.Player
 	return playergen.NewPlayerFactory(generator, natPool, rand.New(rand.NewSource(seed))).WithRegistry(registry), nil
 }
 
-func leagueSummaries(r *SeedResult) []map[string]any {
-	out := make([]map[string]any, 0, len(r.Leagues))
-	for _, l := range r.Leagues {
-		out = append(out, map[string]any{
-			"league_id": l.LeagueID,
-			"name":      l.Name,
-			"season_id": l.SeasonID,
-		})
+// hashMix folds a UUID into a seed so per-league / per-world sub-streams are
+// deterministic and wire-independent of run ordering.
+func hashMix(seed int64, id uuid.UUID) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write(id[:])
+	return seed ^ int64(h.Sum64())
+}
+
+// cryptoSeed returns a fresh crypto-random int64 replay seed.
+func cryptoSeed() int64 {
+	var b [8]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		return time.Now().UnixNano()
 	}
-	return out
+	return int64(binary.LittleEndian.Uint64(b[:]))
 }
 
 func mustJSON(v map[string]any) []byte {

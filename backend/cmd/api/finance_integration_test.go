@@ -166,7 +166,7 @@ func TestHTTPFinancesAuthSemantics(t *testing.T) {
 	// A manager in a different world cannot read this club's books (403).
 	worldOther := testdb.CreateWorld(t, pool, "finance-other-world")
 	testdb.CreateUser(t, pool, "finance-foreign@example.com", "s3cret", []testdb.Join{{WorldID: worldOther}})
-	foreign := login(t, ts, client, "finance-foreign@example.com", "s3cret")
+	foreign := loginManager(t, ts, pool, "finance-foreign@example.com")
 	for _, path := range []string{"finances", "ledger", "contracts"} {
 		if resp := get(t, ts, client, "/api/clubs/"+clubID.String()+"/"+path, foreign); resp.StatusCode != http.StatusForbidden {
 			t.Fatalf("foreign %s = %d, want 403", path, resp.StatusCode)

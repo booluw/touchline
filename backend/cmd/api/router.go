@@ -72,16 +72,15 @@ func (s *server) router() *gin.Engine {
 		api.POST("/offers/:id/accept", s.requireAuth, s.handleAcceptOffer)
 		api.POST("/offers/:id/decline", s.requireAuth, s.handleDeclineOffer)
 
-		// Admin: world lifecycle (S02-02), world bootstrap (S03-01),
-		// game-start club->manager job offers, and country-scoped league
-		// administration + seeding (S04-01).
+		// Admin: world lifecycle (S02-02), whole-world seeding (clubs + players
+		// + memberships, launch model), media aid offers, country-scoped league
+		// administration (S04-01).
 		admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
 		{
 			admin.POST("/worlds", s.handleCreateWorld)
 			admin.POST("/worlds/:id/status", s.handleWorldStatus)
 			admin.POST("/worlds/:id/config", s.handleWorldConfig)
-			admin.POST("/worlds/:id/bootstrap", s.handleBootstrap)
-			admin.POST("/worlds/:id/seed-competition", s.handleSeedCompetition)
+			admin.POST("/worlds/:id/seed", s.handleSeedWorld)
 			admin.POST("/offers", s.handleCreateOffer)
 			admin.POST("/countries", s.handleCreateCountry)
 			admin.GET("/countries", s.handleListCountries)

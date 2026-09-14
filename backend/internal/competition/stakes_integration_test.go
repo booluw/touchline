@@ -26,8 +26,14 @@ func TestStakesSixPointerBands(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(pool, nil)
 	premier, champ := twoTierLeague(t, svc, countryID)
-	if _, err := svc.SeedCompetition(ctx, worldID, countryID, premier.ID); err != nil {
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier season: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, champ.ID); err != nil {
+		t.Fatalf("start champ season: %v", err)
 	}
 
 	// Before any result exists there is nothing to stake against — the calls

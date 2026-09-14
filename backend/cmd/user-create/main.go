@@ -1,14 +1,16 @@
-// Command user-create provisions a login account + its first manager row in a
-// world (one invocation = one world that account inhabits).
+// Command user-create provisions a login account and, optionally, its first
+// manager row in a world (one invocation = one world that account inhabits).
 //
 // This is a development/bootstrap tool, NOT the product registration flow
-// (registration policy is an open decision, OPD-02). A user created here has
-// no job; login will default them into the given world.
+// (registration policy is an open decision, OPD-02). On an empty database the
+// first account is the world's first ADMIN (no -world-id): it must be able to
+// log into the console before any world exists. Pass -world-id to also join
+// that world as an unemployed manager.
 //
 // Usage:
 //
-//	user-create -email m@example.com -password 'secret' -display-name 'M' \
-//	   -world-id <uuid> [-admin]
+//	user-create -email m@example.com -password 'secret' -display-name 'M' [-admin]
+//	user-create -email m@example.com -password 'secret' -world-id <uuid> [-admin]
 //	user-create ... -password-env LOGIN_PW   # read the password from an env var
 //
 // DATABASE_URL (or -database) must point at a reachable Postgres.
@@ -45,9 +47,6 @@ func main() {
 	if *email == "" {
 		log.Fatal("-email is required")
 	}
-	if *worldID == "" {
-		log.Fatal("-world-id is required (an admin creates the world first — see docs/development.md, Worlds and job offers)")
-	}
 	database := *databaseURL
 	if database == "" {
 		database = os.Getenv("DATABASE_URL")
@@ -69,9 +68,13 @@ func main() {
 		name = strings.SplitN(lowerEmail(*email), "@", 2)[0]
 	}
 
-	world, err := uuid.Parse(*worldID)
-	if err != nil {
-		log.Fatalf("-world-id is not a valid UUID: %v", err)
+	var world *uuid.UUID
+	if *worldID != "" {
+		parsed, err := uuid.Parse(*worldID)
+		if err != nil {
+			log.Fatalf("-world-id is not a valid UUID: %v", err)
+		}
+		world = &parsed
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(pass), bcrypt.DefaultCost)
@@ -97,12 +100,14 @@ func main() {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var worldExists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM world.worlds WHERE id = $1)`, world).Scan(&worldExists); err != nil {
-		log.Fatalf("check world: %v", err)
-	}
-	if !worldExists {
-		log.Fatalf("world %s does not exist (an admin creates the world first — see docs/development.md, Worlds and job offers)", world)
+	if world != nil {
+		var worldExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM world.worlds WHERE id = $1)`, *world).Scan(&worldExists); err != nil {
+			log.Fatalf("check world: %v", err)
+		}
+		if !worldExists {
+			log.Fatalf("world %s does not exist (an admin creates the world first — see docs/development.md, Worlds and job offers)", *world)
+		}
 	}
 
 	var userID uuid.UUID
@@ -119,23 +124,29 @@ func main() {
 		log.Fatalf("insert user: %v", err)
 	}
 
-	err = tx.QueryRow(ctx, `
-		INSERT INTO manager.managers (world_id, user_id, status)
-		VALUES ($1, $2, 'unemployed')
-		RETURNING id`, world, userID,
-	).Scan(new(uuid.UUID))
-	if err != nil {
-		if isUniqueViolation(err) {
-			log.Fatalf("this account is already joined to world %s (one manager row per world per account)", world)
+	if world != nil {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO manager.managers (world_id, user_id, status)
+			VALUES ($1, $2, 'unemployed')
+			RETURNING id`, *world, userID,
+		).Scan(new(uuid.UUID))
+		if err != nil {
+			if isUniqueViolation(err) {
+				log.Fatalf("this account is already joined to world %s (one manager row per world per account)", *world)
+			}
+			log.Fatalf("insert manager: %v", err)
 		}
-		log.Fatalf("insert manager: %v", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		log.Fatalf("commit: %v", err)
 	}
 
-	fmt.Printf("created account %s (id %s) as unemployed manager in world %s\n", lowerEmail(*email), userID, world)
+	if world != nil {
+		fmt.Printf("created account %s (id %s) as unemployed manager in world %s\n", lowerEmail(*email), userID, *world)
+	} else {
+		fmt.Printf("created console account %s (id %s) with no world — create a world and join it with -world-id later\n", lowerEmail(*email), userID)
+	}
 	fmt.Println("note: registration is OPD-02 (open) — this CLI is the dev bootstrap, not the product signup flow")
 }
 

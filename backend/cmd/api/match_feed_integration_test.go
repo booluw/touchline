@@ -95,11 +95,9 @@ func TestMatchFeedFixtureHeader(t *testing.T) {
 	away := insertClub(t, pool, world, "United AFC")
 	fixtureID, _ := insertCompletedFixture(t, pool, world, home, away)
 
+	cookies := loginManager(t, ts, pool, "wf@example.com")
 	client := ts.Client()
-	resp := post(t, ts, client, "/api/auth/login", `{"email":"wf@example.com","password":"s3cret"}`, "")
-	cookies := cookieMap(resp)
-
-	resp = get(t, ts, client, "/api/fixtures/"+fixtureID.String(), cookieHeader(cookies))
+	resp := get(t, ts, client, "/api/fixtures/"+fixtureID.String(), cookies)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("fixture header = %d, want 200", resp.StatusCode)
 	}
@@ -145,11 +143,9 @@ func TestMatchFeedEventsEndpoint(t *testing.T) {
 	away := insertClub(t, pool, world, "United AFC")
 	_, matchID := insertCompletedFixture(t, pool, world, home, away)
 
+	cookies := loginManager(t, ts, pool, "wf@example.com")
 	client := ts.Client()
-	resp := post(t, ts, client, "/api/auth/login", `{"email":"wf@example.com","password":"s3cret"}`, "")
-	cookies := cookieMap(resp)
-
-	resp = get(t, ts, client, "/api/matches/"+matchID.String()+"/events", cookieHeader(cookies))
+	resp := get(t, ts, client, "/api/matches/"+matchID.String()+"/events", cookies)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("match events = %d, want 200", resp.StatusCode)
 	}
@@ -203,14 +199,13 @@ func TestMatchFeedScopedToCallerWorld(t *testing.T) {
 	away := insertClub(t, pool, world, "United AFC")
 	fixtureID, matchID := insertCompletedFixture(t, pool, world, home, away)
 
+	cookies := loginManager(t, ts, pool, "other@example.com")
 	client := ts.Client()
-	resp := post(t, ts, client, "/api/auth/login", `{"email":"other@example.com","password":"s3cret"}`, "")
-	cookies := cookieMap(resp)
 
-	if resp := get(t, ts, client, "/api/fixtures/"+fixtureID.String(), cookieHeader(cookies)); resp.StatusCode != http.StatusNotFound {
+	if resp := get(t, ts, client, "/api/fixtures/"+fixtureID.String(), cookies); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("foreign fixture header = %d, want 404", resp.StatusCode)
 	}
-	if resp := get(t, ts, client, "/api/matches/"+matchID.String()+"/events", cookieHeader(cookies)); resp.StatusCode != http.StatusNotFound {
+	if resp := get(t, ts, client, "/api/matches/"+matchID.String()+"/events", cookies); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("foreign match events = %d, want 404", resp.StatusCode)
 	}
 }

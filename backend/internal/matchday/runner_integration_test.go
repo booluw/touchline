@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/touchline/backend/internal/bootstrap"
 	"github.com/touchline/backend/internal/competition"
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/match"
@@ -19,9 +18,9 @@ import (
 	internalworld "github.com/touchline/backend/internal/world"
 )
 
-// runnerWorld returns a launched two-tier world whose starter club is human
-// (with a full preferred lineup), paced at a fast tick.match_cadence, and its
-// competition service.
+// runnerWorld returns a two-tier world whose clubs are AI-seeded from the
+// admin declaration (SeedWorld) with both leagues' seasons started, paced at a
+// fast tick.match_cadence, plus the competition service.
 func runnerWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, *competition.Service) {
 	t.Helper()
 	pool := testdb.New(t)
@@ -34,48 +33,11 @@ func runnerWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, *competition.Service) 
 	if err != nil {
 		t.Fatalf("create world: %v", err)
 	}
-	res, err := bootstrap.NewService(pool, nil).BootstrapWorld(ctx, w.ID, "Harbour City FC", "")
-	if err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	starter := res.ClubID
 	if err := worldSvc.SetConfig(ctx, w.ID, "tick.match_cadence", "10ms"); err != nil {
 		t.Fatalf("set cadence: %v", err)
 	}
 	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
 		t.Fatalf("launch world: %v", err)
-	}
-
-	// The human club owns its XI.
-	if _, err := pool.Exec(ctx,
-		`UPDATE club.clubs SET is_ai_controlled = FALSE WHERE id = $1`, starter); err != nil {
-		t.Fatalf("make human: %v", err)
-	}
-	rows, err := pool.Query(ctx,
-		`SELECT id FROM player.players WHERE club_id = $1 AND status = 'active' ORDER BY squad_number LIMIT 11`, starter)
-	if err != nil {
-		t.Fatalf("load roster: %v", err)
-	}
-	slot := 0
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			t.Fatalf("scan player: %v", err)
-		}
-		if _, err := pool.Exec(ctx,
-			`INSERT INTO club.club_lineups (slot, club_id, player_id) VALUES ($1, $2, $3)`,
-			slot, starter, id); err != nil {
-			t.Fatalf("write lineup slot %d: %v", slot, err)
-		}
-		slot++
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate roster: %v", err)
-	}
-	if slot != 11 {
-		t.Fatalf("lineup has %d slots, want 11", slot)
 	}
 
 	compSvc := competition.NewService(pool, nil)
@@ -97,8 +59,14 @@ func runnerWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, *competition.Service) 
 	if err := compSvc.UpdateLeagueAdjacency(ctx, champ.ID, &premier.ID, nil); err != nil {
 		t.Fatalf("link champ->premier: %v", err)
 	}
-	if _, err := compSvc.SeedCompetition(ctx, w.ID, country.ID, premier.ID); err != nil {
+	if _, err := compSvc.SeedWorld(ctx, w.ID); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if _, err := compSvc.StartSeason(ctx, w.ID, premier.ID); err != nil {
+		t.Fatalf("start premier season: %v", err)
+	}
+	if _, err := compSvc.StartSeason(ctx, w.ID, champ.ID); err != nil {
+		t.Fatalf("start champ season: %v", err)
 	}
 	return pool, w.ID, compSvc
 }

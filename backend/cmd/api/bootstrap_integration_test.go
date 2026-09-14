@@ -14,77 +14,66 @@ import (
 	"github.com/touchline/backend/internal/testdb"
 )
 
-// TestHTTPBootstrapAndClubReads covers the S03-01 API surface: the admin
-// bootstrap endpoint (201/403/409), world-scoped club listing, and club detail
-// with manager + squad.
-func TestHTTPBootstrapAndClubReads(t *testing.T) {
+// TestHTTPClubReads covers world-scoped club reads: the seeded world's clubs
+// list and club detail (manager + squad) are visible to a manager of that
+// world and sealed against a manager of another world.
+func TestHTTPClubReads(t *testing.T) {
 	ts, pool := testHTTPServer(t)
 	testdb.SeedRefData(t, pool)
+	testdb.SeedClubNameParts(t, pool)
 	client := ts.Client()
 
-	w := testdb.CreateWorld(t, pool, "W-BOOT")
-	admin := testdb.CreateUser(t, pool, "bootadmin@example.com", "s3cret", nil)
+	admin := testdb.CreateUser(t, pool, "clubadmin@example.com", "s3cret", nil)
 	testdb.MakeAdmin(t, pool, admin)
 
 	// A provisioning world is created directly (the admin world-create route is
-	// covered by TestHTTPAdminWorldLifecycle) so the admin's single manager row
-	// resolves to the world this test bootstraps.
+	// covered by TestHTTPAdminWorldLifecycle); the admin's manager row scopes
+	// the club reads below.
 	var worldID string
 	if err := pool.QueryRow(context.Background(), `
 		INSERT INTO world.worlds (id, name, status) VALUES ($1, $2, 'provisioning') RETURNING id`,
-		uuid.New(), "Bootstrap Town").Scan(&worldID); err != nil {
+		uuid.New(), "Club Town").Scan(&worldID); err != nil {
 		t.Fatalf("insert provisioning world: %v", err)
 	}
-	if _, err := pool.Exec(context.Background(), `
+	var adminManager uuid.UUID
+	if err := pool.QueryRow(context.Background(), `
 		INSERT INTO manager.managers (world_id, user_id, is_policy_bot, status)
-		VALUES ($1, $2, FALSE, 'active')`, worldID, admin); err != nil {
+		VALUES ($1, $2, FALSE, 'active') RETURNING id`, worldID, admin).Scan(&adminManager); err != nil {
 		t.Fatalf("insert admin manager row: %v", err)
 	}
 
-	adminCookies := login(t, ts, client, "bootadmin@example.com", "s3cret")
-	testdb.CreateUser(t, pool, "bootplain@example.com", "s3cret", []testdb.Join{{WorldID: w}})
-	plainCookies := login(t, ts, client, "bootplain@example.com", "s3cret")
+	adminCookies := login(t, ts, client, "clubadmin@example.com", "s3cret")
+	// Manager-scoped reads need a real manager session (admins get world-less
+	// console sessions under the login gate) — mint one for the admin's row.
+	mgrCookies := managerCookies(t, ts, pool, adminManager, admin)
 
-	// Non-admins may not bootstrap a world.
-	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/bootstrap",
-		`{"name":"Sneaky FC"}`, plainCookies); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin bootstrap = %d, want 403", resp.StatusCode)
-	}
-
-	// The admin bootstraps the world into a club + squad.
-	resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/bootstrap",
-		`{"name":"Harbour United","short_name":"HAR"}`, adminCookies)
+	// Declare a country + one league and seed the whole world (launch model).
+	resp := post(t, ts, client, "/api/admin/countries",
+		`{"world_id":"`+worldID+`","code":"eng","name":"England"}`, adminCookies)
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("bootstrap = %d, want 201", resp.StatusCode)
+		t.Fatalf("create country = %d, want 201", resp.StatusCode)
 	}
-	var boot map[string]any
+	countryID := decodeID(t, resp, "id")
+	resp = post(t, ts, client, "/api/admin/leagues",
+		`{"country_id":"`+countryID+`","name":"League One","tier":1,"team_count":4}`, adminCookies)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create league = %d, want 201", resp.StatusCode)
+	}
+	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed", "", adminCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("seed = %d, want 200", resp.StatusCode)
+	}
 	raw, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(raw, &boot); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
+	var seed map[string]any
+	if err := json.Unmarshal(raw, &seed); err != nil {
+		t.Fatalf("decode seed: %v", err)
 	}
-	clubID, _ := boot["club_id"].(string)
-	if clubID == "" || boot["club_name"] != "Harbour United" || boot["manager_id"] == "" {
-		t.Fatalf("bootstrap result = %v", boot)
-	}
-	if squad, ok := boot["squad_size"].(float64); !ok || int(squad) != 24 {
-		t.Fatalf("squad_size = %v, want 24", boot["squad_size"])
-	}
-	if ps, ok := boot["players"].([]any); !ok || len(ps) != 24 {
-		t.Fatalf("players = %v entries, want 24", boot["players"])
-	}
-	firstPlayer := boot["players"].([]any)[0].(map[string]any)
-	if firstPlayer["primary_position"] == "" || firstPlayer["first_name"] == "" || firstPlayer["squad_number"].(float64) != 1 {
-		t.Fatalf("first player malformed: %v", firstPlayer)
+	if clubs := seed["new_clubs"]; int(clubs.(float64)) != 4 {
+		t.Fatalf("seed new_clubs = %v, want 4", clubs)
 	}
 
-	// A second bootstrap is a conflict (world already material).
-	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/bootstrap",
-		`{"name":"Twice FC"}`, adminCookies); resp.StatusCode != http.StatusConflict {
-		t.Fatalf("double bootstrap = %d, want 409", resp.StatusCode)
-	}
-
-	// The caller's world lists exactly the bootstrapped club.
-	resp = get(t, ts, client, "/api/clubs", adminCookies)
+	// The manager's world lists exactly the seeded clubs.
+	resp = get(t, ts, client, "/api/clubs", mgrCookies)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list clubs = %d, want 200", resp.StatusCode)
 	}
@@ -93,12 +82,14 @@ func TestHTTPBootstrapAndClubReads(t *testing.T) {
 	if err := json.Unmarshal(raw, &list); err != nil {
 		t.Fatalf("decode clubs: %v", err)
 	}
-	if clubs, ok := list["clubs"].([]any); !ok || len(clubs) != 1 {
-		t.Fatalf("clubs = %v, want exactly 1", list["clubs"])
+	clubs, ok := list["clubs"].([]any)
+	if !ok || len(clubs) != 4 {
+		t.Fatalf("clubs = %v, want exactly 4", list["clubs"])
 	}
+	clubID := clubs[0].(map[string]any)["id"].(string)
 
 	// Club detail exposes manager + 24-player squad for the same world.
-	resp = get(t, ts, client, "/api/clubs/"+clubID, adminCookies)
+	resp = get(t, ts, client, "/api/clubs/"+clubID, mgrCookies)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get club = %d, want 200", resp.StatusCode)
 	}
@@ -107,8 +98,8 @@ func TestHTTPBootstrapAndClubReads(t *testing.T) {
 	if err := json.Unmarshal(raw, &detail); err != nil {
 		t.Fatalf("decode club detail: %v", err)
 	}
-	if detail["name"] != "Harbour United" || detail["short_name"] != "HAR" {
-		t.Fatalf("club detail identity = %v", detail)
+	if detail["short_name"] == "" {
+		t.Fatalf("club detail short_name missing: %v", detail)
 	}
 	if detail["is_ai_controlled"] != true {
 		t.Fatalf("club detail is_ai_controlled = %v, want true", detail["is_ai_controlled"])
@@ -126,11 +117,16 @@ func TestHTTPBootstrapAndClubReads(t *testing.T) {
 		}
 	}
 
-	// Worlds are sealed: a user in another world can never read this club.
-	otherWorld := testdb.CreateWorld(t, pool, "W-BOOT-OTHER")
-	other := testdb.CreateUser(t, pool, "bootother@example.com", "s3cret", []testdb.Join{{WorldID: otherWorld}})
+	// Worlds are sealed: a manager in another world can never read this club.
+	otherWorld := testdb.CreateWorld(t, pool, "W-CLUB-OTHER")
+	other := testdb.CreateUser(t, pool, "clubother@example.com", "s3cret", []testdb.Join{{WorldID: otherWorld}})
 	testdb.MakeAdmin(t, pool, other)
-	otherCookies := login(t, ts, client, "bootother@example.com", "s3cret")
+	var otherManager uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM manager.managers WHERE user_id = $1`, other).Scan(&otherManager); err != nil {
+		t.Fatalf("other manager id: %v", err)
+	}
+	otherCookies := managerCookies(t, ts, pool, otherManager, other)
 	if resp := get(t, ts, client, "/api/clubs/"+clubID, otherCookies); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-world club read = %d, want 404", resp.StatusCode)
 	}

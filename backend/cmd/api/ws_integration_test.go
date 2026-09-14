@@ -58,8 +58,7 @@ func dialWS(t *testing.T, ts *httptest.Server, cookieHeader string) *websocket.C
 
 func wsConnectFor(t *testing.T, ts *httptest.Server, pool *pgxpool.Pool, email string, worldID uuid.UUID) (*websocket.Conn, uuid.UUID) {
 	t.Helper()
-	client := ts.Client()
-	cookies := login(t, ts, client, email, "s3cret")
+	cookies := loginManager(t, ts, pool, email)
 	return dialWS(t, ts, cookies), worldID
 }
 

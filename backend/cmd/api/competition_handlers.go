@@ -123,47 +123,26 @@ func (s *server) handleUpdateAdjacency(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// seedCompetitionRequest is the admin's declaration "start this country's
-// leagues" — the starter league hosts the world's human-owned starter club.
-type seedCompetitionRequest struct {
-	CountryID       uuid.UUID `json:"country_id" binding:"required"`
-	StarterLeagueID uuid.UUID `json:"starter_league_id" binding:"required"`
-}
-
-func (s *server) handleSeedCompetition(c *gin.Context) {
+func (s *server) handleSeedWorld(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
 		return
 	}
-	var req seedCompetitionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "country_id and starter_league_id are required"})
-		return
-	}
-	res, err := s.compSvc.SeedCompetition(c.Request.Context(), worldID, req.CountryID, req.StarterLeagueID)
+	res, err := s.compSvc.SeedWorld(c.Request.Context(), worldID)
 	switch {
 	case errors.Is(err, internalcompetition.ErrWorldNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
-	case errors.Is(err, internalcompetition.ErrCountryNotFound),
-		errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
 	case errors.Is(err, internalcompetition.ErrWorldArchived),
-		errors.Is(err, internalcompetition.ErrWorldNotBootstrapped),
-		errors.Is(err, internalcompetition.ErrCountryWorldMismatch),
-		errors.Is(err, internalcompetition.ErrLeagueAlreadySeeded),
-		errors.Is(err, internalcompetition.ErrAdjacencyMismatch),
-		errors.Is(err, internalcompetition.ErrNoStarterClub),
-		errors.Is(err, internalcompetition.ErrCountryHasNoLeagues):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		errors.Is(err, internalcompetition.ErrWorldHasNoLeagues):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	case err != nil:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
-	c.JSON(http.StatusCreated, res)
+	c.JSON(http.StatusOK, res)
 }
 
 // ---------------------------------------------------------------------------

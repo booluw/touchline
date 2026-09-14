@@ -11,4 +11,5 @@ FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /out/ref-seed /usr/local/bin/ref-seed
 COPY --from=builder /app/data/names /data/names
-CMD ["ref-seed", "-data", "/data/names"]
+COPY --from=builder /app/data/clubs /data/clubs
+CMD ["ref-seed", "-data", "/data/names", "-clubdata", "/data/clubs"]

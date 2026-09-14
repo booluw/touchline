@@ -144,3 +144,12 @@ func countValue(xs []string, v string) int {
 	}
 	return n
 }
+
+func contains(xs []string, v string) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}

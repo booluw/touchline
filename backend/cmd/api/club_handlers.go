@@ -8,50 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
 )
-
-type bootstrapRequest struct {
-	Name      string `json:"name"`
-	ShortName string `json:"short_name"`
-}
-
-// handleBootstrap generates a provisioning world's material start state: an AI
-// starter club, its policy-bot manager, and a generated squad (S03-01). The
-// world must be provisioning and empty of clubs; the human manager takes the
-// club later through the OPD-16 offer->accept path.
-func (s *server) handleBootstrap(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
-		return
-	}
-	var req bootstrapRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
-		return
-	}
-
-	res, err := s.bootSvc.BootstrapWorld(c.Request.Context(), id, req.Name, req.ShortName)
-	switch {
-	case errors.Is(err, internalbootstrap.ErrWorldNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	case errors.Is(err, internalbootstrap.ErrWorldNotProvisioning),
-		errors.Is(err, internalbootstrap.ErrAlreadyBootstrapped):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-		return
-	case errors.Is(err, internalbootstrap.ErrRefDataMissing):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
-		return
-	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
-	}
-	c.JSON(http.StatusCreated, res)
-}
 
 // handleListClubs lists the clubs in the caller's world. The JWT carries no
 // world_id (OPD-15); the world is derived from the manager row.

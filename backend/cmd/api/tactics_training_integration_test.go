@@ -62,7 +62,7 @@ func tacticsClub(t *testing.T, ts *httptest.Server, pool *pgxpool.Pool, email st
 		t.Fatalf("make club human: %v", err)
 	}
 
-	cookies := login(t, ts, ts.Client(), email, "s3cret")
+	cookies := loginManager(t, ts, pool, email)
 	return w.ID, res.ClubID, cookies
 }
 
@@ -184,7 +184,7 @@ func TestHTTPLineupRoundTrip(t *testing.T) {
 	// A foreign manager (in another world) is forbidden.
 	w2 := testdb.CreateWorld(t, pool, "lineup-other")
 	testdb.CreateUser(t, pool, "lineup-foreign@example.com", "s3cret", []testdb.Join{{WorldID: w2}})
-	foreign := login(t, ts, client, "lineup-foreign@example.com", "s3cret")
+	foreign := loginManager(t, ts, pool, "lineup-foreign@example.com")
 	if resp := put(t, ts, client, "/api/clubs/"+clubID.String()+"/lineup", body, foreign); decodedStatus(t, resp) != http.StatusForbidden {
 		t.Fatalf("foreign put lineup = %d, want 403", decodedStatus(t, resp))
 	}
@@ -248,7 +248,7 @@ func TestHTTPTacticsRoundTrip(t *testing.T) {
 
 	w2 := testdb.CreateWorld(t, pool, "tactics-other")
 	testdb.CreateUser(t, pool, "tactics-foreign@example.com", "s3cret", []testdb.Join{{WorldID: w2}})
-	foreign := login(t, ts, client, "tactics-foreign@example.com", "s3cret")
+	foreign := loginManager(t, ts, pool, "tactics-foreign@example.com")
 	if resp := post(t, ts, client, "/api/clubs/"+clubID.String()+"/tactics",
 		`{"style":"direct"}`, foreign); decodedStatus(t, resp) != http.StatusForbidden {
 		t.Fatalf("foreign post tactics = %d, want 403", decodedStatus(t, resp))
@@ -297,7 +297,7 @@ func TestHTTPTrainingPlanRoundTrip(t *testing.T) {
 
 	w2 := testdb.CreateWorld(t, pool, "plan-other")
 	testdb.CreateUser(t, pool, "plan-foreign@example.com", "s3cret", []testdb.Join{{WorldID: w2}})
-	foreign := login(t, ts, client, "plan-foreign@example.com", "s3cret")
+	foreign := loginManager(t, ts, pool, "plan-foreign@example.com")
 	if resp := post(t, ts, client, "/api/clubs/"+clubID.String()+"/training-plan",
 		`{"archetype":"defensive"}`, foreign); decodedStatus(t, resp) != http.StatusForbidden {
 		t.Fatalf("foreign post training-plan = %d, want 403", decodedStatus(t, resp))

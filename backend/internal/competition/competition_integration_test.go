@@ -9,12 +9,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/touchline/backend/internal/bootstrap"
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"
 )
 
-// seedWorld returns a bootstrapped world with a starter club and a country.
+// seedWorld returns a world with a country and nothing else materialized — no
+// clubs, no leagues. The launch model: the admin declares structure, and only
+// an explicit SeedWorld call produces clubs + players.
 func seedWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	pool := testdb.New(t)
@@ -24,9 +25,6 @@ func seedWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID) {
 	w, err := internalworld.NewService(pool, nil).CreateWorld(context.Background(), "competition-it")
 	if err != nil {
 		t.Fatalf("create world: %v", err)
-	}
-	if _, err := bootstrap.NewService(pool, nil).BootstrapWorld(context.Background(), w.ID, "Harbour City FC", ""); err != nil {
-		t.Fatalf("bootstrap: %v", err)
 	}
 	country, err := NewService(pool, nil).CreateCountry(context.Background(), w.ID, "eng", "England")
 	if err != nil {
@@ -58,115 +56,149 @@ func twoTierLeague(t *testing.T, svc *Service, countryID uuid.UUID) (*League, *L
 	return premier, champ
 }
 
-func TestSeedCompetition(t *testing.T) {
+func TestSeedWorld(t *testing.T) {
 	pool, worldID, countryID := seedWorld(t)
 	ctx := context.Background()
 	svc := NewService(pool, nil)
 	premier, champ := twoTierLeague(t, svc, countryID)
 
-	res, err := svc.SeedCompetition(ctx, worldID, countryID, premier.ID)
+	res, err := svc.SeedWorld(ctx, worldID)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if len(res.Leagues) != 2 {
-		t.Fatalf("seeded leagues = %d, want 2", len(res.Leagues))
+	if res.RandomSeed == 0 {
+		t.Fatal("seed result must report the world's replay seed")
 	}
-	for _, l := range res.Leagues {
-		if l.TeamCount != 4 {
-			t.Fatalf("%s team_count = %d, want 4", l.Name, l.TeamCount)
-		}
-		if l.FixtureCount != 12 {
-			t.Fatalf("%s fixtures = %d, want 12", l.Name, l.FixtureCount)
-		}
-		if l.Matchdays != 6 {
-			t.Fatalf("%s matchdays = %d, want 6", l.Name, l.Matchdays)
+	if res.NewClubs != 8 {
+		t.Fatalf("new clubs = %d, want 8", res.NewClubs)
+	}
+	if len(res.Countries) != 1 || len(res.Countries[0].Leagues) != 2 {
+		t.Fatalf("countries = %+v, want 2 leagues under 1 country", res.Countries)
+	}
+	for _, l := range res.Countries[0].Leagues {
+		if l.TeamCount != 4 || l.NewClubs != 4 {
+			t.Fatalf("%s team_count=%d new_clubs=%d, want 4/4", l.Name, l.TeamCount, l.NewClubs)
 		}
 	}
 
-	// The starter club goes into the starter league.
-	var starterClub uuid.UUID
+	// Materialization is clubs + players + memberships ONLY: no seasons, no
+	// fixtures, no starter-club special cases — every club is AI-controlled.
+	var totalClubs int
 	if err := pool.QueryRow(ctx,
-		`SELECT id FROM club.clubs WHERE name = 'Harbour City FC' AND world_id = $1`, worldID).Scan(&starterClub); err != nil {
-		t.Fatalf("starter club: %v", err)
+		`SELECT COUNT(*) FROM club.clubs WHERE world_id = $1`, worldID).Scan(&totalClubs); err != nil {
+		t.Fatalf("count clubs: %v", err)
 	}
-	var inPremier bool
+	if totalClubs != 8 {
+		t.Fatalf("clubs = %d, want 8", totalClubs)
+	}
+	var nonAI int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM club.clubs WHERE world_id = $1 AND is_ai_controlled = FALSE`, worldID).Scan(&nonAI); err != nil {
+		t.Fatalf("count non-AI: %v", err)
+	}
+	if nonAI != 0 {
+		t.Fatalf("non-AI clubs = %d, want 0 (all-AI seeding)", nonAI)
+	}
+
+	// Memberships: every club in exactly one league; each league at team_count.
+	var members int
 	if err := pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM competition.seasons s
-			JOIN competition.competition_entries e ON e.season_id = s.id
-			WHERE s.competition_id = $1 AND e.club_id = $2)`,
-		premier.ID, starterClub).Scan(&inPremier); err != nil {
-		t.Fatalf("starter placement: %v", err)
+		SELECT COUNT(*) FROM competition.club_competitions
+		WHERE world_id = $1 AND role = 'league'`, worldID).Scan(&members); err != nil {
+		t.Fatalf("count memberships: %v", err)
 	}
-	if !inPremier {
-		t.Fatal("starter club not placed in the starter league")
+	if members != 8 {
+		t.Fatalf("league memberships = %d, want 8", members)
 	}
-
-	// 8 entries across the two leagues.
-	var total int
-	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM competition.seasons s
-		JOIN competition.competition_entries e ON e.season_id = s.id
-		WHERE s.competition_id IN ($1,$2)`, premier.ID, champ.ID).Scan(&total); err != nil {
-		t.Fatalf("count entries: %v", err)
-	}
-	if total != 8 {
-		t.Fatalf("total entries = %d, want 8", total)
+	for _, l := range []*League{premier, champ} {
+		var n int
+		if err := pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM competition.club_competitions
+			WHERE competition_id = $1 AND role = 'league'`, l.ID).Scan(&n); err != nil {
+			t.Fatalf("count members of %s: %v", l.Name, err)
+		}
+		if n != 4 {
+			t.Fatalf("%s members = %d, want 4", l.Name, n)
+		}
 	}
 
-	// Events are recorded auditably: SEASON_CREATED x2 + COMPETITION_SEEDED.
-	var events int
-	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM world.events
-		WHERE world_id = $1 AND event_type IN ('SEASON_CREATED','COMPETITION_SEEDED')`,
-		worldID).Scan(&events); err != nil {
-		t.Fatalf("count events: %v", err)
+	// No seasons, no fixtures yet — running a season is a separate step.
+	var seasons, fixtures int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM competition.seasons WHERE world_id = $1`, worldID).Scan(&seasons); err != nil {
+		t.Fatalf("count seasons: %v", err)
 	}
-	if events != 3 {
-		t.Fatalf("seed events = %d, want 3", events)
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM match.fixtures WHERE world_id = $1`, worldID).Scan(&fixtures); err != nil {
+		t.Fatalf("count fixtures: %v", err)
 	}
-
-	// Double-seeding a league is rejected.
-	_, err = svc.SeedCompetition(ctx, worldID, countryID, premier.ID)
-	if err != ErrLeagueAlreadySeeded {
-		t.Fatalf("second seed err = %v, want ErrLeagueAlreadySeeded", err)
+	if seasons != 0 || fixtures != 0 {
+		t.Fatalf("seed must not create seasons/fixtures: seasons=%d fixtures=%d", seasons, fixtures)
 	}
 
-	// Every club plays exactly 6 fixtures; all at 19:00 UTC.
-	fixtures, err := svc.GetFixtures(ctx, premier.ID, worldID, nil)
+	// Re-seeding the same world is an idempotent no-op.
+	res2, err := svc.SeedWorld(ctx, worldID)
 	if err != nil {
-		t.Fatalf("fixtures: %v", err)
+		t.Fatalf("re-seed: %v", err)
 	}
-	if len(fixtures) != 12 {
-		t.Fatalf("fixtures = %d, want 12", len(fixtures))
+	if res2.NewClubs != 0 || res2.RandomSeed != res.RandomSeed {
+		t.Fatalf("re-seed = %+v, want 0 new clubs and the same seed", res2)
 	}
-	homeCount := map[uuid.UUID]int{}
-	awayCount := map[uuid.UUID]int{}
-	for _, f := range fixtures {
-		if f.ScheduledAt.UTC().Hour() != 19 {
-			t.Fatalf("fixture %s hour = %d, want 19 UTC", f.ID, f.ScheduledAt.UTC().Hour())
-		}
-		homeCount[f.HomeClubID]++
-		awayCount[f.AwayClubID]++
+
+	// Adding a league later: the next seed fills ONLY it.
+	third, err := svc.CreateLeague(ctx, LeagueParams{CountryID: countryID, Name: "League One", Tier: 3, TeamCount: 4})
+	if err != nil {
+		t.Fatalf("create third league: %v", err)
 	}
-	for clubID := range homeCount {
-		if homeCount[clubID] != 3 || awayCount[clubID] != 3 {
-			t.Fatalf("club %s plays %d home / %d away, want 3/3", clubID, homeCount[clubID], awayCount[clubID])
-		}
+	res3, err := svc.SeedWorld(ctx, worldID)
+	if err != nil {
+		t.Fatalf("incremental seed: %v", err)
+	}
+	if res3.NewClubs != 4 {
+		t.Fatalf("incremental new clubs = %d, want 4", res3.NewClubs)
+	}
+	var thirdMembers int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM competition.club_competitions
+		WHERE competition_id = $1 AND role = 'league'`, third.ID).Scan(&thirdMembers); err != nil {
+		t.Fatalf("count members of third: %v", err)
+	}
+	if thirdMembers != 4 {
+		t.Fatalf("third league members = %d, want 4", thirdMembers)
+	}
+
+	// Every generated club has a drafted squad (players), not just a row.
+	var squadless int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM club.clubs c
+		WHERE c.world_id = $1
+		  AND NOT EXISTS (SELECT 1 FROM player.players p WHERE p.club_id = c.id)`,
+		worldID).Scan(&squadless); err != nil {
+		t.Fatalf("count squadless clubs: %v", err)
+	}
+	if squadless != 0 {
+		t.Fatalf("squadless clubs = %d, want 0", squadless)
 	}
 }
 
-func TestApplyResultAndRollover(t *testing.T) {
+func TestStartSeasonAndApplyResultAndRollover(t *testing.T) {
 	pool, worldID, countryID := seedWorld(t)
 	ctx := context.Background()
 	svc := NewService(pool, nil)
 	premier, champ := twoTierLeague(t, svc, countryID)
 
-	if _, err := svc.SeedCompetition(ctx, worldID, countryID, premier.ID); err != nil {
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	// A season can only start once members exist.
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, champ.ID); err != nil {
+		t.Fatalf("start champ: %v", err)
+	}
 
-	// Standings start empty for the seeded season.
+	// Standings start empty for the started season.
 	standing, err := svc.GetStandings(ctx, premier.ID, worldID)
 	if err != nil {
 		t.Fatalf("standings: %v", err)

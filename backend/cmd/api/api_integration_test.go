@@ -80,7 +80,8 @@ func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 func TestHTTPLoginSetsCookiesAndProtectsDashboard(t *testing.T) {
 	ts, pool := testHTTPServer(t)
 	w := testdb.CreateWorld(t, pool, "W-HTTP-A")
-	testdb.CreateUser(t, pool, "http@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	userID := testdb.CreateUser(t, pool, "http@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	testdb.MakeAdmin(t, pool, userID)
 	client := ts.Client()
 
 	// 401 without any session.
@@ -187,6 +188,39 @@ func login(t *testing.T, ts *httptest.Server, client *http.Client, email, passwo
 	return cookieHeader(cookieMap(resp))
 }
 
+// loginManager returns a manager-scoped session cookie header for the named
+// user, bypassing the login endpoint. This is the correct way to test
+// world-scoped manager reads under the phase-1 login gate (which only admits
+// admins into world-less console sessions).
+func loginManager(t *testing.T, ts *httptest.Server, pool *pgxpool.Pool, email string) string {
+	t.Helper()
+	ctx := context.Background()
+	var userID, managerID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM auth.users WHERE email = $1`, email).Scan(&userID); err != nil {
+		t.Fatalf("resolve user %s: %v", email, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT id FROM manager.managers WHERE user_id = $1`, userID).Scan(&managerID); err != nil {
+		t.Fatalf("resolve manager for %s: %v", email, err)
+	}
+	return managerCookies(t, ts, pool, managerID, userID)
+}
+
+// managerCookies mints a manager session cookie header from a manager + user id.
+func managerCookies(t *testing.T, ts *httptest.Server, pool *pgxpool.Pool, managerID, userID uuid.UUID) string {
+	t.Helper()
+	var worldID uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT world_id FROM manager.managers WHERE id = $1`, managerID).Scan(&worldID); err != nil {
+		t.Fatalf("manager world: %v", err)
+	}
+	cfg := pkgauth.JWTConfig{Secret: "api-integration-secret", AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
+	pair, err := pkgauth.GenerateTokenPair(cfg, pkgauth.ManagerIdentity{ManagerID: managerID, WorldID: worldID, UserID: userID})
+	if err != nil {
+		t.Fatalf("mint manager tokens: %v", err)
+	}
+	return cookieHeader(map[string]string{"access_token": pair.AccessToken, "refresh_token": pair.RefreshToken})
+}
+
 func TestHTTPAdminWorldLifecycle(t *testing.T) {
 	ts, pool := testHTTPServer(t)
 	client := ts.Client()
@@ -196,11 +230,12 @@ func TestHTTPAdminWorldLifecycle(t *testing.T) {
 	testdb.MakeAdmin(t, pool, admin)
 	adminCookies := login(t, ts, client, "admin@example.com", "s3cret")
 
-	// A non-admin account is forbidden from creating worlds.
+	// A non-admin account cannot obtain a session at all (launch gate), so a
+	// forbidden plain login is the only 403 an outsider reaches here.
 	testdb.CreateUser(t, pool, "plain@example.com", "s3cret", []testdb.Join{{WorldID: w}})
-	plainCookies := login(t, ts, client, "plain@example.com", "s3cret")
-	if resp := post(t, ts, client, "/api/admin/worlds", `{"name":"sneaky"}`, plainCookies); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin create world = %d, want 403", resp.StatusCode)
+	if resp := post(t, ts, client, "/api/auth/login",
+		`{"email":"plain@example.com","password":"s3cret"}`, ""); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-admin login = %d, want 403", resp.StatusCode)
 	}
 
 	// Unauthenticated admin routes are 401.
@@ -234,8 +269,8 @@ func TestHTTPAdminWorldLifecycle(t *testing.T) {
 		t.Fatalf("set config = %d, want 200", resp.StatusCode)
 	}
 	if resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/config",
-		`{"key":"tick.daily_cadence","value":"30 0 * * *"}`, plainCookies); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin set config = %d, want 403", resp.StatusCode)
+		`{"key":"tick.daily_cadence","value":"30 0 * * *"}`, ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous set config = %d, want 401", resp.StatusCode)
 	}
 	var daily string
 	if err := pool.QueryRow(context.Background(),
@@ -267,6 +302,7 @@ func TestHTTPJobOfferFlow(t *testing.T) {
 	w := testdb.CreateWorld(t, pool, "W-OFFERS")
 	clubID, _ := testdb.CreateClubWithAIManager(t, pool, w)
 	candidate := testdb.CreateUser(t, pool, "candidate@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	testdb.MakeAdmin(t, pool, candidate) // only admins may log in during phase 1
 	admin := testdb.CreateUser(t, pool, "admin2@example.com", "s3cret", []testdb.Join{{WorldID: w}})
 	testdb.MakeAdmin(t, pool, admin)
 

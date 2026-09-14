@@ -1,4 +1,4 @@
-# How to: set up and launch a local game (init → DB → admin → world → league → season)
+# How to: set up and launch a local game (init → DB → admin → world → seed → season)
 
 A step-by-step walkthrough for turning a fresh machine (or fresh database) into a
 running Touchline world with a working league and an active season. Every
@@ -9,10 +9,20 @@ for the Docker Compose stack, just with the backend `go run` processes replaced
 by the compose services.
 
 **Scope:** initializing the application, syncing the DB, creating an admin
-account, creating a world, creating a league, starting a season, and opening the
-transfer window. Terminology note: "create a league" and "start a season" are
-**two different steps with the same command** — seeding a competition both
-materializes the league's clubs and creates season #1. See Step 6/7.
+account, creating a world, declaring countries/leagues, seeding the world, and
+starting a season.
+
+Terminology note: **"seed the world"** and **"start a season"** are two separate
+steps. Phases 1–5 encode a two-step launch model:
+
+1. **Declare** the world, its countries, and its leagues — pure metadata, no
+   clubs yet.
+2. **Seed** the whole world in one admin call — every league is filled up to its
+   `team_count` with **AI clubs + squads** (all AI; no human starter club, no
+   seasons, no fixtures). Re-seeding is incremental and idempotent.
+3. **Start a season** per league afterwards via the competition service seam (`StartSeason`)
+   — this is what creates the `in_progress` season and its deterministic fixture
+   list.
 
 ---
 
@@ -90,20 +100,20 @@ cd backend
 migrate -database "$DATABASE_URL" -path migrations up
 ```
 
-Confirm you are on the latest migration (0035 as of S05-02):
+Confirm you are on the latest migration (0037 as of the launch restructure):
 
 ```bash
 psql "$DATABASE_URL" -tAc "SELECT version, dirty FROM schema_migrations ORDER BY version DESC LIMIT 1;"
-# 35 | f
+# 37 | f
 ```
 
-Then seed the curated reference data. **This is mandatory** — world bootstrap and
-league materialization generate names/squads from these pools and fail with
-`ErrRefDataMissing` otherwise:
+Then seed the curated reference data. **This is mandatory** — seeding generates
+names/squads from these pools and fails with `ErrRefDataMissing` otherwise. Two
+pools: generic name data (squads) and the club-name corpus (seed tables):
 
 ```bash
 cd backend
-go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names
+go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names -clubdata data/clubs
 ```
 
 ---
@@ -111,40 +121,30 @@ go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names
 ## 3. Create an admin account
 
 There is no signup endpoint (`OPD-02`); accounts are made with `cmd/user-create`.
-It creates the `auth.users` row **and** an unemployed `manager.managers` row in a
-**world that must already exist**. The chicken-and-egg: to make the first admin
-you need one world row.
-
-If a world already exists (an earlier run, as on this dev box), reuse its id:
-
-```bash
-psql "$DATABASE_URL" -tAc "SELECT id, name, status FROM world.worlds ORDER BY created_at;"
-```
-
-If the `world.worlds` table is empty, create one bootstrap provisioning world row
-directly (the admin API takes over from here):
-
-```bash
-psql "$DATABASE_URL" -tAc "INSERT INTO world.worlds (name, status) VALUES ('bootstrap', 'provisioning') RETURNING id;"
-```
-
-Then create the admin account against it:
+It creates the `auth.users` row and, **only if you pass `-world-id`**, an
+unemployed `manager.managers` row in that world. No world needs to exist first —
+the first admin can (and should) be created standalone, then creates the world
+through the admin API:
 
 ```bash
 cd backend
 ADMIN_PW='change-me' go run ./cmd/user-create \
   -email admin@example.com \
   -password-env ADMIN_PW \
-  -world-id <world-id> \
   -admin
 ```
 
 `-admin` marks `auth.users.is_admin`; every `/api/admin/*` route requires it.
-Without `-admin` the same command creates a plain (jobless) manager — this is
-how you'd add the human manager who later accepts the job offer.
+Without `-admin` the same command creates a plain (jobless) account — needed only
+once the login gate opens (Phase 2 rest). Pass `-world-id` to also mint the
+manager row up front if you prefer.
 
-Verify by logging in and hitting a protected route (an `is_admin` flag shows up
-on `/api/auth/login` responses):
+**Login gate (Phase 1):** the login endpoint only admits administrators.
+Non-admins get `403 {"error":"login is currently limited to administrators"}` —
+there is no way for a plain account to obtain a session yet. Admin sessions are
+**world-less** (no world picker), which matters for manager-scoped reads below.
+
+Verify by logging in (an `is_admin` flag shows up on the response):
 
 ```bash
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/auth/login \
@@ -156,8 +156,7 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/auth/login \
 
 ## 4. Create a world
 
-Use the admin API from here on (the psql row above was only the bootstrap step).
-Login again (if your shell session reset), then:
+Use the admin API from here on.
 
 ```bash
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds \
@@ -165,47 +164,42 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds \
   -d '{"name":"Touchline Test Division"}'
 ```
 
-This returns the new world in **`provisioning`** state — not yet playable.
-Save its `id` as `$WORLD_ID`.
+This returns the new world in **`provisioning`** state — not yet playable. Save
+its `id` as `$WORLD_ID`.
 
 Optional: `POST /api/admin/worlds/:id/status` flips a world's lifecycle later
-(`active`/`open_beta` = playable, `paused`, `archived` terminal). Provisioning
-states are fine for the next steps.
+(`active`/`open_beta` = playable, `paused`, `archived` terminal). Seeding works
+from `provisioning`/`active`/`paused`; only `archived` is rejected. But lifecycle
+status **does** gate the scheduler: only playable worlds get `WORLD_TICK`s, and
+matches only kick off once the world is launched. Launching happens in Step 7.
 
-> Bootstrap requires the world to still be `provisioning`; seeding only rejects
-> `archived` worlds. But lifecycle status **does** gate the scheduler: only
-> playable worlds get `WORLD_TICK`s, and matches only kick off once the world is
-> launched. Launching happens in Step 7.
+A world is an empty shell until it is **seeded** — there is no one-club bootstrap
+step anymore. Seeding (Step 5) materializes all clubs + squads at once as AI
+clubs, and mints the world's deterministic replay seed on its first successful
+run.
 
-A world is an empty shell until bootstrap. Materialize the starter club, its
-policy-bot manager, and a generated 24-player squad (S03-01; this is also where
-S05-02 mints the club's finance account, opening capital, budgets, and starter
-contracts):
-
-```bash
-curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/bootstrap \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Harbour United","short_name":"HAR"}'
-# 201: world_id, club_id, club_name, manager_id, squad_size, random_seed, players
-#      (the parallel CLUB_CREATED event carries contract_count)
-```
-
-Save the returned `club_id` as `$STARTER_CLUB`. It appears in the authenticated
-club reads:
+**World-scoped reads.** The manager-facing routes (`/api/clubs`, `/api/competitions`,
+`/api/countries`, fixtures/standings, finances, tactics, …) resolve the caller's
+world from their session's `ManagerID`. Admin console sessions are world-less, so
+they return `403 "no world context"`. To exercise them as this admin, give the
+admin a manager row in the world (or mint a manager session; the integration
+tests use `pkgauth.GenerateTokenPair`):
 
 ```bash
-curl -c /tmp/jar -b /tmp/jar localhost:8080/api/clubs            # caller world only
-curl -c /tmp/jar -b /tmp/jar localhost:8080/api/clubs/$STARTER_CLUB
-curl -c /tmp/jar -b /tmp/jar localhost:8080/api/clubs/$STARTER_CLUB/finances
+psql "$DATABASE_URL" -tAc "INSERT INTO manager.managers (world_id, user_id, is_policy_bot, status)
+  SELECT '$WORLD_ID', id, FALSE, 'active' FROM auth.users WHERE email = 'admin@example.com' RETURNING id;"
 ```
+
+Reuse the returned id as `$ADMIN_MANAGER` wherever the guide needs a manager
+session cookie.
 
 ---
 
-## 5. Create a league
+## 5. Declare countries and leagues
 
 Leagues are world-scoped and admin-declared per country (`OPD-20`: nothing is
-invented — the admin fixes every number). The starter club will be placed in the
-league you nominate as the **starter league**.
+invented — the admin fixes every number). This is **metadata only**; no clubs are
+created by these calls.
 
 **5.1 Create a country** (world-scoped):
 
@@ -218,11 +212,10 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/countries \
 
 Save the `id` as `$COUNTRY_ID`. Listing reads:
 `GET /api/admin/countries?world_id=$WORLD_ID` (admin) and
-`GET /api/countries` (any authenticated manager in this world).
+`GET /api/countries` (manager-scoped, this world only).
 
-**5.2 Create league(s)** — one per tier. At minimum create the league that will
-host the starter club. `team_count` must be **even and ≥ 4**; a 4-team league is
-the smallest playable season.
+**5.2 Create league(s)** — one per tier. `team_count` must be **even and ≥ 4**; a
+4-team league is the smallest playable season.
 
 ```bash
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/leagues \
@@ -231,11 +224,11 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/leagues \
 # 201: {id, world_id, country_id, name, tier, team_count, status, ...}
 ```
 
-Save the `id` as `$STARTER_LEAGUE`. Optional fields: `promotions`, `relegations`,
+Save the `id` as `$LEAGUE_ID`. Optional fields: `promotions`, `relegations`,
 `promotes_to`, `relegates_to`. Links must reference a league in the **same
 country** (`ErrBadAdjacency` otherwise), and movement counts must be **symmetric
 across the pair** (`ErrAdjacencyMismatch`: the league above must relegate exactly
-as many as the league below promotes). Because leagues validate at seed time,
+as many as the league below promotes). Because adjacencies validate at seed time,
 wire links once both sides exist — a correct two-tier pyramid:
 
 ```bash
@@ -246,61 +239,87 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/leagues \
 # tier 2 promotes 1 up into tier 1 (tier 1 already exists, so the link is valid)
 TIER2_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/leagues \
   -H 'Content-Type: application/json' \
-  -d '{"country_id":"'"$COUNTRY_ID"'","name":"Championship","tier":2,"team_count":6,"promotions":1,"promotes_to":"'"$STARTER_LEAGUE"'"}' \
+  -d '{"country_id":"'"$COUNTRY_ID"'","name":"Championship","tier":2,"team_count":6,"promotions":1,"promotes_to":"'"$LEAGUE_ID"'"}' \
   | jq -r .id)
 # close the loop: tier 1 relegates down to tier 2
-curl -c /tmp/jar -b /tmp/jar -X PATCH localhost:8080/api/admin/leagues/$STARTER_LEAGUE/adjacency \
+curl -c /tmp/jar -b /tmp/jar -X PATCH localhost:8080/api/admin/leagues/$LEAGUE_ID/adjacency \
   -H 'Content-Type: application/json' -d '{"relegates_to":"'"$TIER2_ID"'"}'
 ```
 
 ---
 
-## 6. Create the league's clubs and season
+## 6. Seed the whole world
 
-One admin call materializes the whole country into playable shape (`OPD-18`):
-for every league it guarantees `team_count` entries — the world's existing clubs
-are reused (starting with the starter club in `$STARTER_LEAGUE`) and the rest are
-generated as AI clubs with squads — then it creates **season #1 (`in_progress`)**
-and schedules a deterministic double round-robin fixture list, **one matchday per
-day** from the world's season reference date.
+One admin call materializes the entire world into playable shape (`OPD-18`):
+for **every** league it guarantees `team_count` entries — it reuses the world's
+existing clubs first, and generates the rest as AI clubs with squads, managers,
+and `club_competitions` memberships. No seasons or fixtures yet.
 
 ```bash
-curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/seed-competition \
-  -H 'Content-Type: application/json' \
-  -d '{"country_id":"'"$COUNTRY_ID"'","starter_league_id":"'"$STARTER_LEAGUE"'"}'
-# 201: {world_id, country_id, leagues:[{league_id, name, tier, team_count,
-#        season_id, season_label, fixture_count, matchdays, clubs:[...]}]}
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/seed
+# 200: {world_id, random_seed, countries:[{country_id, country_name,
+#        leagues:[{league_id, name, tier, team_count, new_clubs, clubs:[{id,name}]}]}],
+#        new_clubs, league_count}
 ```
 
-**This one call IS both "create the league" (materialized clubs)
-and "start a season".** Notes:
+Notes:
 
-- **One seed per league.** A league that already has a season is a
-  409 `ErrLeagueAlreadySeeded`. There is no re-seed — retries need a fresh world.
-- Every club in the world must end up in some league, so every other world club
-  is consumed by `$STARTER_LEAGUE` up to its `team_count`; a leftover club is a
-  409 `ErrNoStarterClub` ("world has clubs that fit no league — adjust team
-  counts").
-- The world must already be bootstrapped (the seed needs `WORLD_BOOTSTRAPPED`
-  `random_seed` for determinism) — `409 ErrWorldNotBootstrapped` otherwise.
-- Seeding works from `provisioning`/`active`/`paused`; only `archived` is
-  rejected. Nothing plays until the world is launched (next step).
+- **All AI.** Every seeded club is `is_ai_controlled = true` (policy-bot
+  manager, generated 24-player squad, short name drawn from the club-name
+  corpus). There is no human starter club.
+- **Incremental + idempotent.** The call fills every league up to `team_count`,
+  creating only the clubs that are missing. Re-running it is a `200` no-op
+  (`new_clubs: 0`). Leagues added later are picked up by the next run.
+- **Seeding has no season side effects.** Clubs are placed in as many leagues as
+  declared (league memberships); season/fixture creation is the `StartSeason`
+  seam (Step 7).
+- **First run mints `world_seed`.** The world's replay seed (`random_seed`, a
+  crypto-random int64) is generated on first successful run and stored on
+  `world.worlds`; per-league name scrambling is derived from
+  `seed ⊕ leagueID`. A failed first run rolls back and leaves it unset.
+- Errors: `400` invalid id, `404 ErrWorldNotFound`, `422 ErrWorldArchived` /
+  `ErrWorldHasNoLeagues` (create ≥1 league first, Step 5), `500` otherwise.
 
-Verify the season and fixtures (authenticated, world-scoped):
+Verify the seeded clubs (needs a **manager-scoped** session — this world's
+`$ADMIN_MANAGER`; see Step 4):
 
 ```bash
-curl -c /tmp/jar -b /tmp/jar localhost:8080/api/competitions
-curl -c /tmp/jar -b /tmp/jar "localhost:8080/api/competitions/$STARTER_LEAGUE/fixtures"
-curl -c /tmp/jar -b /tmp/jar localhost:8080/api/competitions/$STARTER_LEAGUE/standings
-# league's season status: SELECT status, season_number FROM competition.seasons WHERE competition_id='...'
+curl -c /tmp/jar -b /tmp/jar localhost:8080/api/clubs                                # 4 clubs (this world only)
+curl -c /tmp/jar -b /tmp/jar localhost:8080/api/clubs/<club-id>                      # detail: squad, manager, is_ai_controlled
+curl -c /tmp/jar -b /tmp/jar localhost:8080/api/competitions                          # declared leagues
+# memberships: SELECT competition_id FROM competition.club_competitions WHERE club_id='<club-id>'
 ```
 
 ---
 
-## 7. Start the season running (launch + tick cadences)
+## 7. Start a season (service seam)
 
-Seeding *creates* the season and its schedule; **matches only kick off once the
-world is playable and the daily tick fires.** Three things compose:
+There is **no Phase-1 endpoint** for starting a season — seeding and seasons are
+deliberately decoupled. Start each league's season #1 through the competition
+service:
+
+```go
+started, err := s.compSvc.StartSeason(ctx, worldID, leagueID) // Season{season_label, status, ...}
+```
+
+`StartSeason` creates the season (`in_progress`), a deterministic double
+round-robin fixture list, and one matchday per game-day from the world's boot
+reference date (fixtures are spaced ≥2 game-days apart to satisfy the phase-2
+rest rule). Executable samples live in the integration suite
+(`internal/competition/runner_integration_test.go`, the `TestStartSeason…`
+tests). Calling it twice for the same league returns `ErrLeagueAlreadySeeded`.
+
+To run a season end-to-end right now without a new endpoint, either wait for the
+phase-2 rest surface or drive the seam from a scratch `go run` main (or the
+matchday runner tests).
+
+---
+
+## 8. Launch the world and let the ticks run
+
+Seeding materializes the clubs and `StartSeason` schedules the matches; **matches
+only kick off once the world is playable and the daily tick fires.** Three things
+compose:
 
 1. **Launch the world** (`provisioning → active`). The scheduler ignores
    non-playable worlds, so this is when the clock starts.
@@ -331,36 +350,31 @@ weekly tick), the monthly tick drives S05-02 wage posting (`4 × weekly_wage` pe
 active contract, idempotent ledger write + `WAGE_POSTED` event).
 
 Watch it happen in the worker logs (`daily tick: kicked X matchday(s), Y
-fixture(s)`), or poll the match feed:
+fixture(s)`), or poll the match feed (manager-scoped session):
 
 ```bash
-curl -c /tmp/jar -b /tmp/jar localhost:8080/api/fixtures/<fixture-id>
+curl -c /tmp/jar -b /tmp/jar localhost:8080/api/competitions/$LEAGUE_ID/standings
+curl -c /tmp/jar -b /tmp/jar "localhost:8080/api/competitions/$LEAGUE_ID/fixtures"
 curl -c /tmp/jar -b /tmp/jar localhost:8080/api/matches/<match-id>/events
 ```
 
 **Season completion is automatic.** When the final fixture's result is applied,
-the standings roll over (promotions/relegations), season #1 is marked
-`completed`, and season #2 is created as `upcoming` with fresh fixtures —
+the standings roll over (promotions/relegations), the season is marked
+`completed`, and the next season is created as `upcoming` with fresh fixtures —
 `SEASON_COMPLETED`/`SEASON_CREATED` events ride the same transaction. No manual
 "next season" step exists.
 
-**Get a human manager into the loop.** To play the starter club yourself, first
-create a plain account (Step 3 without `-admin`), then as admin issue it a job
-offer for the AI starter club (`OPD-16`):
-
-```bash
-curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/offers \
-  -H 'Content-Type: application/json' \
-  -d '{"club_id":"'"$STARTER_CLUB"'","manager_id":"<unemployed-manager-id>"}'
-```
-
-The candidate then sees/accepts the offer (`GET /api/managers/me/offers`,
-`POST /api/offers/:id/accept`), and owns the club — from then on club, tactics,
-training-plan, finances/ledger/contracts reads are theirs (and only theirs).
+**Get a human manager into the loop — later.** Because login is admin-only in
+phase 1, a real human manager cannot yet accept a job offer; the offer/accept
+flow is exercised through minted sessions in the integration suite. When the
+login gate opens (phase 2 rest), create a plain account (Step 3 without
+`-admin`), issue it a job offer for an AI club as admin
+(`POST /api/admin/offers`), and the candidate accepts from their manager
+session.
 
 ---
 
-## 8. Open the transfer window
+## 9. Open the transfer window
 
 **Not yet implemented** — the transfer market is the S06 slice.
 
@@ -378,7 +392,7 @@ The `internal/transfer` package currently holds the planned domain shapes only
   (active/completed/collapsed), `Clause` (sell_on/buy_back/release), `Loan`.
 - Planned service seam: `GetActiveListings`, `PlaceBid`, `RespondToBid`.
 
-When S06 lands, the doc's Step 8 will begin with an admin-action or season-gated
+When S06 lands, this Step 9 will begin with an admin-action or season-gated
 window toggle (to be specified), after which `GET /api/.../listings` and the bid
 flow become callable — and transfer fee installments will start feeding the
 finance summary's `future_installments` / `committed_spending` (currently 0;
@@ -386,25 +400,24 @@ see `docs/design/finance-numerics.md`).
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Error/cause | Fix |
 |---|---|---|
-| `ErrRefDataMissing` on bootstrap | `ref-seed` never ran | Run `go run ./cmd/ref-seed` (Step 2) |
-| `ErrWorldNotProvisioning` on bootstrap | world already launched or bootstrapped | Bootstrap the world before setting it `active` |
-| `ErrAlreadyBootstrapped` | world bootstrapped twice | It is one-shot; new world required |
-| `ErrWorldNotBootstrapped` on seeding | no `WORLD_BOOTSTRAPPED` (starter club missing) | Bootstrap first (Step 4) — no world seed = no world seed randomness |
+| `ErrRefDataMissing` on seed | `ref-seed` never ran | Run `go run ./cmd/ref-seed -data data/names -clubdata data/clubs` (Step 2) |
+| `ErrWorldHasNoLeagues` on seed | world has no declared leagues | Create ≥1 country+league first (Step 5) |
+| Seed created `0` clubs | re-seed of an already-full world | Expected; idempotent. Add leagues/raise `team_count`, re-seed |
+| `ErrLeagueAlreadySeeded` on StartSeason | league already has a season | One season per league; a completed season rolls to the next automatically |
 | `ErrCountryWorldMismatch` | country belongs to another world | Reuse the `country_id` returned for *this* world |
-| `ErrCountryHasNoLeagues` | seeding a country with no leagues | Create ≥1 league first (Step 5) |
 | `ErrInvalidTeamCount` / 400 | `team_count` odd or < 4 | Use an even count ≥ 4 |
 | `ErrBadAdjacency` / `ErrAdjacencyMismatch` | promotion/relegation link bad, or counts asymmetric | Link a league in the same country; the league above must relegate exactly as many as the league below promotes |
-| `ErrLeagueAlreadySeeded` | league already has a season | One seed per league; no re-seed — fresh world |
-| `ErrNoStarterClub` | a world club fits no league | Raise the starter league's `team_count` so every club lands somewhere |
+| `/api/clubs`, `/api/competitions`, … → `403 no world context` | admin console session is world-less | Use a manager-scoped session (grant the admin a manager row, Step 4) |
+| Plain account can't log in (`403`) | Phase-1 login gate is admin-only | By design (OPD-02); opens with the phase-2 rest |
 | `ErrDuplicateEntry`-style 409s on offers | manager already has a job (one-job-per-user) | Resign/sack the current assignment first |
 | `go run ./cmd/api` exits immediately | `JWT_SECRET` unset | `export JWT_SECRET=…` (set in Step 1) |
-| Scheduler fires no ticks | world not `active`/`open_beta` | Launch via Step 7 (playable worlds only) |
+| Scheduler fires no ticks | world not `active`/`open_beta` | Launch via Step 8 (playable worlds only) |
 | Cadence change "does nothing" | next resample is up to 15s away | Wait one `SCHEDULER_POLL_INTERVAL`; `tick.match_cadence` is deliberately ignored by the world clock (`OPD-17`) |
-| Matches never start | daily tick not firing or fixture date in the future | Set `tick.daily_cadence=* * * * *`; fixtures are day-gated by the season reference date |
+| Matches never start | no season started, or daily tick not firing | Run the `StartSeason` seam (Step 7); set `tick.daily_cadence=* * * * *`; fixtures are day-gated by the season reference date |
 
 ---
 
@@ -413,31 +426,25 @@ see `docs/design/finance-numerics.md`).
 ```bash
 export DATABASE_URL="postgres://touchline@localhost:55432/touchline?sslmode=disable&host=/tmp"
 cd backend && migrate -database "$DATABASE_URL" -path migrations up
-go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names
+go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names -clubdata data/clubs
 
-W=$(psql "$DATABASE_URL" -tAc "SELECT id FROM world.worlds LIMIT 1")
-[ -z "$W" ] && W=$(psql "$DATABASE_URL" -tAc "INSERT INTO world.worlds(name,status) VALUES('bootstrap','provisioning') RETURNING id")
-
-ADMIN_PW='change-me' go run ./cmd/user-create -email admin@example.com -password-env ADMIN_PW -world-id "$W" -admin
+ADMIN_PW='change-me' go run ./cmd/user-create -email admin@example.com -password-env ADMIN_PW -admin
 
 # start api/scheduler/worker, then:
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/auth/login \
   -H 'Content-Type: application/json' -d '{"email":"admin@example.com","password":"change-me"}'
 WORLD_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds \
   -H 'Content-Type: application/json' -d '{"name":"Demo Division"}' | jq -r .id)
-CLUB_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/bootstrap \
-  -H 'Content-Type: application/json' -d '{"name":"Harbour United","short_name":"HAR"}' | jq -r .club_id)
 COUNTRY_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/countries \
   -H 'Content-Type: application/json' \
   -d '{"world_id":"'"$WORLD_ID"'","code":"ENG","name":"England"}' | jq -r .id)
 LEAGUE_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/leagues \
   -H 'Content-Type: application/json' \
   -d '{"country_id":"'"$COUNTRY_ID"'","name":"Premier Division","tier":1,"team_count":6}' | jq -r .id)
-curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/seed-competition \
-  -H 'Content-Type: application/json' \
-  -d '{"country_id":"'"$COUNTRY_ID"'","starter_league_id":"'"$LEAGUE_ID"'"}'
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/seed
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/status \
   -H 'Content-Type: application/json' -d '{"status":"active"}'
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
   -H 'Content-Type: application/json' -d '{"key":"tick.daily_cadence","value":"* * * * *"}'
+# then StartSeason(worldID, LEAGUE_ID) via the service seam (Step 7)
 ```

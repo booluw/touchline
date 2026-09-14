@@ -21,18 +21,20 @@ func TestHTTPClubNameParts(t *testing.T) {
 	w := testdb.CreateWorld(t, pool, "W-POOLS")
 	admin := testdb.CreateUser(t, pool, "poolsadmin@example.com", "s3cret", []testdb.Join{{WorldID: w}})
 	testdb.MakeAdmin(t, pool, admin)
-	plain := testdb.CreateUser(t, pool, "poolsplain@example.com", "s3cret", []testdb.Join{{WorldID: w}})
-	_ = plain
+	testdb.CreateUser(t, pool, "poolsplain@example.com", "s3cret", []testdb.Join{{WorldID: w}})
 	adminCookies := login(t, ts, client, "poolsadmin@example.com", "s3cret")
-	plainCookies := login(t, ts, client, "poolsplain@example.com", "s3cret")
 
-	// Non-admins are forbidden.
-	if r := get(t, ts, client, "/api/admin/club-name-parts", plainCookies); r.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin list = %d, want 403", r.StatusCode)
+	// Non-admins are forbidden — they cannot even obtain a session.
+	if r := post(t, ts, client, "/api/auth/login",
+		`{"email":"poolsplain@example.com","password":"s3cret"}`, ""); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-admin login = %d, want 403", r.StatusCode)
+	}
+	if r := get(t, ts, client, "/api/admin/club-name-parts", ""); r.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated list = %d, want 401", r.StatusCode)
 	}
 	if r := post(t, ts, client, "/api/admin/club-name-parts",
-		`{"kind":"stem","value":"Atlas"}`, plainCookies); r.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin add = %d, want 403", r.StatusCode)
+		`{"kind":"stem","value":"Atlas"}`, ""); r.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated add = %d, want 401", r.StatusCode)
 	}
 
 	// List returns seeded pools.

@@ -117,6 +117,9 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0028–0032 | `competition`/`world`/`match`/`club`/`manager` | Club names + world-scoping, fixture standings, match snapshot (`sim_inputs`), world calendar day (`current_day`) |
 | 0033 | `club` / `player` | Manager tactics + training plans (S05-01), new attribute keys backfill (`tackling`/`marking`/`teamwork`) |
 | 0034 | `player` | Match-condition trackers (`player.player_condition`: fatigue/fitness/sharpness/injury_risk/tactical_familiarity) |
+| 0035 | `finance` | Ledger accounting: `income`/`expense` correction + per-entry dedup guard (`finance.ledger_entry_scope`, S05-02) |
+| 0036 | `player` / `club` / `world` | Player lifecycle foundations: `player_origin` + `country_id` pools, academy investment tiers, seasonal street-kid intake anchor (A01) |
+| 0037 | `competition` / `world` | Launch-model seeding: season-independent `competition.club_competitions` (role league/cup, one-league-per-club) + `world.worlds.world_seed` replay seed |
 
 ### River migrations (0016–0022)
 

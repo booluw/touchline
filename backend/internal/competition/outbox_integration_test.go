@@ -67,9 +67,15 @@ func TestCompetitionEventsDispatchPersistedIDs(t *testing.T) {
 
 	delivered, bus := runningBus(t, pool)
 	svc := NewService(pool, bus)
-	premier, _ := twoTierLeague(t, svc, countryID)
-	if _, err := svc.SeedCompetition(ctx, worldID, countryID, premier.ID); err != nil {
+	premier, champ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier season: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, champ.ID); err != nil {
+		t.Fatalf("start champ season: %v", err)
 	}
 
 	// Play the full season; the last result triggers the rollover cascade.
@@ -99,7 +105,7 @@ func TestCompetitionEventsDispatchPersistedIDs(t *testing.T) {
 
 	wantCounts := map[string]int{
 		"COMPETITION_SEEDED": 1,
-		"SEASON_CREATED":     4, // 2 seeded + 2 rollover (one per league)
+		"SEASON_CREATED":     4, // 2 started + 2 rollover (one per league)
 		"SEASON_COMPLETED":   2,
 		"CLUB_PROMOTED":      1,
 		"CLUB_RELEGATED":     1,
@@ -171,58 +177,61 @@ func (failingBus) PublishTx(context.Context, pgx.Tx, *eventbus.Event) error {
 	return errors.New("bus: injectable publish failure")
 }
 
-// TestSeedCompetitionEventFailureAbortsState proves that a seed whose event
-// enqueue fails persists NOTHING: no seasons, no season entries, no fixtures,
-// and no seed events — not a half-materialized pyramid.
-func TestSeedCompetitionEventFailureAbortsState(t *testing.T) {
+// TestSeedWorldEventFailureAbortsState proves that a seed whose event
+// enqueue fails persists NOTHING: no clubs, no league memberships, no world
+// seed, and no events — not a half-materialized pyramid.
+func TestSeedWorldEventFailureAbortsState(t *testing.T) {
 	pool, worldID, countryID := seedWorld(t)
 	ctx := context.Background()
 
 	svc := NewService(pool, failingBus{})
-	premier, champ := twoTierLeague(t, svc, countryID)
+	twoTierLeague(t, svc, countryID)
 
-	if _, err := svc.SeedCompetition(ctx, worldID, countryID, premier.ID); err == nil {
+	if _, err := svc.SeedWorld(ctx, worldID); err == nil {
 		t.Fatal("seed must fail when the event enqueue fails")
 	}
 
-	for _, lt := range []*League{premier, champ} {
-		var seasons int
-		if err := pool.QueryRow(ctx,
-			`SELECT count(*) FROM competition.seasons WHERE competition_id = $1 AND world_id = $2`,
-			lt.ID, worldID).Scan(&seasons); err != nil {
-			t.Fatalf("count seasons: %v", err)
-		}
-		if seasons != 0 {
-			t.Fatalf("%s seasons = %d, want 0 after rolled-back seed", lt.Name, seasons)
-		}
-		var entries int
-		if err := pool.QueryRow(ctx, `
-			SELECT count(*) FROM competition.competition_entries e
-			JOIN competition.seasons s ON s.id = e.season_id
-			WHERE s.competition_id = $1 AND s.world_id = $2`, lt.ID, worldID).Scan(&entries); err != nil {
-			t.Fatalf("count entries: %v", err)
-		}
-		if entries != 0 {
-			t.Fatalf("%s entries = %d, want 0 after rollback", lt.Name, entries)
-		}
-	}
-	var fixtures int
+	var clubs int
 	if err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM match.fixtures WHERE world_id = $1 AND competition_id = $2`, worldID, premier.ID).Scan(&fixtures); err != nil {
-		t.Fatalf("count fixtures: %v", err)
+		`SELECT count(*) FROM club.clubs WHERE world_id = $1`, worldID).Scan(&clubs); err != nil {
+		t.Fatalf("count clubs: %v", err)
 	}
-	if fixtures != 0 {
-		t.Fatalf("fixtures = %d, want 0 after rolled-back seed", fixtures)
+	if clubs != 0 {
+		t.Fatalf("clubs = %d, want 0 after rolled-back seed", clubs)
+	}
+	var memberships int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM competition.club_competitions WHERE world_id = $1`, worldID).Scan(&memberships); err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	if memberships != 0 {
+		t.Fatalf("memberships = %d, want 0 after rollback", memberships)
+	}
+	var seedNull bool
+	if err := pool.QueryRow(ctx,
+		`SELECT world_seed IS NULL FROM world.worlds WHERE id = $1`, worldID).Scan(&seedNull); err != nil {
+		t.Fatalf("load world_seed nullability: %v", err)
+	}
+	if !seedNull {
+		t.Fatal("world_seed is set despite the rolled-back seed")
 	}
 	var events int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM world.events
-		WHERE world_id = $1 AND event_type IN ('SEASON_CREATED','COMPETITION_SEEDED')`,
+		WHERE world_id = $1 AND event_type IN ('WORLD_SEEDED','COMPETITION_SEEDED')`,
 		worldID).Scan(&events); err != nil {
 		t.Fatalf("count events: %v", err)
 	}
 	if events != 0 {
 		t.Fatalf("seed events = %d, want 0 after rollback", events)
+	}
+	var fixtures int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM match.fixtures WHERE world_id = $1`, worldID).Scan(&fixtures); err != nil {
+		t.Fatalf("count fixtures: %v", err)
+	}
+	if fixtures != 0 {
+		t.Fatalf("fixtures = %d, want 0 after rolled-back seed", fixtures)
 	}
 }
 
@@ -236,8 +245,14 @@ func TestRolloverEventFailureAbortsSeasonCompletion(t *testing.T) {
 
 	svc := NewService(pool, nil)
 	premier, champ := twoTierLeague(t, svc, countryID)
-	if _, err := svc.SeedCompetition(ctx, worldID, countryID, premier.ID); err != nil {
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier season: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, champ.ID); err != nil {
+		t.Fatalf("start champ season: %v", err)
 	}
 
 	var fixtures []struct {

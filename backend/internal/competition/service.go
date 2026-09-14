@@ -1,6 +1,6 @@
 // Package competition implements the MVP league/standings layer (S04-01).
 //
-// It records the OPD-01 resolution (OPD-20): league composition is
+// It records the OPD-01 resolution (OPD-20): competition composition is
 // admin-configured per country, per world. Nothing invents a league size,
 // tier count, or promotion/relegation rule — an admin declares every value:
 //
@@ -10,15 +10,24 @@
 //   - every league owns its tier, team count, and its promotion/relegation
 //     adjacency (explicit promotes_to/relegates_to links, never inferred).
 //
-// Seeding materializes the admin's declaration: additional AI clubs (with
-// generated squads) are created via bootstrap.GenerateAIClub until each
-// league reaches team_count, a season and its entries are created, and a
-// deterministic home-and-away round-robin fixture list is scheduled one
-// matchday per day from the world's season reference date.
+// Materialization is a two-step, deterministic process (launch model):
 //
-// Determinism: the whole seeding operation draws from one *rand.Rand seeded
-// from the world's WORLD_BOOTSTRAPPED.random_seed, so identical inputs
-// reproduce identical worlds.
+//  1. SeedWorld materializes the declaration: it generates AI clubs (with
+//     squads, via bootstrap.GenerateAIClub) until every league reaches
+//     team_count and records each club's season-independent membership in
+//     competition.club_competitions (one league per club). Seeding is
+//     incremental — re-running it only fills leagues that are not yet full
+//     (e.g. leagues added after the initial seed).
+//  2. StartSeason consumes membership to create the league's season, its
+//     competition_entries, and a deterministic home-and-away round-robin
+//     fixture list scheduled one matchday per day from the world's season
+//     reference date.
+//
+// Determinism: SeedWorld draws everything from one world seed minted on the
+// first seed run and stored in world.worlds.world_seed (recorded on the
+// WORLD_SEEDED event), with per-league sub-streams derived from seed ⊕
+// leagueID, so identical inputs reproduce identical worlds and later seeds
+// only extend them.
 package competition
 
 import (
@@ -39,7 +48,6 @@ import (
 var (
 	ErrWorldNotFound            = errors.New("world not found")
 	ErrWorldArchived            = errors.New("world is archived")
-	ErrWorldNotBootstrapped     = errors.New("world has no starter club — bootstrap it first")
 	ErrCountryNotFound          = errors.New("country not found")
 	ErrCountryWorldMismatch     = errors.New("country does not belong to this world")
 	ErrCompetitionNotFound      = errors.New("competition not found")
@@ -49,13 +57,13 @@ var (
 	ErrInvalidTier              = errors.New("tier must be >= 1")
 	ErrInvalidCounts            = errors.New("promotions/relegations must be non-negative and fewer than team_count")
 	ErrBadAdjacency             = errors.New("promotes_to/relegates_to must reference a league in the same country, and a positive movement count requires a link")
-	ErrLeagueAlreadySeeded      = errors.New("this league already has a season; one seed per league")
+	ErrLeagueAlreadySeeded      = errors.New("this league already has a season; one season per league at a time")
+	ErrCompetitionNotSeeded     = errors.New("competition has no member clubs — seed the world first")
+	ErrWorldHasNoLeagues        = errors.New("world has no leagues to seed — create countries and leagues first")
 	ErrAdjacencyMismatch        = errors.New("promotion/relegation adjacency is inconsistent: the league above must relegate as many as the league below promotes")
 	ErrFixtureNotFound          = errors.New("fixture not found")
 	ErrResultAlreadyApplied     = errors.New("result already recorded for this fixture")
 	ErrNoSeason                 = errors.New("competition has no season yet")
-	ErrCountryHasNoLeagues      = errors.New("country has no leagues — create leagues before seeding")
-	ErrNoStarterClub            = errors.New("world has clubs that fit no league — adjust team counts")
 	ErrInvalidResult            = errors.New("result scores must be non-negative")
 	ErrManagerNotInMatch        = errors.New("manager does not own a club in this match")
 	ErrMatchNotInProgress       = errors.New("match is not in progress")
@@ -153,22 +161,29 @@ type ClubSeed struct {
 
 // LeagueSeed reports one league's seeding result.
 type LeagueSeed struct {
-	LeagueID     uuid.UUID  `json:"league_id"`
-	Name         string     `json:"name"`
-	Tier         int        `json:"tier"`
-	TeamCount    int        `json:"team_count"`
-	SeasonID     uuid.UUID  `json:"season_id"`
-	SeasonLabel  string     `json:"season_label"`
-	FixtureCount int        `json:"fixture_count"`
-	Matchdays    int        `json:"matchdays"`
-	Clubs        []ClubSeed `json:"clubs"`
+	LeagueID  uuid.UUID  `json:"league_id"`
+	Name      string     `json:"name"`
+	Tier      int        `json:"tier"`
+	TeamCount int        `json:"team_count"`
+	NewClubs  int        `json:"new_clubs"`
+	Clubs     []ClubSeed `json:"clubs"`
 }
 
-// SeedResult is the summary of a country-wide seeding run.
+// CountrySeed reports one country's seeding result (its leagues + members).
+type CountrySeed struct {
+	CountryID   uuid.UUID    `json:"country_id"`
+	CountryName string       `json:"country_name"`
+	Leagues     []LeagueSeed `json:"leagues"`
+}
+
+// SeedResult is the summary of a whole-world seeding run. RandomSeed is the
+// world's stored replay seed (minted on the first successful run).
 type SeedResult struct {
-	WorldID   uuid.UUID    `json:"world_id"`
-	CountryID uuid.UUID    `json:"country_id"`
-	Leagues   []LeagueSeed `json:"leagues"`
+	WorldID     uuid.UUID     `json:"world_id"`
+	RandomSeed  int64         `json:"random_seed"`
+	Countries   []CountrySeed `json:"countries"`
+	NewClubs    int           `json:"new_clubs"`
+	LeagueCount int           `json:"league_count"`
 }
 
 // KickoffHourUTC is the fixed, deterministic kickoff time (19:00 UTC) for

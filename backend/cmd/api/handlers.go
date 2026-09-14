@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	internalauth "github.com/touchline/backend/internal/auth"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
@@ -22,14 +21,13 @@ const (
 )
 
 type loginRequest struct {
-	Email    string     `json:"email"`
-	Password string     `json:"password"`
-	WorldID  *uuid.UUID `json:"world_id,omitempty"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
-// handleLogin verifies credentials and establishes a session. When a jobless
-// account spans multiple worlds it returns the world list instead of cookies;
-// the client re-posts with world_id to pick a world.
+// handleLogin verifies credentials and establishes a session. Phase-1 launch
+// gates login to administrators; an admin session is a world-less console
+// session (the admin row has no manager yet on an empty DB).
 func (s *server) handleLogin(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,7 +42,6 @@ func (s *server) handleLogin(c *gin.Context) {
 	res, err := s.svc.Login(c.Request.Context(), internalauth.LoginParams{
 		Email:             req.Email,
 		Password:          req.Password,
-		WorldID:           req.WorldID,
 		IP:                clientIP(c),
 		DeviceFingerprint: deviceFingerprint(c),
 	})
@@ -52,19 +49,11 @@ func (s *server) handleLogin(c *gin.Context) {
 	case errors.Is(err, internalauth.ErrInvalidCredentials):
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
 		return
-	case errors.Is(err, internalauth.ErrNoManager):
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-		return
-	case errors.Is(err, internalauth.ErrNotMemberOfWorld):
+	case errors.Is(err, internalauth.ErrNotAuthorized):
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	case err != nil:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
-	}
-
-	if res.Worlds != nil {
-		c.JSON(http.StatusOK, gin.H{"status": "worlds", "worlds": res.Worlds})
 		return
 	}
 

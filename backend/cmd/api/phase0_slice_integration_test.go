@@ -36,7 +36,8 @@ func TestPhase0VerticalSlice(t *testing.T) {
 	client := ts.Client()
 
 	// Admin (in any world — admin routes need no world context) and, later, a
-	// jobless candidate who joins the new world at game start.
+	// job-outside candidate who is also an admin under the launch gate (only
+	// admins may log in during phase 1; manager sessions are minted below).
 	adminWorld := testdb.CreateWorld(t, pool, "SLICE-ADMIN-WORLD")
 	admin := testdb.CreateUser(t, pool, "slice-admin@example.com", "s3cret",
 		[]testdb.Join{{WorldID: adminWorld}})
@@ -61,31 +62,49 @@ func TestPhase0VerticalSlice(t *testing.T) {
 	}
 	world := created.ID
 
-	testdb.CreateUser(t, pool, "slice-candidate@example.com", "s3cret",
+	candidate := testdb.CreateUser(t, pool, "slice-candidate@example.com", "s3cret",
 		[]testdb.Join{{WorldID: world}})
-	candidateCookies := login(t, ts, client, "slice-candidate@example.com", "s3cret")
+	testdb.MakeAdmin(t, pool, candidate)
+	var candidateManager uuid.UUID
+	if err := pool.QueryRow(context.Background(),
+		`SELECT id FROM manager.managers WHERE user_id = $1`, candidate).Scan(&candidateManager); err != nil {
+		t.Fatalf("candidate manager id: %v", err)
+	}
+	// Manager-scoped reads need a real manager session, which the phase-1 login
+	// gate does not mint (admins get world-less console sessions) — mint one.
+	candidateCookies := managerCookies(t, ts, pool, candidateManager, candidate)
 
-	// 2. Generate the club with a squad (bootstrap, S03-01).
-	resp = post(t, ts, client, "/api/admin/worlds/"+world.String()+"/bootstrap",
-		`{"name":"Slice FC"}`, adminCookies)
+	// 2. Declare the world's structure (country + one league), then generate
+	// the clubs with squads via the whole-world seed (launch model).
+	resp = post(t, ts, client, "/api/admin/countries",
+		`{"world_id":"`+world.String()+`","code":"eng","name":"England"}`, adminCookies)
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("bootstrap = %d, want 201 (%s)", resp.StatusCode, body)
+		t.Fatalf("create country = %d, want 201 (%s)", resp.StatusCode, body)
 	}
-	var boot struct {
-		ClubID     uuid.UUID `json:"club_id"`
-		ManagerID  uuid.UUID `json:"manager_id"`
-		SquadSize  int       `json:"squad_size"`
-		RandomSeed int64     `json:"random_seed"`
+	countryID := decodeID(t, resp, "id")
+	resp = post(t, ts, client, "/api/admin/leagues",
+		`{"country_id":"`+countryID+`","name":"Slice League","tier":1,"team_count":4}`, adminCookies)
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create league = %d, want 201 (%s)", resp.StatusCode, body)
 	}
-	if err := decodeJSON(t, resp, &boot); err != nil {
-		t.Fatalf("decode bootstrap: %v", err)
+	resp = post(t, ts, client, "/api/admin/worlds/"+world.String()+"/seed", "", adminCookies)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("seed = %d, want 200 (%s)", resp.StatusCode, body)
 	}
-	if boot.SquadSize != 24 || boot.ClubID == uuid.Nil || boot.ManagerID == uuid.Nil || boot.RandomSeed == 0 {
-		t.Fatalf("bootstrap result incomplete: %+v", boot)
+	var seed struct {
+		NewClubs int `json:"new_clubs"`
+	}
+	if err := decodeJSON(t, resp, &seed); err != nil {
+		t.Fatalf("decode seed: %v", err)
+	}
+	if seed.NewClubs != 4 {
+		t.Fatalf("seeded clubs = %d, want 4", seed.NewClubs)
 	}
 
-	// The candidate can read the generated club and its squad in their world.
+	// The candidate can read the generated clubs and their squads in their world.
 	resp = get(t, ts, client, "/api/clubs", candidateCookies)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list clubs = %d, want 200", resp.StatusCode)
@@ -98,15 +117,10 @@ func TestPhase0VerticalSlice(t *testing.T) {
 	if err := decodeJSON(t, resp, &clubs); err != nil {
 		t.Fatalf("decode clubs: %v", err)
 	}
-	found := false
-	for _, c := range clubs.Clubs {
-		if c.ID == boot.ClubID {
-			found = true
-		}
+	if len(clubs.Clubs) != 4 {
+		t.Fatalf("world clubs = %d, want 4", len(clubs.Clubs))
 	}
-	if !found {
-		t.Fatalf("candidate world club list missing %s", boot.ClubID)
-	}
+	clubID := clubs.Clubs[0].ID
 
 	// 3. Launch the world, then set the daily cadence the scheduler syncs to.
 	resp = post(t, ts, client, "/api/admin/worlds/"+world.String()+"/status",
@@ -190,10 +204,11 @@ func TestPhase0VerticalSlice(t *testing.T) {
 	}
 	ghost := testdb.CreateUser(t, pool, "slice-ghost@example.com", "s3cret",
 		[]testdb.Join{{WorldID: world}})
-	ghostCookies := login(t, ts, client, "slice-ghost@example.com", "s3cret")
+	testdb.MakeAdmin(t, pool, ghost)
 	if _, err := pool.Exec(ctx, `DELETE FROM manager.managers WHERE user_id = $1`, ghost); err != nil {
 		t.Fatalf("remove ghost manager row: %v", err)
 	}
+	ghostCookies := login(t, ts, client, "slice-ghost@example.com", "s3cret")
 	resp = get(t, ts, client, "/api/clubs", ghostCookies)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("no-world-context clubs = %d, want 403", resp.StatusCode)
@@ -206,7 +221,7 @@ func TestPhase0VerticalSlice(t *testing.T) {
 	var squad struct {
 		Squad []json.RawMessage `json:"squad"`
 	}
-	resp = get(t, ts, client, "/api/clubs/"+boot.ClubID.String(), candidateCookies)
+	resp = get(t, ts, client, "/api/clubs/"+clubID.String(), candidateCookies)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("club detail = %d, want 200", resp.StatusCode)
 	}
