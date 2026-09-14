@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/playergen"
 )
@@ -287,6 +288,7 @@ func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worl
 	// 3. People + players.
 	ref := daysTruncate(worldRef)
 	players := make([]SquadPlayer, 0, len(squad))
+	seeds := make([]finance.ContractSeed, 0, len(squad))
 	for i, gp := range squad {
 		var personID uuid.UUID
 		if err := tx.QueryRow(ctx, `
@@ -327,18 +329,32 @@ func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worl
 			PrimaryPosition: gp.PrimaryPosition,
 			SquadNumber:     number,
 		})
+		seeds = append(seeds, finance.ContractSeed{
+			PlayerID:   playerID,
+			Position:   gp.PrimaryPosition,
+			Age:        gp.Age,
+			Attributes: gp.Attributes,
+		})
 	}
 
-	// 4. The auditable creation event (same tx).
+	// 4. Financial genesis in the same tx: the ledger account and opening
+	// capital, the season's transfer + wage budgets, and a starter contract
+	// with wage commitment for the full squad (S05-02).
+	if err := finance.BootstrapClub(ctx, tx, worldID, clubID, ref, seeds); err != nil {
+		return nil, fmt.Errorf("seed club finances: %w", err)
+	}
+
+	// 5. The auditable creation event (same tx).
 	actor := "system"
 	clubEvent := &eventbus.Event{
 		WorldID:   worldID,
 		EventType: "CLUB_CREATED",
 		Payload: mustJSON(map[string]any{
-			"club_id":    clubID,
-			"club_name":  clubName,
-			"manager_id": managerID,
-			"squad_size": len(players),
+			"club_id":        clubID,
+			"club_name":      clubName,
+			"manager_id":     managerID,
+			"squad_size":     len(players),
+			"contract_count": len(seeds),
 		}),
 	}
 	clubEvent.ActorType = &actor

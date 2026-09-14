@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/touchline/backend/internal/competition"
 	"github.com/touchline/backend/internal/eventoutbox"
+	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/matchday"
@@ -65,6 +66,7 @@ func main() {
 	matches := match.NewService(pool, bus, squad.NewStore(pool), form.NewStore(pool))
 	compSvc := competition.NewService(pool, bus)
 	trainingSvc := training.NewService(pool, bus)
+	financeSvc := finance.NewService(pool, bus)
 	matchdayRunner := matchday.NewRunner(pool, matches, compSvc)
 	matchdayRunner.WithRealtime(realtimeBroker)
 
@@ -125,6 +127,11 @@ func main() {
 		if payload.Granularity == "weekly" {
 			if _, err := trainingSvc.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
+			}
+		}
+		if payload.Granularity == "monthly" {
+			if _, err := financeSvc.ApplyMonthlyWages(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s monthly wages: %w", ev.WorldID, err)
 			}
 		}
 		return nil

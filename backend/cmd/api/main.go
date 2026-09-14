@@ -13,6 +13,7 @@ import (
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
 	internalcompetition "github.com/touchline/backend/internal/competition"
+	internalfinance "github.com/touchline/backend/internal/finance"
 	internalform "github.com/touchline/backend/internal/form"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
@@ -35,6 +36,7 @@ type server struct {
 	matchSvc      *internalmatch.Service
 	tacticsSvc    *internaltactics.Service
 	trainingSvc   *internaltraining.Service
+	financeSvc    *internalfinance.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -83,6 +85,7 @@ func main() {
 		matchSvc:      internalmatch.NewService(pool, bus, squadStore, internalform.NewStore(pool)),
 		tacticsSvc:    internaltactics.NewService(pool, bus, squadStore),
 		trainingSvc:   internaltraining.NewService(pool, bus),
+		financeSvc:    internalfinance.NewService(pool, bus),
 		jwtCfg:        jwtCfg,
 		pool:          pool,
 		cookiesSecure: os.Getenv("ENV") != "development",

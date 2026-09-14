@@ -6,6 +6,7 @@
         <NuxtLink to="/squad" class="hover:text-white">Squad</NuxtLink>
         <NuxtLink to="/tactics" class="hover:text-white">Tactics</NuxtLink>
         <NuxtLink to="/training" class="hover:text-white">Training</NuxtLink>
+        <NuxtLink to="/finances" class="hover:text-white">Finances</NuxtLink>
         <NuxtLink to="/competitions" class="hover:text-white">Competitions</NuxtLink>
       </div>
     </nav>

@@ -1,38 +1,19 @@
+// Package finance implements the ledger-based financial engine (S05-02).
+//
+// Principles (PRD §35-37, tech plan §14, finance-numerics.md):
+//
+//   - The ledger is append-only and signed: every account movement is a
+//     credit or a debit in finance.ledger_entries. Cash is always derived
+//     as Σcredit − Σdebit — there is no mutable balance column.
+//
+//   - Budgets are planned capacity, explicitly separate from cash. A club
+//     can overspend its allocation; that is a board decision, not a bug.
+//
+//   - Monthly wages post 4 × weekly_wage per active commitment and are
+//     idempotent under river's at-least-once redelivery via the
+//     (account_id, dedup_key) unique index added in 0035.
+//
+//   - The initial balances, contracts and budgets are minted once at world
+//     bootstrap by BootstrapClub (called from GenerateAIClub); a value can
+//     only flow in or out of the ledger through a documented posting.
 package finance
-
-import "github.com/google/uuid"
-
-type LedgerEntry struct {
-	ID          uuid.UUID `json:"id"`
-	WorldID     uuid.UUID `json:"world_id"`
-	ClubID      uuid.UUID `json:"club_id"`
-	Category    string    `json:"category"` // revenue, expense
-	Type        string    `json:"type"`     // ticket_sales, sponsorship, wages, transfer_fee, etc.
-	Amount      int64     `json:"amount"`   // positive = income, negative = expense
-	Description string    `json:"description"`
-	EventID     *uuid.UUID `json:"event_id,omitempty"` // links to world.events for explainability
-	CreatedAt   string    `json:"created_at"`
-}
-
-type Budget struct {
-	ID               uuid.UUID `json:"id"`
-	ClubID           uuid.UUID `json:"club_id"`
-	WorldID          uuid.UUID `json:"world_id"`
-	TransferBudget   int64     `json:"transfer_budget"`
-	WageBudget       int64     `json:"wage_budget"`
-	AvailableCash    int64     `json:"available_cash"` // derived from SUM(ledger_entries)
-}
-
-type WageCommitment struct {
-	ID        uuid.UUID `json:"id"`
-	PlayerID  uuid.UUID `json:"player_id"`
-	ClubID    uuid.UUID `json:"club_id"`
-	WeeklyWage int64    `json:"weekly_wage"`
-}
-
-type Service interface {
-	GetLedger(clubID uuid.UUID) ([]*LedgerEntry, error)
-	GetBudget(clubID uuid.UUID) (*Budget, error)
-	AddEntry(entry *LedgerEntry) error
-	GetCashBalance(clubID uuid.UUID) (int64, error)
-}
