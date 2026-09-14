@@ -5,8 +5,8 @@
 // screen — events, scoreline, clock — is produced by the server.
 import { storeToRefs } from 'pinia'
 
-import type { EventType } from '~/stores/match'
-import { useMatchStore } from '~/stores/match'
+import type { EventType } from '~/app/stores/match'
+import { useMatchStore } from '~/app/stores/match'
 
 const route = useRoute()
 const matchStore = useMatchStore()
@@ -49,7 +49,7 @@ const statusText = computed(() => {
   return match.value.status
 })
 
-onMounted(() => { matchStore.watch(fixtureId.value).catch(() => {}) })
+onMounted(() => { matchStore.watch(fixtureId.value).catch(() => { }) })
 onUnmounted(() => matchStore.disconnect())
 </script>
 
@@ -66,10 +66,9 @@ onUnmounted(() => matchStore.disconnect())
               <div class="text-4xl font-bold text-white">
                 {{ match ? `${match.home_score}–${match.away_score}` : '–' }}
               </div>
-              <div class="mt-2 inline-block rounded px-3 py-1 text-xs font-semibold"
-                   :class="match?.status === 'in_progress' ? 'bg-emerald-800 text-emerald-200' :
-                           match?.status === 'completed' ? 'bg-indigo-800 text-indigo-200' :
-                           'bg-slate-700 text-slate-300'">
+              <div class="mt-2 inline-block rounded px-3 py-1 text-xs font-semibold" :class="match?.status === 'in_progress' ? 'bg-emerald-800 text-emerald-200' :
+                match?.status === 'completed' ? 'bg-indigo-800 text-indigo-200' :
+                  'bg-slate-700 text-slate-300'">
                 {{ statusText }}
               </div>
             </div>
@@ -85,20 +84,26 @@ onUnmounted(() => matchStore.disconnect())
         <section v-else class="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div v-if="match.status === 'in_progress'" class="mb-5 rounded border border-slate-700 bg-slate-900 p-3">
             <label class="mr-3 text-sm font-medium">Live style
-              <select v-model="liveStyle" class="ml-2 rounded bg-slate-800 p-1 text-sm"><option value="balanced">Balanced</option><option value="possession">Possession</option><option value="gegenpress">Gegenpress</option><option value="low_block">Low-block</option><option value="direct">Direct</option></select>
-            </label><button @click="changeStyle" class="rounded bg-indigo-600 px-3 py-1 text-sm">Apply next minute</button>
+              <select v-model="liveStyle" class="ml-2 rounded bg-slate-800 p-1 text-sm">
+                <option value="balanced">Balanced</option>
+                <option value="possession">Possession</option>
+                <option value="gegenpress">Gegenpress</option>
+                <option value="low_block">Low-block</option>
+                <option value="direct">Direct</option>
+              </select>
+            </label><button @click="changeStyle" class="rounded bg-indigo-600 px-3 py-1 text-sm">Apply next
+              minute</button>
             <p v-if="tacticalError" class="mt-2 text-sm text-red-400">{{ tacticalError }}</p>
           </div>
           <h2 class="text-lg font-semibold text-white mb-3">Match events</h2>
           <ul v-if="events.length" class="divide-y divide-slate-700">
             <li v-for="ev in events" :key="ev.id" class="flex items-start gap-3 py-2 text-sm">
               <span class="w-10 shrink-0 text-right font-mono text-slate-400 tabular-nums">{{ ev.minute }}'</span>
-              <span class="w-28 shrink-0 font-semibold"
-                    :class="ev.type === 'goal' || ev.type === 'penalty_scored' ? 'text-emerald-400' :
-                            ev.type === 'red_card' || ev.type === 'injury' ? 'text-red-400' :
-                            ev.type === 'yellow_card' ? 'text-yellow-400' :
-                            ev.type === 'half_time' || ev.type === 'full_time' ? 'text-indigo-300' :
-                            'text-slate-300'">
+              <span class="w-28 shrink-0 font-semibold" :class="ev.type === 'goal' || ev.type === 'penalty_scored' ? 'text-emerald-400' :
+                ev.type === 'red_card' || ev.type === 'injury' ? 'text-red-400' :
+                  ev.type === 'yellow_card' ? 'text-yellow-400' :
+                    ev.type === 'half_time' || ev.type === 'full_time' ? 'text-indigo-300' :
+                      'text-slate-300'">
                 {{ labels[ev.type] }}</span>
               <span class="text-slate-300/90">{{ ev.detail?.commentary ?? ev.detail?.detail ?? ev.type }}</span>
             </li>

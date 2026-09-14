@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useFinanceStore } from '~/stores/finance'
+import { useFinanceStore } from '~/app/stores/finance'
 const store = useFinanceStore()
 const clubId = ref('')
 const error = ref('')
@@ -34,11 +34,15 @@ onMounted(() => init().catch(() => { error.value = 'Could not load your club fin
           </div>
           <div class="rounded border border-slate-700 bg-slate-800 p-4">
             <span class="block text-sm text-slate-400">Operating profit (season)</span>
-            <strong class="text-2xl" :class="store.summary.operating_profit < 0 ? 'text-red-300' : 'text-emerald-300'">{{ sign(store.summary.operating_profit) }}</strong>
+            <strong class="text-2xl"
+              :class="store.summary.operating_profit < 0 ? 'text-red-300' : 'text-emerald-300'">{{
+                sign(store.summary.operating_profit) }}</strong>
           </div>
           <div class="rounded border border-slate-700 bg-slate-800 p-4">
             <span class="block text-sm text-slate-400">Projected year-end balance</span>
-            <strong class="text-2xl" :class="store.summary.projected_year_end_balance < 0 ? 'text-red-300' : 'text-slate-100'">{{ sign(store.summary.projected_year_end_balance) }}</strong>
+            <strong class="text-2xl"
+              :class="store.summary.projected_year_end_balance < 0 ? 'text-red-300' : 'text-slate-100'">{{
+                sign(store.summary.projected_year_end_balance) }}</strong>
           </div>
         </div>
 
@@ -47,12 +51,14 @@ onMounted(() => init().catch(() => { error.value = 'Could not load your club fin
           <div class="grid gap-4 sm:grid-cols-2">
             <div v-if="store.summary.transfer_budget" class="text-sm">
               <span class="block text-slate-400">Transfer budget ({{ store.summary.transfer_budget.season }})</span>
-              <span class="text-slate-200">{{ fmt(store.summary.transfer_budget.allocated) }} allocated · {{ fmt(store.summary.transfer_budget.committed) }} committed</span>
+              <span class="text-slate-200">{{ fmt(store.summary.transfer_budget.allocated) }} allocated · {{
+                fmt(store.summary.transfer_budget.committed) }} committed</span>
               <span class="block text-emerald-300">{{ fmt(store.summary.transfer_budget.available) }} available</span>
             </div>
             <div v-if="store.summary.wage_budget" class="text-sm">
               <span class="block text-slate-400">Wage budget ({{ store.summary.wage_budget.season }})</span>
-              <span class="text-slate-200">{{ fmt(store.summary.wage_budget.allocated) }} allocated · {{ fmt(store.summary.wage_budget.committed) }} committed</span>
+              <span class="text-slate-200">{{ fmt(store.summary.wage_budget.allocated) }} allocated · {{
+                fmt(store.summary.wage_budget.committed) }} committed</span>
               <span class="block text-emerald-300">{{ fmt(store.summary.wage_budget.available) }} available</span>
             </div>
           </div>
@@ -89,7 +95,14 @@ onMounted(() => init().catch(() => { error.value = 'Could not load your club fin
         <section class="rounded border border-slate-700 bg-slate-800 p-4">
           <h2 class="mb-2 text-lg font-semibold text-white">Recent ledger activity</h2>
           <table class="w-full text-sm">
-            <thead><tr class="text-left text-slate-400"><th class="pb-1">Date</th><th>Type</th><th>Category</th><th class="text-right">Amount</th></tr></thead>
+            <thead>
+              <tr class="text-left text-slate-400">
+                <th class="pb-1">Date</th>
+                <th>Type</th>
+                <th>Category</th>
+                <th class="text-right">Amount</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="e in store.ledger.slice(0, 20)" :key="e.id" class="border-t border-slate-700">
                 <td class="py-1">{{ new Date(e.occurred_at).toLocaleDateString() }}</td>
@@ -106,7 +119,15 @@ onMounted(() => init().catch(() => { error.value = 'Could not load your club fin
         <section class="rounded border border-slate-700 bg-slate-800 p-4">
           <h2 class="mb-2 text-lg font-semibold text-white">Contracts</h2>
           <table class="w-full text-sm">
-            <thead><tr class="text-left text-slate-400"><th class="pb-1">Player</th><th>Weekly wage</th><th>Start</th><th>Until</th><th>Status</th></tr></thead>
+            <thead>
+              <tr class="text-left text-slate-400">
+                <th class="pb-1">Player</th>
+                <th>Weekly wage</th>
+                <th>Start</th>
+                <th>Until</th>
+                <th>Status</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="c in store.contracts" :key="c.id" class="border-t border-slate-700">
                 <td class="py-1">{{ c.player_name }}</td>

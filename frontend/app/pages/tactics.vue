@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { useTacticsStore } from '~/stores/tactics'
+import { useTacticsStore } from '~/app/stores/tactics'
 
 const store = useTacticsStore()
 const { value, saving } = storeToRefs(store)
@@ -71,11 +71,8 @@ onMounted(() => init().catch(() => (error.value = 'Could not load your club.')))
           <h1 class="text-3xl font-bold text-white">Tactics</h1>
           <p class="text-slate-400">Choose one Simple-Mode style. The server freezes it at kick-off.</p>
         </div>
-        <button
-          :disabled="saving"
-          class="rounded bg-indigo-600 px-4 py-2 font-medium text-white disabled:bg-slate-700"
-          @click="save"
-        >
+        <button :disabled="saving" class="rounded bg-indigo-600 px-4 py-2 font-medium text-white disabled:bg-slate-700"
+          @click="save">
           {{ saving ? 'Saving…' : 'Save tactics' }}
         </button>
       </div>
@@ -84,13 +81,9 @@ onMounted(() => init().catch(() => (error.value = 'Could not load your club.')))
       <p v-if="saved" class="text-emerald-400">Tactics saved.</p>
 
       <div class="grid gap-3 sm:grid-cols-2">
-        <button
-          v-for="s in styles"
-          :key="s.key"
-          class="rounded border p-4 text-left"
+        <button v-for="s in styles" :key="s.key" class="rounded border p-4 text-left"
           :class="style === s.key ? 'border-indigo-400 bg-indigo-950' : 'border-slate-700 bg-slate-800'"
-          @click="style = s.key"
-        >
+          @click="style = s.key">
           <strong>{{ s.label }}</strong>
           <span class="block text-sm text-slate-400">{{ s.key }}</span>
         </button>

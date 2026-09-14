@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useSquadStore } from '~/stores/squad'
+import { useSquadStore } from '~/app/stores/squad'
 
 const squad = useSquadStore()
 const clubId = ref('')
@@ -79,11 +79,9 @@ onMounted(() => init().catch((e) => (error.value = e instanceof Error ? e.messag
           <p v-if="clubName" class="text-slate-400">{{ clubName }} — pick your starting XI</p>
           <p v-else class="text-slate-400">{{ squad.players.length }} players available</p>
         </div>
-        <button
-          :disabled="!canSave"
+        <button :disabled="!canSave"
           class="rounded bg-indigo-600 px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
-          @click="save"
-        >
+          @click="save">
           {{ squad.saving ? 'Saving…' : 'Save lineup' }}
         </button>
       </div>
@@ -91,21 +89,17 @@ onMounted(() => init().catch((e) => (error.value = e instanceof Error ? e.messag
       <p v-if="error" class="text-red-400">{{ error }}</p>
       <p v-if="saved" class="text-emerald-400">Lineup saved.</p>
 
-      <div v-if="unfilled" class="text-sm text-amber-400">{{ unfilled }} slot(s) still empty — fill all 11 to field an XI.</div>
-      <div v-if="duplicatePlayers.length" class="text-sm text-amber-400">Duplicate players selected — each player can only start once.</div>
+      <div v-if="unfilled" class="text-sm text-amber-400">{{ unfilled }} slot(s) still empty — fill all 11 to field an
+        XI.</div>
+      <div v-if="duplicatePlayers.length" class="text-sm text-amber-400">Duplicate players selected — each player can
+        only start once.</div>
 
       <div class="grid gap-2 sm:grid-cols-2">
-        <div
-          v-for="s in orderedSlots"
-          :key="s.slot"
-          class="flex items-center gap-3 rounded border border-slate-700 bg-slate-800 p-2"
-        >
+        <div v-for="s in orderedSlots" :key="s.slot"
+          class="flex items-center gap-3 rounded border border-slate-700 bg-slate-800 p-2">
           <span class="w-24 text-xs uppercase tracking-wide text-slate-400">{{ s.position }}</span>
-          <select
-            v-model="slots[s.slot]"
-            class="w-full rounded bg-slate-900 p-2 text-sm"
-            :class="duplicatePlayers.includes(slots[s.slot]) ? 'text-amber-300' : ''"
-          >
+          <select v-model="slots[s.slot]" class="w-full rounded bg-slate-900 p-2 text-sm"
+            :class="duplicatePlayers.includes(slots[s.slot]) ? 'text-amber-300' : ''">
             <option value="">— select —</option>
             <option v-for="p in rosterOptions" :key="p.id" :value="p.id">{{ p.label }}</option>
           </select>
