@@ -25,9 +25,9 @@ import (
 func newRealtimeTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *realtime.Hub) {
 	t.Helper()
 	s, pool := newTestServer(t)
-	ts := httptest.NewServer(s.router())
+	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
-	return ts, pool, s.hub
+	return ts, pool, s.Hub()
 }
 
 func dialWS(t *testing.T, ts *httptest.Server, cookieHeader string) *websocket.Conn {

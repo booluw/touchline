@@ -22,6 +22,7 @@ import (
 	internalcompetition "github.com/touchline/backend/internal/competition"
 	internalfinance "github.com/touchline/backend/internal/finance"
 	internalform "github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/httpapi"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
 	internalsquad "github.com/touchline/backend/internal/squad"
@@ -36,34 +37,34 @@ import (
 // newTestServer builds a server wired like main(): real services, a realtime
 // hub with an in-process broker, and its pooled Postgres test DB. WS tests use
 // it directly to reach the hub; REST tests wrap it below.
-func newTestServer(t *testing.T) (*server, *pgxpool.Pool) {
+func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 	t.Helper()
 	pool := testdb.New(t)
 
 	cfg := pkgauth.JWTConfig{Secret: "api-integration-secret", AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
 
 	hub := realtime.NewHub(realtime.NewLocalBroker(),
-		realtime.WithOriginPatterns(originHostPattern("http://localhost:3000")))
+		realtime.WithOriginPatterns(httpapi.OriginHostPattern("http://localhost:3000")))
 	go func() { _ = hub.Run(context.Background()) }()
 	t.Cleanup(func() { _ = hub.Close() })
 
-	s := &server{
-		svc:           internalauth.NewService(pool, cfg),
-		worldSvc:      internalworld.NewService(pool, nil),
-		mgrSvc:        internalmanager.NewService(pool, nil),
-		clubSvc:       internalclub.NewService(pool),
-		bootSvc:       internalbootstrap.NewService(pool, nil),
-		compSvc:       internalcompetition.NewService(pool, nil),
-		matchSvc:      internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool)),
-		tacticsSvc:    internaltactics.NewService(pool, nil, internalsquad.NewStore(pool)),
-		trainingSvc:   internaltraining.NewService(pool, nil),
-		financeSvc:    internalfinance.NewService(pool, nil),
-		jwtCfg:        cfg,
-		pool:          pool,
-		cookiesSecure: false,
-		appOrigin:     "http://localhost:3000",
-		hub:           hub,
-	}
+	s := httpapi.New(httpapi.Options{
+		Auth:          internalauth.NewService(pool, cfg),
+		World:         internalworld.NewService(pool, nil),
+		Manager:       internalmanager.NewService(pool, nil),
+		Club:          internalclub.NewService(pool),
+		Bootstrap:     internalbootstrap.NewService(pool, nil),
+		Competition:   internalcompetition.NewService(pool, nil),
+		Match:         internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool)),
+		Tactics:       internaltactics.NewService(pool, nil, internalsquad.NewStore(pool)),
+		Training:      internaltraining.NewService(pool, nil),
+		Finance:       internalfinance.NewService(pool, nil),
+		JWT:           cfg,
+		Pool:          pool,
+		CookiesSecure: false,
+		AppOrigin:     "http://localhost:3000",
+		Hub:           hub,
+	})
 	return s, pool
 }
 
@@ -72,7 +73,7 @@ func newTestServer(t *testing.T) (*server, *pgxpool.Pool) {
 func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	t.Helper()
 	s, pool := newTestServer(t)
-	ts := httptest.NewServer(s.router())
+	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 	return ts, pool
 }

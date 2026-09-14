@@ -1,0 +1,476 @@
+// Package app is the single-process composition of the Touchline backend. It
+// wires the database pool, the river event bus, the realtime broker/hub, and
+// every game service once, then runs any combination of the three subsystems —
+// API (HTTP + WS), scheduler (world clock), and worker (event consumer + live
+// match engine) — from the same binary. `cmd/touchline serve` runs all three in
+// one process; the subcommands run them individually for prod isolation.
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/google/uuid"
+	internalauth "github.com/touchline/backend/internal/auth"
+	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
+	internalclub "github.com/touchline/backend/internal/club"
+	internalcompetition "github.com/touchline/backend/internal/competition"
+	"github.com/touchline/backend/internal/eventoutbox"
+	"github.com/touchline/backend/internal/finance"
+	"github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/httpapi"
+	internalmanager "github.com/touchline/backend/internal/manager"
+	"github.com/touchline/backend/internal/match"
+	"github.com/touchline/backend/internal/matchday"
+	"github.com/touchline/backend/internal/scheduler"
+	"github.com/touchline/backend/internal/squad"
+	internaltactics "github.com/touchline/backend/internal/tactics"
+	"github.com/touchline/backend/internal/training"
+	internalworld "github.com/touchline/backend/internal/world"
+	pkgjwt "github.com/touchline/backend/pkg/auth"
+	"github.com/touchline/backend/pkg/eventbus"
+	"github.com/touchline/backend/pkg/realtime"
+)
+
+// Config mirrors the environment the backend reads. FromEnv fills it with the
+// same defaults the old split binaries used.
+type Config struct {
+	DatabaseURL    string
+	JWTSecret      string
+	JWTAccessTTL   time.Duration
+	JWTRefreshTTL  time.Duration
+	AppOrigin      string
+	Env            string
+	RedisURL       string
+	APIPort        string
+	SchedulerPoll  time.Duration
+	RepairInterval time.Duration
+}
+
+// FromEnv reads Configuration from process environment variables and fails fast
+// with an actionable error when a required variable is missing.
+func FromEnv() (Config, error) {
+	cfg := Config{
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		JWTAccessTTL:   envDuration("JWT_ACCESS_TTL", 15*time.Minute),
+		JWTRefreshTTL:  envDuration("JWT_REFRESH_TTL", 720*time.Hour),
+		AppOrigin:      envOr("APP_ORIGIN", "http://localhost:3000"),
+		Env:            envOr("ENV", "development"),
+		RedisURL:       os.Getenv("REDIS_URL"),
+		APIPort:        envOr("API_PORT", "8080"),
+		SchedulerPoll:  envDuration("SCHEDULER_POLL_INTERVAL", 15*time.Second),
+		RepairInterval: envDuration("EVENT_REPAIR_SWEEP_INTERVAL", 60*time.Second),
+	}
+	if cfg.DatabaseURL == "" {
+		return cfg, fmt.Errorf("DATABASE_URL is required — set it in .env (see docs/development.md)")
+	}
+	if cfg.JWTSecret == "" {
+		return cfg, fmt.Errorf("JWT_SECRET is required — set it in .env (see docs/development.md)")
+	}
+	return cfg, nil
+}
+
+// App is one process bound to one database and one event bus. Every subsystem
+// runner shares the same services so the game is coherent whether it runs as a
+// single process (serve) or as split pods.
+type App struct {
+	Pool *pgxpool.Pool
+	Bus  *eventbus.RiverBus
+
+	JWT        pkgjwt.JWTConfig
+	AppOrigin  string
+	APIPort    string
+	Poll       time.Duration
+	RepairTick time.Duration
+
+	// Realtime transport shared by the API hub and the worker's world-tick push
+	// so fan-out is coherent in a single process.
+	Broker realtime.Broker
+	Hub    *realtime.Hub
+
+	// Services (built once).
+	Matches  *match.Service
+	CompSvc  *internalcompetition.Service
+	Training *training.Service
+	Finance  *finance.Service
+	Runner   *matchday.Runner
+	http     *httpapi.Server
+}
+
+// Build constructs the process: pool, event bus, realtime transport, and every
+// game service once, wiring the HTTP surface from them. Close must be called on
+// shutdown.
+func Build(ctx context.Context, cfg Config) (*App, error) {
+	pool, err := connectDB(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("connected to PostgreSQL")
+
+	bus, err := eventbus.NewRiverBus(pool, eventbus.RiverBusConfig{})
+	if err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("init event bus: %w", err)
+	}
+
+	jwt := pkgjwt.JWTConfig{
+		Secret:     cfg.JWTSecret,
+		AccessTTL:  cfg.JWTAccessTTL,
+		RefreshTTL: cfg.JWTRefreshTTL,
+	}
+
+	broker := newRealtimeBroker(ctx)
+	hub := realtime.NewHub(broker, realtime.WithOriginPatterns(httpapi.OriginHostPattern(cfg.AppOrigin)))
+	go func() {
+		if err := hub.Run(ctx); err != nil {
+			log.Printf("realtime hub stopped: %v", err)
+		}
+	}()
+
+	squadStore := squad.NewStore(pool)
+	formStore := form.NewStore(pool)
+
+	matches := match.NewService(pool, bus, squadStore, formStore)
+	compSvc := internalcompetition.NewService(pool, bus)
+	trainingSvc := training.NewService(pool, bus)
+	financeSvc := finance.NewService(pool, bus)
+	runner := matchday.NewRunner(pool, matches, compSvc)
+	runner.WithRealtime(broker)
+
+	httpSrv := httpapi.New(httpapi.Options{
+		Auth:          internalauth.NewService(pool, jwt),
+		World:         internalworld.NewService(pool, bus),
+		Manager:       internalmanager.NewService(pool, bus),
+		Club:          internalclub.NewService(pool),
+		Bootstrap:     internalbootstrap.NewService(pool, bus),
+		Competition:   compSvc,
+		Match:         matches,
+		Tactics:       internaltactics.NewService(pool, bus, squadStore),
+		Training:      trainingSvc,
+		Finance:       financeSvc,
+		JWT:           jwt,
+		Pool:          pool,
+		CookiesSecure: cfg.Env != "development",
+		AppOrigin:     cfg.AppOrigin,
+		Hub:           hub,
+	})
+
+	return &App{
+		Pool:       pool,
+		Bus:        bus,
+		JWT:        jwt,
+		AppOrigin:  cfg.AppOrigin,
+		APIPort:    cfg.APIPort,
+		Poll:       cfg.SchedulerPoll,
+		RepairTick: cfg.RepairInterval,
+		Broker:     broker,
+		Hub:        hub,
+		Matches:    matches,
+		CompSvc:    compSvc,
+		Training:   trainingSvc,
+		Finance:    financeSvc,
+		Runner:     runner,
+		http:       httpSrv,
+	}, nil
+}
+
+// HTTPHandler returns the fully wired API engine.
+func (a *App) HTTPHandler() http.Handler {
+	return a.http.Handler()
+}
+
+// Close releases the pool, the realtime broker, and the event bus.
+func (a *App) Close() {
+	if a.Broker != nil {
+		_ = a.Broker.Close()
+	}
+	if a.Pool != nil {
+		a.Pool.Close()
+	}
+}
+
+// RunAPI serves the HTTP + WebSocket surface until ctx is cancelled, draining
+// in-flight requests on shutdown.
+func (a *App) RunAPI(ctx context.Context) error {
+	srv := &http.Server{
+		Addr:              ":" + a.APIPort,
+		Handler:           a.HTTPHandler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	log.Printf("API server starting on :%s (cors origin %s)", a.APIPort, a.AppOrigin)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdownCtx)
+	return nil
+}
+
+// RunScheduler drives the configurable world clock until ctx is cancelled. A
+// scheduler advisory lock elects a single leader.
+func (a *App) RunScheduler(ctx context.Context) error {
+	log.Printf("world clock starting (cadence sync every %s)", a.Poll)
+	if err := scheduler.NewService(a.Pool, a.Bus).Run(ctx, a.Poll); err != nil {
+		return fmt.Errorf("world clock: %w", err)
+	}
+	log.Printf("world clock stopped")
+	return nil
+}
+
+// RunWorker consumes the event bus: realtime world-tick fan-out, daily
+// kickoffs + live match pacing, weekly training, monthly wages, the outbox
+// repair sweep, and the live-match startup rehydration.
+func (a *App) RunWorker(ctx context.Context) error {
+	bus := a.Bus
+
+	runnerEnabled, releaseRunnerLock, err := acquireMatchRunnerLock(ctx, a.Pool)
+	if err != nil {
+		return err
+	}
+	if !runnerEnabled {
+		log.Printf("another worker holds the match-runner lock; live subsystem disabled in this pod")
+	} else {
+		defer releaseRunnerLock()
+	}
+
+	if err := bus.Subscribe(ctx, "WORLD_TICK", func(ev eventbus.Event) error {
+		var payload struct {
+			Granularity string `json:"granularity"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			log.Printf("world tick %s: unreadable payload (%v); skipping", ev.ID, err)
+			return nil
+		}
+		log.Printf("handled event %s (%s, granularity %s) for world %s at tick %d",
+			ev.ID, ev.EventType, payload.Granularity, ev.WorldID, ev.WorldTick)
+
+		tickEvent, err := realtime.BuildWorldTick(ev.WorldID, ev.ID.String(), payload.Granularity, ev.WorldTick)
+		if err != nil {
+			return nil
+		}
+		if err := a.Broker.Publish(ctx, tickEvent); err != nil {
+			return nil
+		}
+
+		if payload.Granularity == "daily" && runnerEnabled {
+			sum, err := a.Runner.KickoffDue(ctx, ev.WorldID)
+			if err != nil {
+				log.Printf("world %s daily tick: kickoff: %v", ev.WorldID, err)
+				return err
+			}
+			if sum != nil && sum.Kicked > 0 {
+				log.Printf("world %s daily tick: kicked %d matchday(s), %d fixture(s)",
+					ev.WorldID, sum.Matchdays, sum.Kicked)
+			}
+			go func() {
+				if err := a.Runner.RunLive(ctx, ev.WorldID); err != nil {
+					log.Printf("world %s live runner: %v", ev.WorldID, err)
+				}
+			}()
+		}
+		if payload.Granularity == "weekly" {
+			if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
+			}
+		}
+		if payload.Granularity == "monthly" {
+			if _, err := a.Finance.ApplyMonthlyWages(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s monthly wages: %w", ev.WorldID, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("subscribe: %w", err)
+	}
+
+	if err := bus.Start(ctx); err != nil {
+		return fmt.Errorf("start worker: %w", err)
+	}
+	log.Printf("worker started; consuming events from the event bus")
+
+	// Outbox repair sweep (OPD-23). Idempotent re-enqueue by original id.
+	go a.sweep(ctx)
+
+	// Startup sweep (OPD-21): resume any in-progress match after a restart.
+	if runnerEnabled {
+		go a.rehydrate(ctx)
+	}
+
+	<-ctx.Done()
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer stopCancel()
+	if err := bus.Stop(stopCtx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("stop: %v", err)
+	}
+	log.Printf("worker stopped")
+	return nil
+}
+
+// RunAll runs the API, scheduler, and worker in one process until ctx is
+// cancelled or one of them fails. All three share the same pool, bus, and
+// realtime transport built by Build.
+func (a *App) RunAll(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	log.Printf("---- touchline serve: api :%s + scheduler + worker in one process ----", a.APIPort)
+
+	errCh := make(chan error, 3)
+	go func() { errCh <- a.RunAPI(ctx) }()
+	go func() { errCh <- a.RunScheduler(ctx) }()
+	go func() { errCh <- a.RunWorker(ctx) }()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("touchline serve: subsystem failed (%v); shutting down", err)
+		}
+		cancel()
+		// Give the other subsystems a moment to drain after cancellation.
+		timeout := time.NewTimer(20 * time.Second)
+		defer timeout.Stop()
+		for range 2 {
+			select {
+			case <-errCh:
+			case <-timeout.C:
+			}
+		}
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// sweep re-enqueues committed world.events rows that never got a dispatch job.
+func (a *App) sweep(ctx context.Context) {
+	ticker := time.NewTicker(a.RepairTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rep, err := eventoutbox.Sweep(ctx, a.Pool, a.Bus, eventoutbox.Options{})
+			if err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("event_repair_sweep: error: %v", err)
+				continue
+			}
+			if rep.Repaired > 0 || rep.OldestLagSeconds > 0 {
+				log.Printf("event_repair_sweep scanned=%d repaired=%d oldest_lag_s=%.0f",
+					rep.Scanned, rep.Repaired, rep.OldestLagSeconds)
+			}
+		}
+	}
+}
+
+// rehydrate resumes every world's in-progress matches after a pod restart.
+func (a *App) rehydrate(ctx context.Context) {
+	worlds, err := a.Runner.WorldsWithLiveMatches(ctx)
+	if err != nil {
+		log.Printf("live startup sweep: %v", err)
+		return
+	}
+	for _, w := range worlds {
+		go func(worldID uuid.UUID) {
+			if err := a.Runner.RunLive(ctx, worldID); err != nil {
+				log.Printf("world %s live rehydrate: %v", worldID, err)
+			}
+		}(w)
+	}
+}
+
+// acquireMatchRunnerLock elects a single worker pod to run the live match
+// subsystem (OPD-21) via a Postgres advisory lock. The lock is bound to one
+// dedicated connection held for the worker's lifetime.
+func acquireMatchRunnerLock(ctx context.Context, pool *pgxpool.Pool) (bool, func(), error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return false, nil, fmt.Errorf("match runner: acquire lock connection: %w", err)
+	}
+	for {
+		var got bool
+		if err := conn.QueryRow(ctx,
+			`SELECT pg_try_advisory_lock(hashtext('touchline:match_runner'))`).Scan(&got); err != nil {
+			conn.Release()
+			return false, nil, fmt.Errorf("match runner: acquire lock: %w", err)
+		}
+		if got {
+			return true, func() { conn.Release() }, nil
+		}
+		log.Printf("match runner: waiting for another worker to release the runner lock")
+		select {
+		case <-ctx.Done():
+			conn.Release()
+			return false, nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// newRealtimeBroker builds the Redis pub/sub transport for realtime fan-out,
+// degrading gracefully to the in-process broker when Redis is unavailable.
+func newRealtimeBroker(ctx context.Context) realtime.Broker {
+	url := os.Getenv("REDIS_URL")
+	if url == "" {
+		return realtime.NewLocalBroker()
+	}
+	broker, err := realtime.NewRedisBroker(ctx, url)
+	if err != nil {
+		log.Printf("warning: REDIS_URL unreachable (%v); falling back to in-process realtime fan-out", err)
+		return realtime.NewLocalBroker()
+	}
+	log.Printf("realtime fan-out via Redis (%s)", broker.ChannelName())
+	return broker
+}
+
+func connectDB(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("cannot reach PostgreSQL: %w", err)
+	}
+	return pool, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+		log.Printf("warning: invalid %s %q, using %s", key, v, fallback)
+	}
+	return fallback
+}

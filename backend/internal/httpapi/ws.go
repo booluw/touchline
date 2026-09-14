@@ -1,8 +1,7 @@
-package main
+package httpapi
 
 import (
 	"net/http"
-	"net/url"
 
 	"github.com/gin-gonic/gin"
 
@@ -28,20 +27,4 @@ func (s *server) handleWS(c *gin.Context) {
 		WorldID:   worldID,
 		ManagerID: ident.ManagerID,
 	})
-}
-
-// originHostPattern converts APP_ORIGIN (e.g. "http://localhost:3000") into a
-// WebSocket origin pattern (e.g. "localhost:3000"). coder/websocket matches
-// these against the browser's Origin header to stop cross-site socket
-// hijacking; with no configured origin every WS path falls back to same-host
-// checks (fine for bare `go run`).
-func originHostPattern(appOrigin string) []string {
-	if appOrigin == "" {
-		return nil
-	}
-	u, err := url.Parse(appOrigin)
-	if err != nil {
-		return []string{appOrigin}
-	}
-	return []string{u.Host}
 }
