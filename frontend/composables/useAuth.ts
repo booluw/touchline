@@ -54,6 +54,8 @@ export function useAuth() {
     if (res.ok) {
       user.value = (body as LoginSuccess).display_name ?? null
       pendingWorldId.value = null
+
+      console.log(body)
       return body as LoginSuccess
     }
     throw new Error((body as { error?: string }).error ?? 'Sign-in failed.')
