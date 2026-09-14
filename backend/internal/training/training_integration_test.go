@@ -241,13 +241,21 @@ func TestApplyWeeklyMatchesDeterministicModel(t *testing.T) {
 			t.Fatalf("player %s appeared during apply", pid)
 		}
 		// Every growth/decay key must equal the seeded binary-rounding stream;
-		// untouched keys must be unchanged.
+		// untouched keys must be unchanged. The service also applies the
+		// veteranDecay stream (pace/stamina −0.05 per week for age ≥ 30,
+		// non-physical plans), so the expected value must include that pass.
 		for _, key := range distinctKeys(plan) {
 			d := attrDelta(plan, bm.age, key)
-			want := applyDelta(bm.attrs[key], d, rngForTest(42, pid, key))
+			curr := applyDelta(bm.attrs[key], d, rngForTest(42, pid, key))
+			// veteran decay pass (mirrors service.go lines 316-335).
+			if decay := veteranDecay(bm.age, plan.Key); decay != nil {
+				if dd, ok := decay[key]; ok {
+					curr = applyDelta(curr, dd, rngForTest(42, pid, key+"-age"))
+				}
+			}
 			got := m.attrs[key]
-			if got != want {
-				t.Fatalf("player %s age %d key %s: value %d, want %d (delta %v)", pid, bm.age, key, got, want, d)
+			if got != curr {
+				t.Fatalf("player %s age %d key %s: value %d, want %d (delta %v)", pid, bm.age, key, got, curr, d)
 			}
 		}
 		// Never-written keys must still be absent.

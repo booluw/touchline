@@ -78,8 +78,8 @@ func NewService(pool *pgxpool.Pool, bus Publishable, squadStore *squad.Store) *S
 // LineupInput is one slot assignment (slot 0..10; coordinates are
 // squad.FormationFor, see design §1.2).
 type LineupInput struct {
-	Slot     int
-	PlayerID uuid.UUID
+	Slot     int       `json:"slot"`
+	PlayerID uuid.UUID `json:"player_id"`
 }
 
 // SlotView is a serialisable slot with its formation position resolved.

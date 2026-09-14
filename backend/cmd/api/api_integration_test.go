@@ -24,7 +24,9 @@ import (
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
 	internalsquad "github.com/touchline/backend/internal/squad"
+	internaltactics "github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/testdb"
+	internaltraining "github.com/touchline/backend/internal/training"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgauth "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/realtime"
@@ -52,6 +54,8 @@ func newTestServer(t *testing.T) (*server, *pgxpool.Pool) {
 		bootSvc:       internalbootstrap.NewService(pool, nil),
 		compSvc:       internalcompetition.NewService(pool, nil),
 		matchSvc:      internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool)),
+		tacticsSvc:    internaltactics.NewService(pool, nil, internalsquad.NewStore(pool)),
+		trainingSvc:   internaltraining.NewService(pool, nil),
 		jwtCfg:        cfg,
 		pool:          pool,
 		cookiesSecure: false,
@@ -327,6 +331,13 @@ func post(t *testing.T, ts *httptest.Server, client *http.Client, path, body, co
 func get(t *testing.T, ts *httptest.Server, client *http.Client, path, cookieHeader string) *http.Response {
 	t.Helper()
 	resp := do(t, ts, client, http.MethodGet, path, "", cookieHeader)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func put(t *testing.T, ts *httptest.Server, client *http.Client, path, body, cookieHeader string) *http.Response {
+	t.Helper()
+	resp := do(t, ts, client, http.MethodPut, path, body, cookieHeader)
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
 }

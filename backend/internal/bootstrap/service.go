@@ -495,9 +495,12 @@ func shortName(name string) string {
 	return string(runes[:n])
 }
 
-// daysTruncate strips the time component of the world's season reference date.
+// daysTruncate strips the time component of the world's season reference date,
+// using the UTC calendar day so the anchor is timezone-independent and matches
+// the matchday world-day counter (see matchday.worldDate).
 func daysTruncate(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	y, m, d := t.UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // dobFor derives the player's date_of_birth from the world reference date.

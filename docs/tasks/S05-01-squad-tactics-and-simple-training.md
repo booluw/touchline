@@ -1,6 +1,6 @@
 # S05-01 — Implement MVP squad, tactics, and simple training commands
 
-**Status:** Not started  
+**Status:** Done  
 **Sprint:** 05 — Manager controls and finance  
 **Source:** PRD §§3–4, 26, 52, 55–56, 73–74; technical plan §§10, 12, 16; matchsim Addendum v1.2/v1.3  
 **Depends on:** S04-02  
@@ -151,4 +151,17 @@ Deliver the server-side commands, domain services, and responsive management scr
 
 ## Delivery evidence
 
-- Pending.
+- **Migrations** (0033 — `club.club_tactics` / `club.club_training_plans` + attribute backfill; 0034 — `player.player_condition` for fitness/fatigue/sharpness/injury risk).
+- **Backend services** (actor-agnostic, ownership + deadline-validated):
+  - `internal/tactics`: `SetLineup` (all-11 unique, `UNIQUE(club_id, player_id)`), `GetLineup` (resolved to formation positions; empty slots = `uuid.Nil`), `SetTactics`/`GetTactics` (style ∈ 5 + formation ∈ allowed set); emits `LINEUP_SAVED` / `TACTIC_SET` via `PublishTx`. `cmd/api/tactics_training_handlers.go` serves `PUT /api/clubs/:id/lineup`, `GET|POST /api/clubs/:id/tactics`.
+  - `internal/training`: `SubmitPlan` (archetype ∈ 5, idempotent effective_from_tick), `GetPlan`, `ApplyWeekly` (deterministic RNG schema; growth + veteran decay + detrain draws; fatigue/fitness/sharpness/injury risk updates); emits `TRAINING_PLAN_SET` / `TRAINING_WEEK`; worker wires `ApplyWeekly` on weekly `WORLD_TICK` emissions. `cmd/api` serves `GET|POST /api/clubs/:id/training-plan`.
+  - `internal/squad`: `FormationFor` / `AllowedFormations` / `SelectStarters` fallback XI.
+- **Match engine tactical modulation** (matchsim v1.5): `matchsim.Tuning.Styles` carries the approved quantitative blocks (possession shift, chance volume, shot conversion, cards, stamina decay) per S05-01 spec; `Team.Tactics.Style` re-weights existing engine draws; `tactic_change` `LiveInput` switches a side's style from its minute onward and is byte-identically deterministic on replay (`TestLiveTacticReplayIsDeterministic`, `TestPossessionStyleShiftsPossession`, `TestStylesChangeOutcome`).
+- **Frontend** (`pnpm run typecheck` + `pnpm run lint` clean):
+  - `pages/squad.vue` — lineup editor: loads squad + persisted lineup, renders 11 formation-positioned `<select>`s over the club roster, enforces complete + no-duplicate locally, saves via `PUT /api/clubs/:id/lineup`.
+  - `pages/tactics.vue` — style/formation selector; local-style→allowed-formations map mirrors `internal/squad/AllowedFormations`; avoids the prior per-click refetch/stale-validation bug.
+  - `pages/training.vue` — archetype selector + save.
+- **HTTP integration tests** (`cmd/api/tactics_training_integration_test.go`): `TestHTTPLineupRoundTrip`, `TestHTTPTacticsRoundTrip`, `TestHTTPTrainingPlanRoundTrip`, `TestHTTPTacticsDeadlineConflict` (409 when next fixture live), `TestHTTPLiveTacticChange` (200/404/403/400 across worlds + stale minute + live scope), + policy-bot foreign-world 403 variants.
+- **Test harness** (`internal/testdb/harness.go`): `SeedRefData` seeds the full curated name lists (en 44×87, br 40×39) to eliminate name-registry exhaustion under AI-club seeding.
+- **Off-scope runner fix** (sanctioned during the gap-fill phase): `daysTruncate` in `internal/competition/clubnames.go` and `internal/bootstrap/service.go` aligned to `t.UTC().Date()` matching `matchday.worldDate`; prevented a boundary-clock off-by-one fixture date drift visible when local calendar day ≠ UTC calendar day. Verified together with matchday + competition + bootstrap + tactics + training suites.
+- **Full gate**: `go build ./...` + `go vet ./...` + unit tests ✓; full integration suite (`-p 1 -tags integration -count=1 ./...` excluding `testdb`) ✓; `pnpm run typecheck` + `pnpm run lint` (frontend) ✓.

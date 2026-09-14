@@ -117,18 +117,45 @@ func SeedRefData(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatalf("seed nationalities: %v", err)
 	}
 
-	names := map[string][][2]string{ // code -> {type, name}
+	firstNames := map[string][]string{ // code -> first names (curated data/names)
 		"eng": {
-			{"first", "Oliver"}, {"first", "Harry"}, {"first", "Jack"}, {"first", "Charlie"},
-			{"first", "George"}, {"first", "Freddie"}, {"first", "Alfie"}, {"first", "Oscar"},
-			{"last", "Smith"}, {"last", "Jones"}, {"last", "Taylor"}, {"last", "Brown"},
-			{"last", "Wilson"}, {"last", "Evans"}, {"last", "Thomas"}, {"last", "Roberts"},
+			"Aaron", "Adam", "Alfie", "Archie", "Arthur", "Benjamin", "Charlie", "Daniel",
+			"David", "Edward", "Ellis", "Felix", "George", "Harry", "Henry", "Jacob",
+			"James", "Jamie", "Jack", "Joseph", "Joshua", "Leo", "Lewis", "Liam",
+			"Logan", "Louis", "Luca", "Mason", "Max", "Michael", "Nathan", "Noah",
+			"Oliver", "Oscar", "Owen", "Reece", "Riley", "Ryan", "Samuel", "Toby",
+			"Tom", "Tommy", "Tyler", "William",
 		},
 		"br": {
-			{"first", "Gabriel"}, {"first", "Matheus"}, {"first", "Rafael"}, {"first", "Lucas"},
-			{"first", "Pedro"}, {"first", "Bruno"}, {"first", "Diego"}, {"first", "Thiago"},
-			{"last", "Silva"}, {"last", "Santos"}, {"last", "Oliveira"}, {"last", "Souza"},
-			{"last", "Lima"}, {"last", "Pereira"}, {"last", "Costa"}, {"last", "Alves"},
+			"Ana", "Beatriz", "Bruno", "Caio", "Carla", "Carlos", "Daniel", "Diego",
+			"Eduardo", "Felipe", "Fernando", "Gabriel", "Gustavo", "Henrique", "Igor",
+			"Joao", "Jonas", "Jorge", "Jose", "Julio", "Kaique", "Lucas", "Luana",
+			"Luciano", "Marcelo", "Marcos", "Matheus", "Murilo", "Paula", "Patricia",
+			"Paulo", "Pedro", "Rafael", "Renato", "Ricardo", "Rodrigo", "Samuel",
+			"Thiago", "Vinicius", "Vitor",
+		},
+	}
+	lastNames := map[string][]string{ // code -> last names (curated data/names)
+		"eng": {
+			"Adams", "Allen", "Anderson", "Atkinson", "Bailey", "Baker", "Ball", "Barker",
+			"Barnes", "Bell", "Bennett", "Booth", "Brooks", "Brown", "Butler", "Carter",
+			"Chapman", "Clarke", "Cole", "Collins", "Cook", "Cooper", "Cox", "Davies",
+			"Davis", "Dixon", "Edwards", "Ellis", "Evans", "Fisher", "Foster", "Fox",
+			"Gibson", "Graham", "Grant", "Green", "Griffiths", "Hall", "Harris", "Harrison",
+			"Hayes", "Hill", "Hughes", "Hunter", "Jackson", "James", "Johnson", "Jones",
+			"Kelly", "Lewis", "Marshall", "Martin", "Mason", "Matthews", "Miller", "Mitchell",
+			"Moore", "Morgan", "Morris", "Murphy", "Murray", "Owen", "Parker", "Pearce",
+			"Phillips", "Price", "Reed", "Richards", "Roberts", "Robinson", "Russell", "Shaw",
+			"Simpson", "Smith", "Taylor", "Thompson", "Turner", "Walker", "Walsh", "Ward",
+			"Watson", "Webb", "White", "Williams", "Wilson", "Wood", "Wright",
+		},
+		"br": {
+			"Almeida", "Alves", "Araujo", "Barbosa", "Campos", "Cardoso", "Carvalho",
+			"Castilho", "Costa", "Dias", "Duarte", "Fernandes", "Ferreira", "Freitas",
+			"Gomes", "Lima", "Lopes", "Martins", "Melo", "Monteiro", "Moraes", "Moreira",
+			"Nascimento", "Nunes", "Oliveira", "Pereira", "Pinto", "Ramos", "Ribeiro",
+			"Rocha", "Rodrigues", "Sales", "Santana", "Santos", "Silva", "Souza",
+			"Tavares", "Teixeira", "Vieira",
 		},
 	}
 
@@ -142,9 +169,14 @@ func SeedRefData(t *testing.T, pool *pgxpool.Pool) {
 	sqlStr := `INSERT INTO ref.name_pool (nationality_code, name_type, name, frequency_weight)
 		VALUES ($1, $2, $3, 1.0)`
 	for _, code := range codes {
-		for _, row := range names[code] {
-			if _, err := pool.Exec(ctx, sqlStr, code, row[0], row[1]); err != nil {
-				t.Fatalf("insert name pool %s %s: %v", code, row[0], err)
+		for _, name := range firstNames[code] {
+			if _, err := pool.Exec(ctx, sqlStr, code, "first", name); err != nil {
+				t.Fatalf("insert name pool %s first: %v", code, err)
+			}
+		}
+		for _, name := range lastNames[code] {
+			if _, err := pool.Exec(ctx, sqlStr, code, "last", name); err != nil {
+				t.Fatalf("insert name pool %s last: %v", code, err)
 			}
 		}
 	}
