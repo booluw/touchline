@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@vite-pwa/nuxt": "^0.9.1",
-    "nuxt": "^3.21.11",
+    "nuxt": "^4.5.2",
     "pinia": "^2.3.1",
     "vue": "^3.5.42"
   },

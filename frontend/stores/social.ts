@@ -8,7 +8,9 @@ export const useSocialStore = defineStore('social', {
   actions: {
     async fetchMessages() {
       const { public: { apiBase } } = useRuntimeConfig()
-      const { data } = await useFetch(`${apiBase}/api/messages`)
+      const { data } = await useFetch(`${apiBase}/api/messages`, {
+        deep: true
+      })
       this.messages = data.value as Record<string, unknown>[] ?? []
     },
     async sendMessage(receiverId: string, content: string) {

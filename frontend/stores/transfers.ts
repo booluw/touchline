@@ -8,7 +8,9 @@ export const useTransfersStore = defineStore('transfers', {
   actions: {
     async fetchListings() {
       const { public: { apiBase } } = useRuntimeConfig()
-      const { data } = await useFetch(`${apiBase}/api/transfers/listings`)
+      const { data } = await useFetch(`${apiBase}/api/transfers/listings`, {
+        deep: true
+      })
       this.listings = data.value as Record<string, unknown>[] ?? []
     },
     async placeBid(clubId: string, playerId: string, amount: number) {
