@@ -79,6 +79,17 @@ func (s *server) router() *gin.Engine {
 		api.POST("/offers/:id/accept", s.requireAuth, s.handleAcceptOffer)
 		api.POST("/offers/:id/decline", s.requireAuth, s.handleDeclineOffer)
 
+		// Transfer market (S06-01): listings, bids, negotiation. World-scoped
+		// to the caller's manager; handlers resolve the manager's club and
+		// world from the session identity (OPD-15).
+		api.POST("/transfers/listings", s.requireAuth, s.handleCreateListing)
+		api.GET("/transfers/listings", s.requireAuth, s.handleListListings)
+		api.GET("/transfers/listings/:id", s.requireAuth, s.handleGetListing)
+		api.POST("/transfers/listings/:id/withdraw", s.requireAuth, s.handleWithdrawListing)
+		api.POST("/transfers/bids", s.requireAuth, s.handlePlaceBid)
+		api.GET("/transfers/bids", s.requireAuth, s.handleListBids)
+		api.POST("/transfers/bids/:id/respond", s.requireAuth, s.handleRespondBid)
+
 		// Admin: world lifecycle (S02-02), whole-world seeding (clubs + players
 		// + memberships, launch model), media aid offers, country-scoped league
 		// administration (S04-01).

@@ -703,6 +703,204 @@ paths:
                       end_date: "2028-06-30"
                       release_clause: 25000000
                       status: active
+  /api/transfers/listings:
+    get:
+      tags: [transfer]
+      summary: Market listings
+      operationId: listListings
+      description: Transfer listings in the caller's world, newest first, with open bids attached.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, default: active, enum: [active, withdrawn, completed, expired] }
+        - name: position
+          in: query
+          required: false
+          schema: { type: string }
+        - name: listing_type
+          in: query
+          required: false
+          schema: { type: string, enum: [open_to_offers, actively_shopped, loan_available] }
+        - name: club_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The market's listings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListingList" }
+    post:
+      tags: [transfer]
+      summary: List a player
+      operationId: createListing
+      description: Lists one of the caller's own active players on the market; AI buyer interest settles atomically in the same request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ListingInput" }
+      responses:
+        "201":
+          description: The created listing with its open bids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Listing" }
+        "400":
+          description: Invalid payload, player not transferable, or duplicate listing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the player's club manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Player or world not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/transfers/listings/{id}:
+    get:
+      tags: [transfer]
+      summary: Listing detail
+      operationId: getListing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000020" }
+      responses:
+        "200":
+          description: The listing with its open bids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Listing" }
+        "404":
+          description: Listing not found (or in another world).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/transfers/listings/{id}/withdraw:
+    post:
+      tags: [transfer]
+      summary: Withdraw listing
+      operationId: withdrawListing
+      description: Takes the caller's own active listing off the market and expires its open bids.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000020" }
+      responses:
+        "200":
+          description: The withdrawn listing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Listing" }
+        "403":
+          description: Not the listing club.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Listing not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/transfers/bids:
+    get:
+      tags: [transfer]
+      summary: My bid threads
+      operationId: listBids
+      description: The negotiation threads the caller's club is involved in, newest first.
+      responses:
+        "200":
+          description: Incoming and outgoing bid threads.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BidList" }
+    post:
+      tags: [transfer]
+      summary: Place a bid
+      operationId: placeBid
+      description: Offers on a listed player (via a listing) or directly on any active player. When the selling club is AI the counterpart policy resolves the bid atomically in the same request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BidInput" }
+      responses:
+        "201":
+          description: The bid thread, plus the completed transfer and AI explanation when the selling club is AI.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BidResult" }
+        "400":
+          description: Invalid terms, duplicate open bid, or self-bid.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not a participant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Player, listing, or world not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Insufficient funds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/transfers/bids/{id}/respond:
+    post:
+      tags: [transfer]
+      summary: Respond to a bid
+      operationId: respondBid
+      description: Accept the other side's current offer, reject it, or put a counter on the table (terms required). An AI counterparty answers a human counter automatically in the same request.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000021" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RespondInput" }
+      responses:
+        "200":
+          description: The updated bid thread, plus the completed transfer and AI explanation when resolved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BidResult" }
+        "400":
+          description: Invalid action or terms.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not a participant.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Bid not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Bid already resolved or expired.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/managers/me/offers:
     get:
       tags: [manager]
@@ -1598,6 +1796,138 @@ components:
         end_date: { type: string, format: date }
         release_clause: { type: integer, format: int64, nullable: true }
         status: { type: string }
+    Listing:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        player_name: { type: string }
+        position: { type: string }
+        age: { type: integer }
+        market_value: { type: integer, format: int64 }
+        listing_club_id: { type: string, format: uuid }
+        listing_club_name: { type: string }
+        asking_price: { type: integer, format: int64, nullable: true }
+        listing_type: { type: string, enum: [open_to_offers, actively_shopped, loan_available] }
+        status: { type: string, enum: [active, withdrawn, completed, expired] }
+        bid_count: { type: integer }
+        latest_bid:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Bid" }]
+        listed_at: { type: string, format: date-time }
+    ListingList:
+      type: object
+      properties:
+        listings:
+          type: array
+          items: { $ref: "#/components/schemas/Listing" }
+    ListingInput:
+      type: object
+      required: [player_id]
+      properties:
+        player_id: { type: string, format: uuid }
+        asking_price: { type: integer, format: int64, nullable: true }
+        listing_type: { type: string, enum: [open_to_offers, actively_shopped, loan_available], default: open_to_offers }
+    TransferTerms:
+      type: object
+      required: [fee, weekly_wage, contract_length_months]
+      properties:
+        fee: { type: integer, format: int64, description: Transfer fee (pence). }
+        weekly_wage: { type: integer, format: int64 }
+        contract_length_months: { type: integer, minimum: 1, maximum: 120 }
+        signing_bonus: { type: integer, format: int64 }
+        release_clause: { type: integer, format: int64, nullable: true }
+        sell_on_percentage: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        buy_back_amount: { type: integer, format: int64, nullable: true }
+    Bid:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        listing_id: { type: string, format: uuid, nullable: true }
+        player_id: { type: string, format: uuid }
+        player_name: { type: string }
+        bidding_club_id: { type: string, format: uuid }
+        bidding_club_name: { type: string }
+        selling_club_id: { type: string, format: uuid }
+        selling_club_name: { type: string }
+        fee: { type: integer, format: int64 }
+        weekly_wage: { type: integer, format: int64 }
+        contract_length_months: { type: integer }
+        signing_bonus: { type: integer, format: int64 }
+        release_clause: { type: integer, format: int64, nullable: true }
+        round: { type: integer }
+        proposed_by: { type: string, enum: [buying_club, selling_club] }
+        status: { type: string, enum: [pending, accepted, rejected, countered, withdrawn, expired] }
+        created_at: { type: string, format: date-time }
+        responded_at: { type: string, format: date-time, nullable: true }
+    BidList:
+      type: object
+      properties:
+        incoming:
+          type: array
+          items: { $ref: "#/components/schemas/Bid" }
+        outgoing:
+          type: array
+          items: { $ref: "#/components/schemas/Bid" }
+    BidInput:
+      type: object
+      required: [terms]
+      properties:
+        listing_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        terms: { $ref: "#/components/schemas/TransferTerms" }
+    RespondInput:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [accept, reject, counter] }
+        terms: { $ref: "#/components/schemas/TransferTerms" }
+    Clause:
+      type: object
+      properties:
+        clause_type: { type: string, enum: [sell_on, buy_back] }
+        percentage: { type: integer, nullable: true }
+        amount: { type: integer, format: int64, nullable: true }
+        beneficiary_club_id: { type: string, format: uuid, nullable: true }
+    CompletedTransfer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        bid_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        from_club_id: { type: string, format: uuid }
+        to_club_id: { type: string, format: uuid }
+        fee: { type: integer, format: int64 }
+        clauses:
+          type: array
+          items: { $ref: "#/components/schemas/Clause" }
+        related_event_id: { type: string, format: uuid }
+        completed_at: { type: string, format: date-time }
+    Explanation:
+      type: object
+      properties:
+        subject: { type: string }
+        score: { type: integer }
+        factors:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              delta: { type: integer }
+    BidResult:
+      type: object
+      properties:
+        bid: { $ref: "#/components/schemas/Bid" }
+        transfer:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/CompletedTransfer" }]
+        explanation:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Explanation" }]
     JobOffer:
       type: object
       properties:

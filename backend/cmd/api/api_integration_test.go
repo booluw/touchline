@@ -29,6 +29,7 @@ import (
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/testdb"
 	internaltraining "github.com/touchline/backend/internal/training"
+	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgauth "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/realtime"
@@ -58,6 +59,7 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 		Match:         internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool)),
 		Tactics:       internaltactics.NewService(pool, nil, internalsquad.NewStore(pool)),
 		Training:      internaltraining.NewService(pool, nil),
+		Transfers:     internaltransfer.NewService(pool, nil),
 		Finance:       internalfinance.NewService(pool, nil),
 		JWT:           cfg,
 		Pool:          pool,

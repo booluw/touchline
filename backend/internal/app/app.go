@@ -34,6 +34,7 @@ import (
 	"github.com/touchline/backend/internal/squad"
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/training"
+	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/eventbus"
@@ -98,12 +99,13 @@ type App struct {
 	Hub    *realtime.Hub
 
 	// Services (built once).
-	Matches  *match.Service
-	CompSvc  *internalcompetition.Service
-	Training *training.Service
-	Finance  *finance.Service
-	Runner   *matchday.Runner
-	http     *httpapi.Server
+	Matches   *match.Service
+	CompSvc   *internalcompetition.Service
+	Training  *training.Service
+	Finance   *finance.Service
+	Transfers *internaltransfer.Service
+	Runner    *matchday.Runner
+	http      *httpapi.Server
 }
 
 // Build constructs the process: pool, event bus, realtime transport, and every
@@ -143,6 +145,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	compSvc := internalcompetition.NewService(pool, bus)
 	trainingSvc := training.NewService(pool, bus)
 	financeSvc := finance.NewService(pool, bus)
+	transfersSvc := internaltransfer.NewService(pool, bus)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
@@ -157,6 +160,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Tactics:       internaltactics.NewService(pool, bus, squadStore),
 		Training:      trainingSvc,
 		Finance:       financeSvc,
+		Transfers:     transfersSvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -178,6 +182,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		CompSvc:    compSvc,
 		Training:   trainingSvc,
 		Finance:    financeSvc,
+		Transfers:  transfersSvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -287,6 +292,11 @@ func (a *App) RunWorker(ctx context.Context) error {
 					log.Printf("world %s live runner: %v", ev.WorldID, err)
 				}
 			}()
+		}
+		if payload.Granularity == "daily" {
+			if err := a.Transfers.DailyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s daily transfer market: %w", ev.WorldID, err)
+			}
 		}
 		if payload.Granularity == "weekly" {
 			if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {

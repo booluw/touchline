@@ -84,7 +84,14 @@ func New(t *testing.T) *pgxpool.Pool {
 		 competition.competitions, competition.competition_rules, competition.club_competitions,
 		 competition.seasons, competition.standings,
 		 match.fixtures, match.matches, match.match_events, match.match_inputs,
-		 auth.sessions, auth.users RESTART IDENTITY CASCADE`); err != nil {
+		 auth.sessions, auth.users,
+		 person.people, player.players, player.player_attributes, player.player_hidden_traits,
+		 player.player_personality, player.player_preferences, player.player_emotional_states,
+		 player.contracts, player.player_history, player.injuries,
+		 transfer.listings, transfer.bids, transfer.negotiations, transfer.completed_transfers,
+		 transfer.clauses, transfer.loans,
+		 finance.accounts, finance.ledger_entries, finance.budgets, finance.wage_commitments,
+		 finance.financial_crisis_states RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("reset test tables: %v", err)
 	}
 	return pool

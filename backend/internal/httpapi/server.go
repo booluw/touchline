@@ -15,6 +15,7 @@ import (
 	internalmatch "github.com/touchline/backend/internal/match"
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	internaltraining "github.com/touchline/backend/internal/training"
+	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/realtime"
@@ -34,6 +35,7 @@ type server struct {
 	tacticsSvc    *internaltactics.Service
 	trainingSvc   *internaltraining.Service
 	financeSvc    *internalfinance.Service
+	transfersSvc  *internaltransfer.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -55,6 +57,7 @@ type Options struct {
 	Tactics       *internaltactics.Service
 	Training      *internaltraining.Service
 	Finance       *internalfinance.Service
+	Transfers     *internaltransfer.Service
 	JWT           pkgjwt.JWTConfig
 	Pool          *pgxpool.Pool
 	CookiesSecure bool
@@ -75,6 +78,7 @@ func New(opts Options) *Server {
 		tacticsSvc:    opts.Tactics,
 		trainingSvc:   opts.Training,
 		financeSvc:    opts.Finance,
+		transfersSvc:  opts.Transfers,
 		jwtCfg:        opts.JWT,
 		pool:          opts.Pool,
 		cookiesSecure: opts.CookiesSecure,
