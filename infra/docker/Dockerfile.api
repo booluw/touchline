@@ -1,4 +1,5 @@
-# Go backend (multi-stage build, shared by api / scheduler / worker)
+# Go backend (multi-stage build). The cmd/touchline binary runs the whole game
+# in one process (serve) or a single subsystem (api | scheduler | worker).
 FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
@@ -8,17 +9,17 @@ RUN go mod download
 
 COPY backend/ ./
 
-# Confirm the binary name and run tests before finishing the build stage's context
-RUN go build -o /out/api ./cmd/api && \
-    go build -o /out/scheduler ./cmd/scheduler && \
-    go build -o /out/worker ./cmd/worker
+# Build the single all-in-one binary (dev + default prod entry point).
+RUN go build -o /out/touchline ./cmd/touchline
 
 FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates tzdata
 
-COPY --from=builder /out/api /out/scheduler /out/worker /usr/local/bin/
+COPY --from=builder /out/touchline /usr/local/bin/touchline
 
 EXPOSE 8080
 
-CMD ["api"]
+# The container's default is the whole game in one process; override with
+# ["touchline", "api"] / "scheduler" / "worker" for prod isolation.
+CMD ["touchline", "serve"]

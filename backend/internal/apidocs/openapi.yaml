@@ -1,0 +1,1618 @@
+openapi: 3.1.0
+info:
+  title: Touchline API
+  version: 0.1.0
+  description: |
+    Touchline is a text-first football management game. The backend is a single
+    binary (`cmd/touchline serve` runs the API, the scheduler world clock, and
+    the event worker in one process; the api/scheduler/worker subcommands split
+    them for prod isolation).
+
+    Authentication is cookie-based: login exchanges credentials for a rotating
+    access/refresh cookie pair, and every game endpoint below a security scheme
+    marker requires a valid `access_token` cookie. The whole world is scoped to
+    the session, so "my world" reads are always the caller's own world.
+
+    Launch model: worlds are created as metadata (name), then an admin declares
+    countries and leagues, and finally seeds the whole world with clubs,
+    players, and memberships. Seasons/league play follow the fixture system
+    driven by the scheduler.
+
+    The interactive reference is this page; the raw spec lives at
+    `/openapi.yaml`. Live game state (world ticks, match pace 15-min ticks)
+    streams over `/ws` (see the WebSocket section).
+  license:
+    name: Proprietary
+servers:
+  - url: http://localhost:8080
+    description: Local development (cmd/touchline serve)
+tags:
+  - name: health
+    description: Liveness probes (OPD-14 — compose healthchecks depend on these).
+  - name: auth
+    description: Session lifecycle (login + rotation).
+  - name: dashboard
+    description: Session-gated dashboard aggregate.
+  - name: clubs
+    description: Club reads + lineup/tactics/training-plan commands (world-scoped to caller).
+  - name: finance
+    description: Club finances, ledger, contracts (owning manager only).
+  - name: manager
+    description: The manager's job offer inbox + career actions.
+  - name: admin
+    description: World lifecycle, whole-world seeding, country/league administration, offer factory, club-name parts. Admin sessions only.
+  - name: competition
+    description: Competition manager reads (countries, competitions, fixtures, standings), world-scoped.
+  - name: match
+    description: Match screen fixture header, persisted match event feed, live tactical changes.
+  - name: realtime
+    description: Authenticated WebSocket push (world ticks, match updates).
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: Backend process is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              examples:
+                ok:
+                  value: { status: ok }
+  /health/db:
+    get:
+      tags: [health]
+      summary: Database connectivity probe
+      operationId: healthDb
+      security: []
+      responses:
+        "200":
+          description: PostgreSQL reachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              examples:
+                ok:
+                  value: { status: db-ok }
+        "503":
+          description: PostgreSQL unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              examples:
+                down:
+                  value: { status: db-down }
+  /ws:
+    get:
+      tags: [realtime]
+      summary: Authenticated WebSocket event stream
+      operationId: ws
+      description: |
+        Upgrades to a WebSocket authenticated by the `access_token` cookie on the
+        handshake. The server pushes world-scoped events to every socket of that
+        world:
+
+        * `world_tick` — `{ event_id, granularity: "daily"|"weekly"|"monthly", tick }`
+          broadcast when the scheduler advances the caller's world.
+        * `match_update` — live match state updates (`minute`, running score) as the
+          worker simulates in-progress matches.
+
+        A HTTP-only cookie is not accessible to the browser WebSocket client
+        constructor; Nuxt forwards it automatically because the socket is opened
+        same-site. Failing auth closes the handshake with 401.
+      security:
+        - sessionCookie: []
+      responses:
+        "101":
+          description: WebSocket upgrade accepted; stream begins.
+        "401":
+          description: Missing/invalid access_token cookie.
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Establish a session
+      operationId: login
+      security: []
+      description: |
+        Validates credentials and sets the `access_token`/`refresh_token` httpOnly
+        cookies. Phase-1 launch gates login to administrators — a successful
+        login here is a world-less admin console session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: admin@touchline.local }
+                password: { type: string, format: password, example: changeme }
+      responses:
+        "200":
+          description: Session established; cookies set.
+          headers:
+            Set-Cookie:
+              description: access_token + refresh_token httpOnly cookies.
+              schema: { type: string, example: "access_token=eyJ...; HttpOnly; Path=/; SameSite=Lax; Max-Age=900" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  display_name: { type: string, example: "Admin" }
+        "400":
+          description: Malformed body (missing email/password).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "email and password are required" }
+        "401":
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "invalid email or password" }
+        "403":
+          description: Login is currently limited to administrators.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "login is currently limited to administrators" }
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the session
+      operationId: refresh
+      security: []
+      description: |
+        Exchanges the `refresh_token` cookie for a fresh cookie pair for the same
+        manager. Used when the access token expires.
+      responses:
+        "200":
+          description: Session rotated; new cookie pair set.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              example: { status: ok }
+        "401":
+          description: Missing/invalid refresh token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "missing refresh token" }
+  /api/dashboard:
+    get:
+      tags: [dashboard]
+      summary: Session dashboard aggregate
+      operationId: dashboard
+      description: |
+        Protected endpoint proving the session round-trip; the S07-01
+        aggregation returns the empty shape the frontend already types against.
+      responses:
+        "200":
+          description: Aggregated dashboard feed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  urgent: { type: array, items: {}, example: [] }
+                  important: { type: array, items: {}, example: [] }
+                  interesting: { type: array, items: {}, example: [] }
+        "401":
+          description: No valid access_token cookie.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "unauthorized" }
+  /api/clubs:
+    get:
+      tags: [clubs]
+      summary: List clubs in my world
+      operationId: listClubs
+      description: Clubs of the caller's own world (AI clubs included).
+      responses:
+        "200":
+          description: Club list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clubs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Club" }
+              examples:
+                sample:
+                  value:
+                    clubs:
+                      - id: 00000000-0000-4000-8000-000000000005
+                        world_id: 00000000-0000-4000-8000-000000000001
+                        name: Northgate Rovers
+                        short_name: NGR
+        "403":
+          description: Session has no world context (admin console session).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "no world context" }
+  /api/clubs/{id}:
+    get:
+      tags: [clubs]
+      summary: Get a club in my world
+      operationId: getClub
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: Club detail with full squad.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClubDetail" }
+              examples:
+                sample:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000005
+                    world_id: 00000000-0000-4000-8000-000000000001
+                    name: Northgate Rovers
+                    short_name: NGR
+                    country: England
+                    is_ai_controlled: false
+                    manager:
+                      id: 00000000-0000-4000-8000-000000000006
+                      display_name: Test Manager
+                    squad:
+                      - id: 00000000-0000-4000-8000-00000000000b
+                        person_id: 00000000-0000-4000-8000-00000000000c
+                        first_name: Leo
+                        last_name: Marsh
+                        display_name: Leo Marsh
+                        nationality_code: ENG
+                        nationality_name: England
+                        date_of_birth: "1998-04-12T00:00:00Z"
+                        age: 27
+                        primary_position: ST
+                        squad_number: 9
+        "400":
+          description: Invalid club id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "invalid club id" }
+        "403":
+          description: No world context on the session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "club not found" }
+  /api/clubs/{id}/lineup:
+    get:
+      tags: [clubs]
+      summary: Get the club's lineup
+      operationId: getLineup
+      description: Slot -> player mapping (16 slots; empty slots null).
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The current lineup.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lineup" }
+              examples:
+                sample:
+                  value:
+                    slots:
+                      - slot: 0
+                        player_id: 00000000-0000-4000-8000-00000000000b
+    put:
+      tags: [clubs]
+      summary: Set the club's lineup
+      operationId: setLineup
+      description: Submit a full 16-slot lineup. Requires the club's manager identity (or an AI policy bot in scheduled mode).
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slots]
+              properties:
+                slots:
+                  type: array
+                  minItems: 16
+                  maxItems: 16
+                  items:
+                    type: object
+                    required: [slot]
+                    properties:
+                      slot: { type: integer, example: 0 }
+                      player_id: { type: string, format: uuid, nullable: true, example: "00000000-0000-4000-8000-00000000000b" }
+      responses:
+        "204":
+          description: Lineup saved.
+        "400":
+          description: Invalid lineup (players not in squad, duplicated, wrong count).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Not the owning manager of the club.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/tactics:
+    get:
+      tags: [clubs]
+      summary: Get the club's tactics
+      operationId: getTactics
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: Style, formation, allowed formations, and current slot assignments.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tactics" }
+              examples:
+                sample:
+                  value:
+                    club_id: 00000000-0000-4000-8000-000000000005
+                    style: balanced
+                    formation: 4-3-3
+                    allowed_formations: ["4-3-3", "4-4-2", "3-5-2"]
+                    slots:
+                      - slot: 0
+                        position: GK
+                        player_id: 00000000-0000-4000-8000-00000000000b
+    post:
+      tags: [clubs]
+      summary: Set the club's tactics
+      operationId: setTactics
+      description: Change playing style and/or formation (effect on the existing slot mapping is a bulk re-check by the service).
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [style, formation]
+              properties:
+                style: { type: string, enum: [balanced, counter, attacking, defensive, press, possession], example: balanced }
+                formation: { type: string, example: "4-3-3" }
+      responses:
+        "204":
+          description: Tactics saved.
+        "400":
+          description: Invalid formation/style for the squad.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/training-plan:
+    get:
+      tags: [clubs]
+      summary: Get the club's training plan
+      operationId: getTrainingPlan
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The club's weekly training archetype.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrainingPlan" }
+              examples:
+                sample:
+                  value:
+                    club_id: 00000000-0000-4000-8000-000000000005
+                    archetype: balanced
+                    effective_from_tick: 62
+                    last_applied_week: 7
+    post:
+      tags: [clubs]
+      summary: Set the club's training plan
+      operationId: setTrainingPlan
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [archetype]
+              properties:
+                archetype:
+                  type: string
+                  enum: [balanced, attacking, defending, fitness, technical]
+                  example: balanced
+      responses:
+        "204":
+          description: Training plan saved.
+        "400":
+          description: Unknown archetype.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/finances:
+    get:
+      tags: [finance]
+      summary: Club financial summary
+      operationId: getFinances
+      description: Owning manager only (the club resolves the owner's world).
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: Cash, budgets, wages, and projections.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinancialSummary" }
+              examples:
+                sample:
+                  value:
+                    currency: GBP
+                    cash: 48250000
+                    operating_profit: 740000
+                    transfer_budget: { season: 1, allocated: 30000000, committed: 0, available: 30000000 }
+                    wage_budget: { season: 1, allocated: 18000000, committed: 16400000, available: 1600000 }
+                    wage_commitments: { count: 24, weekly_wage: 316000, annual_wage: 16400000 }
+                    committed_spending: 0
+                    projected_revenue: 125000000
+                    projected_year_end_balance: 30400000
+                    future_installments: 0
+                    debt: 0
+                    factors:
+                      - { label: League position, amount: 18000000 }
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/ledger:
+    get:
+      tags: [finance]
+      summary: Club ledger entries
+      operationId: getLedger
+      description: Append-only financial entries (genesis, weekly wages, transfers). Most-recent first.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: Ledger entry list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LedgerEntry" }
+              examples:
+                sample:
+                  value:
+                    - id: 00000000-0000-4000-8000-000000000010
+                      entry_type: GENESIS
+                      category: startup_capital
+                      amount: 35000000
+                      description: Starting cash at club creation
+                      occurred_at: "2026-06-01T19:00:00Z"
+                    - id: 00000000-0000-4000-8000-000000000011
+                      entry_type: WAGE
+                      category: wage
+                      amount: -1264000
+                      description: Weekly wages for 24 players
+                      related_event_id: 00000000-0000-4000-8000-000000000012
+                      occurred_at: "2026-06-14T19:00:00Z"
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/contracts:
+    get:
+      tags: [finance]
+      summary: Club player contracts
+      operationId: getContracts
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: Active player contracts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Contract" }
+              examples:
+                sample:
+                  value:
+                    - id: 00000000-0000-4000-8000-000000000013
+                      player_id: 00000000-0000-4000-8000-00000000000c
+                      player_name: Leo Marsh
+                      weekly_wage: 45000
+                      signing_bonus: 500000
+                      start_date: "2026-06-01"
+                      end_date: "2028-06-30"
+                      release_clause: 25000000
+                      status: active
+  /api/managers/me/offers:
+    get:
+      tags: [manager]
+      summary: My job offer inbox
+      operationId: listOffers
+      description: Open AI-club job offers for the signed-in manager.
+      responses:
+        "200":
+          description: Offer list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  offers:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobOffer" }
+              examples:
+                sample:
+                  value:
+                    offers:
+                      - id: 00000000-0000-4000-8000-000000000009
+                        world_id: 00000000-0000-4000-8000-000000000001
+                        club_id: 00000000-0000-4000-8000-000000000014
+                        club_name: Highfield United
+                        manager_id: 00000000-0000-4000-8000-000000000006
+                        status: pending
+                        created_at: "2026-06-01T19:00:00Z"
+  /api/managers/me/resign:
+    post:
+      tags: [manager]
+      summary: Resign from my club
+      operationId: resign
+      description: |
+        The manager vacates their club (back to AI control). Any open offers
+        remain; the manager is once again hirable.
+      responses:
+        "200":
+          description: Resignation recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              example: { status: ok }
+        "409":
+          description: No club to resign from.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/offers/{id}/accept:
+    post:
+      tags: [manager]
+      summary: Accept a job offer
+      operationId: acceptOffer
+      parameters:
+        - $ref: "#/components/parameters/OfferID"
+      responses:
+        "200":
+          description: The accepted offer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobOffer" }
+              examples:
+                sample:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000009
+                    world_id: 00000000-0000-4000-8000-000000000001
+                    club_id: 00000000-0000-4000-8000-000000000014
+                    club_name: Highfield United
+                    manager_id: 00000000-0000-4000-8000-000000000006
+                    status: accepted
+                    created_at: "2026-06-01T19:00:00Z"
+        "404":
+          description: Offer not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Offer already decided.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/offers/{id}/decline:
+    post:
+      tags: [manager]
+      summary: Decline a job offer
+      operationId: declineOffer
+      parameters:
+        - $ref: "#/components/parameters/OfferID"
+      responses:
+        "200":
+          description: The declined offer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobOffer" }
+        "404":
+          description: Offer not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Offer already decided.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds:
+    post:
+      tags: [admin]
+      summary: Create a world
+      operationId: createWorld
+      description: |
+        Registers a new world in a provisioning state. A world is then built by
+        declaring countries/leagues and seeding (no playable season exists
+        until the start-season service runs).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: "Test League World" }
+      responses:
+        "201":
+          description: The created world row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/World" }
+              examples:
+                sample:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000001
+                    name: Test League World
+                    status: provisioning
+                    created_at: "2026-06-01T19:00:00Z"
+        "409":
+          description: A world with this name already exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/status:
+    post:
+      tags: [admin]
+      summary: Transition a world's lifecycle status
+      operationId: setWorldStatus
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [provisioning, seeding, active, paused, archived]
+                  example: seeding
+      responses:
+        "200":
+          description: Updated world row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/World" }
+        "400":
+          description: Unknown status / invalid transition.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: World not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/config:
+    post:
+      tags: [admin]
+      summary: Write a world config key
+      operationId: setWorldConfig
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+      description: Sets one world_config key (e.g. match tick cadence).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key:
+                  type: string
+                  enum: [match_tick_cadence]
+                  example: match_tick_cadence
+                value:
+                  type: string
+                  example: "*/15 * * * *"
+      responses:
+        "200":
+          description: Config written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              example: { ok: true }
+        "400":
+          description: Missing key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: World not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/seed:
+    post:
+      tags: [admin]
+      summary: Seed the whole world (clubs, players, memberships)
+      operationId: seedWorld
+      description: |
+        Idempotent, incremental whole-world seeding: every league is filled to
+        its team_count with new clubs, players are generated, and club manager
+        rows (admin) are migrated to real club ownership. The first successful
+        run mints the world's replay random seed. Requires countries+leagues to
+        be declared first.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+      responses:
+        "200":
+          description: Seeding summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SeedResult" }
+              examples:
+                sample:
+                  value:
+                    world_id: 00000000-0000-4000-8000-000000000001
+                    random_seed: 48765432
+                    countries:
+                      - country_id: 00000000-0000-4000-8000-000000000002
+                        country_name: England
+                        leagues:
+                          - league_id: 00000000-0000-4000-8000-000000000003
+                            name: Premier League
+                            tier: 1
+                            team_count: 8
+                            new_clubs: 8
+                            clubs:
+                              - { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers }
+                    new_clubs: 8
+                    league_count: 2
+        "422":
+          description: World has no leagues to seed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "world has no leagues" }
+        "404":
+          description: World not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/countries:
+    get:
+      tags: [admin]
+      summary: List declared countries
+      operationId: listCountries
+      responses:
+        "200":
+          description: Country list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Country" }
+              examples:
+                sample:
+                  value:
+                    - id: 00000000-0000-4000-8000-000000000002
+                      code: ENG
+                      name: England
+    post:
+      tags: [admin]
+      summary: Declare a country for the world
+      operationId: createCountry
+      description: Metadata only — a country holds tiers of leagues.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [world_id, code, name]
+              properties:
+                world_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+                code: { type: string, example: ENG }
+                name: { type: string, example: England }
+      responses:
+        "201":
+          description: The created country.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Country" }
+        "400":
+          description: Missing fields.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/leagues:
+    get:
+      tags: [admin]
+      summary: List declared leagues
+      operationId: listLeagues
+      responses:
+        "200":
+          description: League list across all declared countries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/League" }
+    post:
+      tags: [admin]
+      summary: Declare a league
+      operationId: createLeague
+      description: Metadata only — tiers and promotion/relegation rules.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [country_id, name, team_count]
+              properties:
+                country_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
+                name: { type: string, example: "Premier League" }
+                tier: { type: integer, minimum: 1, example: 1 }
+                team_count: { type: integer, minimum: 4, example: 20 }
+                promotions: { type: integer, example: 3 }
+                relegations: { type: integer, example: 3 }
+                promotes_to: { type: string, format: uuid, nullable: true }
+                relegates_to: { type: string, format: uuid, nullable: true }
+      responses:
+        "201":
+          description: The created league.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/League" }
+        "400":
+          description: Malformed payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/leagues/{id}/adjacency:
+    patch:
+      tags: [admin]
+      summary: Update a league's promotion/relegation links
+      operationId: updateAdjacency
+      parameters:
+        - $ref: "#/components/parameters/LeagueID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                promotes_to: { type: string, format: uuid, nullable: true, description: League promoted into above this one. }
+                relegates_to: { type: string, format: uuid, nullable: true, description: League relegated into below this one. }
+      responses:
+        "200":
+          description: Updated league.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/League" }
+        "400":
+          description: Cycles or cross-country adjacency rejected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: League not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/offers:
+    post:
+      tags: [admin]
+      summary: Create a media/AI job offer
+      operationId: createOffer
+      description: |
+        Offers an AI club to a human manager (used to place the first manager
+        into a seeded world before manager self-service exists).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id, manager_id]
+              properties:
+                club_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000014" }
+                manager_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000006" }
+      responses:
+        "201":
+          description: The created offer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobOffer" }
+        "404":
+          description: Club or manager not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Club already has a human manager / not an AI club.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/club-name-parts:
+    get:
+      tags: [admin]
+      summary: List club name stems and suffixes
+      operationId: listClubNameParts
+      description: Global pools used by the seeding generator to compose club names.
+      responses:
+        "200":
+          description: The two name-part pools.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stems: { type: array, items: { type: string }, example: [northgate, highfield, eastbrook] }
+                  suffixes: { type: array, items: { type: string }, example: [rovers, united, athletic] }
+    post:
+      tags: [admin]
+      summary: Add a club name stem or suffix
+      operationId: addClubNamePart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, value]
+              properties:
+                kind: { type: string, enum: [stem, suffix], example: stem }
+                value: { type: string, example: silvermoor }
+      responses:
+        "201":
+          description: The upserted part.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kind: { type: string }
+                  value: { type: string }
+        "400":
+          description: Invalid kind or empty value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/club-name-parts/{kind}/{value}:
+    delete:
+      tags: [admin]
+      summary: Delete a club name stem or suffix
+      operationId: removeClubNamePart
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema: { type: string, enum: [stem, suffix] }
+        - name: value
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Removed (deleting an absent entry is a no-op).
+        "400":
+          description: Invalid kind.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/countries:
+    get:
+      tags: [competition]
+      summary: Countries in my world
+      operationId: myCountries
+      responses:
+        "200":
+          description: Countries declared in the caller's world.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Country" }
+  /api/competitions:
+    get:
+      tags: [competition]
+      summary: Competitions in my world
+      operationId: myCompetitions
+      description: Latest season per competition in the caller's world.
+      responses:
+        "200":
+          description: Competition-season summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CompetitionSummary" }
+  /api/competitions/{id}:
+    get:
+      tags: [competition]
+      summary: Competition detail
+      operationId: getCompetition
+      description: Competition + season (current standings context) in the caller's world.
+      parameters:
+        - $ref: "#/components/parameters/CompetitionID"
+      responses:
+        "200":
+          description: Competition with season state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompetitionDetail" }
+        "404":
+          description: Not found in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/competitions/{id}/fixtures:
+    get:
+      tags: [competition]
+      summary: Competition fixtures
+      operationId: getFixtures
+      description: The current season's fixture list in the caller's world, ordered by matchday.
+      parameters:
+        - $ref: "#/components/parameters/CompetitionID"
+      responses:
+        "200":
+          description: Fixture list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Fixture" }
+              examples:
+                sample:
+                  value:
+                    - id: 00000000-0000-4000-8000-000000000007
+                      world_id: 00000000-0000-4000-8000-000000000001
+                      competition_id: 00000000-0000-4000-8000-00000000000a
+                      home_club_id: 00000000-0000-4000-8000-000000000005
+                      home_club_name: Northgate Rovers
+                      away_club_id: 00000000-0000-4000-8000-000000000014
+                      away_club_name: Highfield United
+                      matchday: 1
+                      scheduled_at: "2026-06-07T19:00:00Z"
+                      status: scheduled
+  /api/competitions/{id}/standings:
+    get:
+      tags: [competition]
+      summary: Competition standings
+      operationId: getStandings
+      parameters:
+        - $ref: "#/components/parameters/CompetitionID"
+      responses:
+        "200":
+          description: League table for the current season.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Standings" }
+              examples:
+                sample:
+                  value:
+                    season_id: 00000000-0000-4000-8000-00000000000a
+                    season_label: 2026-27
+                    season_number: 1
+                    status: active
+                    rows:
+                      - { club_name: Northgate Rovers, club_short: NGR, played: 12, won: 8, drawn: 3, lost: 1, goals_for: 27, goals_against: 9, points: 27 }
+                      - { club_name: Highfield United, club_short: HFU, played: 12, won: 7, drawn: 4, lost: 1, goals_for: 24, goals_against: 11, points: 25 }
+  /api/fixtures/{id}:
+    get:
+      tags: [match]
+      summary: Fixture + match header
+      operationId: getFixture
+      description: The fixture header plus live match view once the match has kicked off (world-scoped to the caller).
+      parameters:
+        - $ref: "#/components/parameters/FixtureID"
+      responses:
+        "200":
+          description: Fixture with optional live match view.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FixtureMatch" }
+              examples:
+                sample:
+                  value:
+                    fixture:
+                      id: 00000000-0000-4000-8000-000000000007
+                      world_id: 00000000-0000-4000-8000-000000000001
+                      competition_id: 00000000-0000-4000-8000-00000000000a
+                      home_club_id: 00000000-0000-4000-8000-000000000005
+                      home_club_name: Northgate Rovers
+                      away_club_id: 00000000-0000-4000-8000-000000000014
+                      away_club_name: Highfield United
+                      matchday: 1
+                      scheduled_at: "2026-06-07T19:00:00Z"
+                      status: scheduled
+        "404":
+          description: Fixture not found in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/matches/{id}/events:
+    get:
+      tags: [match]
+      summary: Persisted match event feed
+      operationId: getMatchEvents
+      description: The full ordered match_events feed (the same list the live socket streams), world-scoped.
+      parameters:
+        - $ref: "#/components/parameters/MatchID"
+      responses:
+        "200":
+          description: Ordered event feed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/MatchEvent" }
+              examples:
+                sample:
+                  value:
+                    events:
+                      - id: 00000000-0000-4000-8000-000000000015
+                        match_id: 00000000-0000-4000-8000-000000000008
+                        sequence: 1
+                        minute: 1
+                        type: MATCH_START
+                        data:
+                          home_score: 0
+                          away_score: 0
+        "404":
+          description: Match not found in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/matches/{id}/tactical:
+    post:
+      tags: [match]
+      summary: Live tactical change
+      operationId: liveTacticChange
+      description: Switch style or formation while a match is live (one pending change, applied at the next tick).
+      parameters:
+        - $ref: "#/components/parameters/MatchID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                minute: { type: integer, example: 45 }
+                style: { type: string, enum: [balanced, counter, attacking, defensive, press, possession], example: attacking }
+      responses:
+        "200":
+          description: Change accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+              example: { status: ok }
+        "409":
+          description: No live match / change window closed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: httpOnly cookie set by POST /api/auth/login and rotated by /api/auth/refresh.
+  parameters:
+    WorldID:
+      name: id
+      in: path
+      required: true
+      description: World id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+    ClubID:
+      name: id
+      in: path
+      required: true
+      description: Club id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000005" }
+    CompetitionID:
+      name: id
+      in: path
+      required: true
+      description: Competition id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000a" }
+    LeagueID:
+      name: id
+      in: path
+      required: true
+      description: League id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000003" }
+    FixtureID:
+      name: id
+      in: path
+      required: true
+      description: Fixture id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000007" }
+    MatchID:
+      name: id
+      in: path
+      required: true
+      description: Match id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000008" }
+    OfferID:
+      name: id
+      in: path
+      required: true
+      description: Job offer id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000009" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, example: internal error }
+    Status:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+    World:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [provisioning, seeding, active, paused, archived] }
+        created_at: { type: string, format: date-time }
+    Country:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+    Club:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        name: { type: string }
+        short_name: { type: string }
+    ClubDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        name: { type: string }
+        short_name: { type: string }
+        country: { type: string }
+        is_ai_controlled: { type: boolean }
+        manager:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string, format: uuid }
+            display_name: { type: string }
+        squad:
+          type: array
+          items: { $ref: "#/components/schemas/SquadPlayer" }
+    SquadPlayer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        person_id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        nationality_code: { type: string }
+        nationality_name: { type: string }
+        date_of_birth: { type: string, format: date-time }
+        age: { type: integer }
+        primary_position: { type: string }
+        squad_number: { type: integer, nullable: true }
+    Lineup:
+      type: object
+      properties:
+        slots:
+          type: array
+          items:
+            type: object
+            properties:
+              slot: { type: integer }
+              player_id: { type: string, format: uuid, nullable: true }
+    Tactics:
+      type: object
+      properties:
+        club_id: { type: string, format: uuid }
+        style: { type: string }
+        formation: { type: string }
+        allowed_formations: { type: array, items: { type: string } }
+        slots:
+          type: array
+          items:
+            type: object
+            properties:
+              slot: { type: integer }
+              position: { type: string }
+              player_id: { type: string, format: uuid }
+    TrainingPlan:
+      type: object
+      properties:
+        club_id: { type: string, format: uuid }
+        archetype: { type: string }
+        effective_from_tick: { type: integer }
+        last_applied_week: { type: integer, nullable: true }
+    FinancialSummary:
+      type: object
+      properties:
+        currency: { type: string }
+        cash: { type: integer, format: int64 }
+        operating_profit: { type: integer, format: int64 }
+        transfer_budget: { $ref: "#/components/schemas/BudgetLine" }
+        wage_budget: { $ref: "#/components/schemas/BudgetLine" }
+        wage_commitments: { $ref: "#/components/schemas/Commitments" }
+        committed_spending: { type: integer, format: int64 }
+        projected_revenue: { type: integer, format: int64 }
+        projected_year_end_balance: { type: integer, format: int64 }
+        future_installments: { type: integer, format: int64 }
+        debt: { type: integer, format: int64 }
+        factors:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              amount: { type: integer, format: int64 }
+    BudgetLine:
+      type: object
+      properties:
+        season: { type: integer }
+        allocated: { type: integer, format: int64 }
+        committed: { type: integer, format: int64 }
+        available: { type: integer, format: int64 }
+    Commitments:
+      type: object
+      properties:
+        count: { type: integer }
+        weekly_wage: { type: integer, format: int64 }
+        annual_wage: { type: integer, format: int64 }
+    LedgerEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        entry_type: { type: string, enum: [GENESIS, WAGE, TRANSFER_IN, TRANSFER_OUT, PRIZE, SPONSOR] }
+        category: { type: string }
+        amount: { type: integer, format: int64 }
+        description: { type: string }
+        related_event_id: { type: string, format: uuid, nullable: true }
+        occurred_at: { type: string, format: date-time }
+    Contract:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        player_name: { type: string }
+        weekly_wage: { type: integer, format: int64 }
+        signing_bonus: { type: integer, format: int64 }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        release_clause: { type: integer, format: int64, nullable: true }
+        status: { type: string }
+    JobOffer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        club_id: { type: string, format: uuid }
+        club_name: { type: string }
+        manager_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, accepted, declined, withdrawn] }
+        created_at: { type: string, format: date-time }
+    League:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        country_id: { type: string, format: uuid }
+        name: { type: string }
+        tier: { type: integer }
+        team_count: { type: integer }
+        status: { type: string }
+        promotions: { type: integer }
+        relegations: { type: integer }
+        promotes_to: { type: string, format: uuid, nullable: true }
+        relegates_to: { type: string, format: uuid, nullable: true }
+    SeedResult:
+      type: object
+      properties:
+        world_id: { type: string, format: uuid }
+        random_seed: { type: integer, format: int64 }
+        countries:
+          type: array
+          items: { $ref: "#/components/schemas/CountrySeed" }
+        new_clubs: { type: integer }
+        league_count: { type: integer }
+    CountrySeed:
+      type: object
+      properties:
+        country_id: { type: string, format: uuid }
+        country_name: { type: string }
+        leagues:
+          type: array
+          items: { $ref: "#/components/schemas/LeagueSeed" }
+    LeagueSeed:
+      type: object
+      properties:
+        league_id: { type: string, format: uuid }
+        name: { type: string }
+        tier: { type: integer }
+        team_count: { type: integer }
+        new_clubs: { type: integer }
+        clubs:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+    CompetitionSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        country_id: { type: string, format: uuid }
+        country_name: { type: string }
+        tier: { type: integer }
+        team_count: { type: integer }
+        status: { type: string }
+    CompetitionDetail:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        country_id: { type: string, format: uuid }
+        country_name: { type: string }
+        name: { type: string }
+        tier: { type: integer }
+        team_count: { type: integer }
+        season:
+          type: object
+          properties:
+            season_id: { type: string, format: uuid }
+            season_label: { type: string }
+            season_number: { type: integer }
+            status: { type: string }
+    Fixture:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        competition_id: { type: string, format: uuid }
+        home_club_id: { type: string, format: uuid }
+        home_club_name: { type: string }
+        away_club_id: { type: string, format: uuid }
+        away_club_name: { type: string }
+        matchday: { type: integer }
+        scheduled_at: { type: string, format: date-time }
+        status: { type: string, enum: [scheduled, running, finished] }
+        home_score: { type: integer, nullable: true }
+        away_score: { type: integer, nullable: true }
+    Standings:
+      type: object
+      properties:
+        season_id: { type: string, format: uuid }
+        season_label: { type: string }
+        season_number: { type: integer }
+        status: { type: string }
+        rows:
+          type: array
+          items: { $ref: "#/components/schemas/StandingRow" }
+    StandingRow:
+      type: object
+      properties:
+        club_name: { type: string }
+        club_short: { type: string }
+        played: { type: integer }
+        won: { type: integer }
+        drawn: { type: integer }
+        lost: { type: integer }
+        goals_for: { type: integer }
+        goals_against: { type: integer }
+        points: { type: integer }
+    FixtureMatch:
+      type: object
+      properties:
+        fixture: { $ref: "#/components/schemas/Fixture" }
+        match:
+          nullable: true
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [scheduled, running, finished] }
+            minute: { type: integer }
+            home_score: { type: integer }
+            away_score: { type: integer }
+    MatchEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        match_id: { type: string, format: uuid }
+        sequence: { type: integer }
+        minute: { type: integer }
+        type: { type: string, example: MATCH_START }
+        data:
+          type: object
+          additionalProperties: true
+security:
+  - sessionCookie: []

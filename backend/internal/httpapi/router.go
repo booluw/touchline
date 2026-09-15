@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+
+	"github.com/touchline/backend/internal/apidocs"
 )
 
 // router wires the REST API. Health endpoints (/health, /health/db) are OPD-14
@@ -35,6 +37,10 @@ func (s *server) router() *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "db-ok"})
 	})
+
+	// API reference (OpenAPI spec + interactive Scalar UI). Public like the
+	// health endpoints — anyone can read the contract.
+	apidocs.Mount(r)
 
 	// The single authenticated WebSocket (S02-04). requireAuth validates the
 	// access_token cookie on the handshake; events are world-scoped.

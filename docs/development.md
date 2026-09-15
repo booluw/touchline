@@ -68,8 +68,9 @@ Bootstrap happens automatically in order:
 1. `migrations` — applies `backend/migrations` (golang-migrate up).
 2. `ref-seed` — populates `ref.nationalities` + `ref.name_pool` from the
    curated `data/names` files (reference data only; idempotent).
-3. `api` (8080), `scheduler` (8081), `worker` (8082) — wait for Postgres and
-   the reference tables, then start and report healthy.
+3. `touchline` (8080) — the single binary running API + scheduler + worker in
+   one process; waits for Postgres and the reference tables, then reports
+   healthy.
 4. `frontend` (3000) — starts once the API is healthy.
 
 Verify:
@@ -90,12 +91,23 @@ each backend binary fail fast at boot with the same guidance.
 ```bash
 cd backend
 set -a; source ../.env; set +a   # or export DATABASE_URL yourself
-go run ./cmd/api                  # :8080, GET /health and /health/db
-go run ./cmd/scheduler            # :8081, GET /health
-go run ./cmd/worker               # :8082, GET /health
+go run ./cmd/touchline            # the whole game in one process: API :8080
 ```
 
-Migrations via golang-migrate (`brew install golang-migrate`, or
+The game is only playable when the API, scheduler (world clock), and worker
+(event + live-match engine) run at once, so `serve` (the default) is the normal
+entry point: it binds the HTTP/WS surface on `:8080` and runs the scheduler and
+worker in-process. For pod isolation the same binary splits the roles
+(the standalone probes stay on `:8081`/`:8082`):
+
+```bash
+cd backend
+go run ./cmd/touchline api         # :8080, GET /health and /health/db
+go run ./cmd/touchline scheduler   # :8081 world clock
+go run ./cmd/touchline worker      # :8082 engine consumer
+```
+
+Migrate via golang-migrate (`brew install golang-migrate`, or
 `go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest`):
 
 ```bash
@@ -110,8 +122,13 @@ Bare `go run` processes need `JWT_SECRET` set — the API fails fast without it
 ```bash
 cd backend
 set -a; source ../.env; set +a
-go run ./cmd/api   # POST /api/auth/{login,refresh}, GET /api/dashboard
+go run ./cmd/touchline           # API :8080 — POST /api/auth/{login,refresh}, GET /api/dashboard
 ```
+
+The interactive API reference runs on the API itself while it's up:
+`curl http://localhost:8080/api/openapi.yaml` (raw OpenAPI 3.1 spec) and
+`open http://localhost:8080/api/docs` (interactive Scalar UI). A unit test in
+`internal/httpapi` fails the build if the spec drifts from the router.
 
 Create a dev account (world must already exist — see "Worlds and job offers"
 below for the supported admin flow):
@@ -230,7 +247,7 @@ or sack closes it (history is never deleted). See OPD-16.
 
 ### World clock (S02-03)
 
-The scheduler binary is the world clock. It reads each **playable** world's
+The scheduler runner is the world clock. It reads each **playable** world's
 cadence values from `world.world_config` and fires world-scoped `WORLD_TICK`
 events whose payload carries the tick `granularity`
 (`hourly|daily|weekly|monthly|seasonal`). Cadences are re-read every
@@ -240,9 +257,11 @@ so only one scheduler can ever fire a cadence. Each emitted tick advances that
 world's monotonic `current_tick`.
 
 ```bash
-# World clock running (with the worker consuming WORLD_TICK log lines):
-go run ./cmd/scheduler
-go run ./cmd/worker
+# Interactively the simplest is one process (serve runs the clock too):
+go run ./cmd/touchline
+# …or run the clock standalone with the worker consuming WORLD_TICK lines:
+go run ./cmd/touchline scheduler
+go run ./cmd/touchline worker
 ```
 
 An admin tunes a cadence at runtime (no redeploy):

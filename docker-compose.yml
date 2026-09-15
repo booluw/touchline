@@ -8,7 +8,7 @@
 #
 # Redis is the only backing store in the compose stack (NATS deferred; river
 # chosen as the Phase-0 event bus). Bootstrap order: migrations →
-# ref-seed (S01-04 reference data) → api/scheduler/worker → frontend.
+# ref-seed (S01-04 reference data) → touchline (API + scheduler + worker) → frontend.
 
 name: touchline
 
@@ -47,11 +47,15 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-  api:
+  # One binary, one process: the API (HTTP + WS), the scheduler world clock,
+  # and the worker (event consumer + live-match engine) all run together via
+  # `touchline serve`. For pod isolation the same image runs a single role with
+  # `touchline api|scheduler|worker` instead.
+  touchline:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.api
-    command: ["/usr/local/bin/api"]
+    command: ["touchline", "serve"]
     ports:
       - "8080:8080"
     environment:
@@ -76,59 +80,6 @@ services:
       ref-seed:
         condition: service_completed_successfully
 
-  scheduler:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.scheduler
-    command: ["/usr/local/bin/scheduler"]
-    ports:
-      - "8081:8081"
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}
-      REDIS_URL: ${REDIS_URL:?REDIS_URL required (see .env.example / docs/development.md)}
-      SCHEDULER_PORT: "8081"
-      SCHEDULER_POLL_INTERVAL: ${SCHEDULER_POLL_INTERVAL:-15s}
-      ENV: development
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      redis:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
-      ref-seed:
-        condition: service_completed_successfully
-
-  worker:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.worker
-    command: ["/usr/local/bin/worker"]
-    ports:
-      - "8082:8082"
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required (see .env.example / docs/development.md)}
-      REDIS_URL: ${REDIS_URL:?REDIS_URL required (see .env.example / docs/development.md)}
-      WORKER_PORT: "8082"
-      ENV: development
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      redis:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
-      ref-seed:
-        condition: service_completed_successfully
-
   frontend:
     build:
       context: .
@@ -140,7 +91,7 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      api:
+      touchline:
         condition: service_healthy
 
 volumes:

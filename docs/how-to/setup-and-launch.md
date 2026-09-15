@@ -54,7 +54,8 @@ export DATABASE_URL="postgres://touchline@localhost:55432/touchline?sslmode=disa
 
 ## 1. Initialize the application
 
-Backend binaries (three terminals, or one shell with `&`):
+Backend — one process runs the whole game (API :8080 + world clock + engine
+consumer). The interactive API reference is then at `http://localhost:8080/api/docs`:
 
 ```bash
 cd backend
@@ -62,10 +63,11 @@ set -a; source ../.env 2>/dev/null; set +a   # optional: load repo-root .env
 export JWT_SECRET=dev-secret-change-me
 export APP_ORIGIN=http://localhost:3000
 export ENV=development
-go run ./cmd/api          # :8080
-go run ./cmd/scheduler    # :8081 world clock
-go run ./cmd/worker       # :8082 engine consumer
+go run ./cmd/touchline        # serve :8080 (api + scheduler + worker)
 ```
+
+The same binary splits roles for pod isolation (`go run ./cmd/touchline api`
+on :8080, `scheduler` on :8081, `worker` on :8082).
 
 Frontend:
 
@@ -414,7 +416,7 @@ see `docs/design/finance-numerics.md`).
 | `/api/clubs`, `/api/competitions`, … → `403 no world context` | admin console session is world-less | Use a manager-scoped session (grant the admin a manager row, Step 4) |
 | Plain account can't log in (`403`) | Phase-1 login gate is admin-only | By design (OPD-02); opens with the phase-2 rest |
 | `ErrDuplicateEntry`-style 409s on offers | manager already has a job (one-job-per-user) | Resign/sack the current assignment first |
-| `go run ./cmd/api` exits immediately | `JWT_SECRET` unset | `export JWT_SECRET=…` (set in Step 1) |
+| `go run ./cmd/touchline serve` exits immediately | `JWT_SECRET` unset | `export JWT_SECRET=…` (set in Step 1) |
 | Scheduler fires no ticks | world not `active`/`open_beta` | Launch via Step 8 (playable worlds only) |
 | Cadence change "does nothing" | next resample is up to 15s away | Wait one `SCHEDULER_POLL_INTERVAL`; `tick.match_cadence` is deliberately ignored by the world clock (`OPD-17`) |
 | Matches never start | no season started, or daily tick not firing | Run the `StartSeason` seam (Step 7); set `tick.daily_cadence=* * * * *`; fixtures are day-gated by the season reference date |
