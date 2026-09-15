@@ -8,7 +8,7 @@
           <label class="block text-sm text-slate-400 mb-1" for="email">Email</label>
           <input
             id="email"
-            v-model="email"
+            v-model="auth.email"
             type="email"
             required
             class="w-full px-4 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
@@ -18,7 +18,7 @@
           <label class="block text-sm text-slate-400 mb-1" for="password">Password</label>
           <input
             id="password"
-            v-model="password"
+            v-model="auth.password"
             type="password"
             required
             class="w-full px-4 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
@@ -61,39 +61,16 @@
 <script setup lang="ts">
 const { login, selectWorld, worlds, needsWorldSelection } = useAuth()
 
-const email = ref('')
-const password = ref('')
+const auth = ref({ email: '', password: ''})
 const errorMessage = ref('')
 
 async function submitLogin() {
-  errorMessage.value = ''
-  try {
-    const res = await doLogin()
-    if ((res as LoginWorldPicker).status === 'worlds') {
-      return
-    }
-    navigateTo('/')
-  } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : 'Sign-in failed.'
-  }
-}
-
-async function confirmWorld() {
-  const res = await doLogin()
-  // The world picker logged in with cookies on this call; land on the home
-  // status panel, which opens the live socket.
-  if ((res as LoginWorldPicker).status !== 'worlds') {
-    navigateTo('/')
-  }
+  await login(auth.value)
 }
 
 async function doLogin() {
-  const res = await login(email.value, password.value)
-  // A real session now exists; open the single realtime socket. World-picker
-  // responses set no cookies yet, so wait until the user has picked one.
-  if ((res as LoginWorldPicker).status !== 'worlds') {
-    useRealtimeStore().connect()
-  }
-  return res
+  // if ((res as LoginWorldPicker).status !== 'worlds') {
+  //   useRealtimeStore().connect()
+  // }
 }
 </script>

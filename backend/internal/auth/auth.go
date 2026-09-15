@@ -46,6 +46,9 @@ type LoginResult struct {
 	TokenPair   *pkgauth.TokenPair
 	Identity    *pkgauth.ManagerIdentity
 	DisplayName string
+	IsAdmin bool
+	CreatedAt time.Time
+	ID uuid.UUID
 }
 
 // Service resolves credentials and manages rotating sessions.
@@ -75,9 +78,10 @@ func (s *Service) Login(ctx context.Context, params LoginParams) (*LoginResult, 
 	var userID uuid.UUID
 	var hash, name string
 	var isAdmin bool
+	var createdAt time.Time
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, password_hash, display_name, is_admin FROM auth.users WHERE email = $1`, email,
-	).Scan(&userID, &hash, &name, &isAdmin)
+		`SELECT id, password_hash, display_name, created_at, is_admin FROM auth.users WHERE email = $1`, email,
+	).Scan(&userID, &hash, &name, &createdAt, &isAdmin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_ = bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(params.Password))
 		return nil, ErrInvalidCredentials
@@ -123,7 +127,14 @@ func (s *Service) Login(ctx context.Context, params LoginParams) (*LoginResult, 
 		return nil, fmt.Errorf("commit session: %w", err)
 	}
 
-	return &LoginResult{TokenPair: pair, Identity: identity, DisplayName: name}, nil
+	return &LoginResult{
+		TokenPair: pair,
+		Identity: identity,
+		DisplayName: name,
+		IsAdmin: isAdmin,
+		CreatedAt: createdAt,
+		ID: userID,
+	}, nil
 }
 
 // Refresh validates a refresh token, revokes the matched session, and mints a

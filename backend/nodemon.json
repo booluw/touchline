@@ -1,0 +1,6 @@
+{
+  "watch": ["*", ".env"],
+  "ext": "go",
+  "exec": "go run ./cmd/touchline/main.go",
+  "signal": "SIGTERM"
+}

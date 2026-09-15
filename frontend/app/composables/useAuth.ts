@@ -1,9 +1,13 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Auth session flow against the Gin API (S02-01).
 //
 // The API authenticates with httpOnly cookies (access_token + refresh_token),
 // so every request uses credentials: 'include'. A jobless account that spans
 // multiple worlds triggers a world-picker round-trip: login returns
 // { status: 'worlds', worlds: [...] } without cookies, the user picks a world,
+
+import type { User } from "~/types"
+
 // and login is re-posted with world_id.
 export interface WorldOption {
   id: string
@@ -20,45 +24,33 @@ export interface LoginWorldPicker {
   worlds: WorldOption[]
 }
 
-export type LoginResponse = LoginSuccess | LoginWorldPicker
+export type LoginResponse = User | LoginWorldPicker
 
 export function useAuth() {
   const { public: { apiBase } } = useRuntimeConfig()
+  const { $api } = useNuxtApp()
+  const store = useAuthStore()
 
   const user = ref<string | null>(null)
   const worlds = ref<WorldOption[]>([])
   const needsWorldSelection = ref(false)
   const pendingWorldId = ref<string | null>(null)
 
-  async function login(email: string, password: string): Promise<LoginResponse> {
+  async function login(payload: { email: string, password: string }) {
     worlds.value = []
     needsWorldSelection.value = false
 
-    const res = await fetch(`${apiBase}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        email,
-        password,
-        world_id: pendingWorldId.value ?? undefined,
-      }),
-    })
-    const body: LoginResponse = await res.json().catch(() => ({}))
-
-    if (res.ok && (body as LoginWorldPicker).status === 'worlds') {
-      worlds.value = (body as LoginWorldPicker).worlds ?? []
-      needsWorldSelection.value = true
-      return body as LoginWorldPicker
+    try {
+      const resp = await $api.post<User>(`${apiBase}/api/auth/login`, payload, { auth: false })
+      store.setUser(resp)
+      if (resp.is_admin) {
+        navigateTo("/admin")
+        return
+      }
+      navigateTo("/")
+    } catch (error) {
+      console.error(error)
     }
-    if (res.ok) {
-      user.value = (body as LoginSuccess).display_name ?? null
-      pendingWorldId.value = null
-
-      console.log(body)
-      return body as LoginSuccess
-    }
-    throw new Error((body as { error?: string }).error ?? 'Sign-in failed.')
   }
 
   // Registers a world choice; the next login() call re-posts with world_id.

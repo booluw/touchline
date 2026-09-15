@@ -58,7 +58,12 @@ func (s *server) handleLogin(c *gin.Context) {
 	}
 
 	s.setAuthCookies(c, res.TokenPair)
-	c.JSON(http.StatusOK, gin.H{"display_name": res.DisplayName})
+	c.JSON(http.StatusOK, gin.H{
+		"display_name": res.DisplayName,
+		"created_at": res.CreatedAt,
+		"is_admin": res.IsAdmin,
+		"id": res.ID,
+	})
 }
 
 // handleRefresh rotates the refresh-token session and issues a fresh cookie
