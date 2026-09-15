@@ -75,7 +75,20 @@ func (s *server) router() *gin.Engine {
 		{
 			manager.GET("/me/offers", s.handleListOffers)
 			manager.POST("/me/resign", s.handleResign)
+			manager.GET("/:id/profile", s.handleGetManagerProfile)
 		}
+
+		// Social messaging (S06-04b): the manager's inbox and sending.
+		// World-scoped to the caller's manager; recipients must be human
+		// managers in the same world.
+		api.GET("/messages", s.requireAuth, s.handleListMessages)
+		api.POST("/messages", s.requireAuth, s.handleSendMessage)
+		api.POST("/messages/:id/read", s.requireAuth, s.handleReadMessage)
+
+		// Relationship graph (S06-04c): the caller's rivalry edges + those of
+		// their active club, and the realtime relationship_change feed.
+		api.GET("/relationships", s.requireAuth, s.handleListRelationships)
+
 		api.POST("/offers/:id/accept", s.requireAuth, s.handleAcceptOffer)
 		api.POST("/offers/:id/decline", s.requireAuth, s.handleDeclineOffer)
 

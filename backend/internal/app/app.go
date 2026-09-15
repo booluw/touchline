@@ -33,6 +33,7 @@ import (
 	"github.com/touchline/backend/internal/matchday"
 	internalplayer "github.com/touchline/backend/internal/player"
 	"github.com/touchline/backend/internal/scheduler"
+	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/training"
@@ -108,6 +109,7 @@ type App struct {
 	Transfers *internaltransfer.Service
 	Players   *internalplayer.Service
 	Board     *internalboard.Service
+	Social    *internalsocial.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
 }
@@ -154,6 +156,9 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	playerSvc := internalplayer.NewService(pool, bus, transfersSvc)
 	transfersSvc.WithPlayerLifecycle(playerSvc)
 	matches.WithPlayers(playerSvc)
+	socialSvc := internalsocial.NewService(pool, bus)
+	socialSvc.WithRealtime(broker)
+	matches.WithSocial(socialSvc)
 	boardSvc := internalboard.NewService(pool, bus, managerSvc)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
@@ -172,6 +177,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Transfers:     transfersSvc,
 		Board:         boardSvc,
 		Player:        playerSvc,
+		Social:        socialSvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -196,6 +202,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Transfers:  transfersSvc,
 		Players:    playerSvc,
 		Board:      boardSvc,
+		Social:     socialSvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -317,6 +324,11 @@ func (a *App) RunWorker(ctx context.Context) error {
 			}
 			if err := a.Players.WeeklyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s weekly player pass: %w", ev.WorldID, err)
+			}
+			if reconciled, err := a.Social.ReconcileRivalries(ctx, ev.WorldID); err != nil {
+				return fmt.Errorf("world %s rivalries reconcile: %w", ev.WorldID, err)
+			} else if reconciled > 0 {
+				log.Printf("world %s rivalries reconciled: %d fixtures backfilled", ev.WorldID, reconciled)
 			}
 			if reviewed, sacked, err := a.Board.WeeklyReview(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s weekly board review: %w", ev.WorldID, err)

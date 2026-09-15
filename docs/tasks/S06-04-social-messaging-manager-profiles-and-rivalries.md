@@ -1,6 +1,6 @@
 # S06-04 — Implement manager profiles, direct messaging, and relationship graph foundations
 
-**Status:** Not started  
+**Status:** Implemented — split into sub-sprints [S06-04a](S06-04a-social-manager-profiles.md) (Implemented), [S06-04b](S06-04b-direct-messaging.md) (Implemented), [S06-04c](S06-04c-rivalries-and-relationship-realtime.md) (Implemented)  
 **Sprint:** 06 — Multiplayer market and board consequences  
 **Source:** PRD §§48, 66; technical plan §§6, 12, 16; OPENCODE.md  
 **Depends on:** S02-01, S04-01
@@ -17,6 +17,10 @@ Implement the `social` engine schema (`social.relationships`, `social.messages`,
 - Head-to-head fixtures and transfer negotiations automatically create or update `rivalry` and `trust` graph edges between managers and clubs.
 - WebSocket pushes incoming social messages and relationship change alerts to active sessions in realtime.
 
-## Delivery evidence
+## Status by sub-sprint
 
-- Pending.
+| Sub-sprint | Scope | Status |
+|---|---|---|
+| [S06-04a](S06-04a-social-manager-profiles.md) | Manager profile pages: career, active club, trophy cabinet, head-to-head, trust score, rivals | **Implemented** |
+| [S06-04b](S06-04b-direct-messaging.md) | Direct manager→manager messaging + rate limiting + sanitization + inbox | **Implemented** |
+| [S06-04c](S06-04c-rivalries-and-relationship-realtime.md) | Auto-tracked club↔club + human manager↔manager rivalries + realtime alerts | **Implemented** |

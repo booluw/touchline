@@ -24,6 +24,7 @@ import (
 
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/player"
+	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/matchsim"
 )
@@ -458,8 +459,20 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		}
 	}
 
+	// Rivalry graph + trust deltas land atomically with the result (S06-04c).
+	var socialPush *internalsocial.RelationshipPush
+	if s.social != nil {
+		if socialPush, err = s.social.RecordCompletedMatch(ctx, tx, sess.WorldID, sess.FixtureID, sess.HomeClubID, sess.AwayClubID, res.HomeGoals, res.AwayGoals, now); err != nil {
+			return nil, fmt.Errorf("finalize: rivalries: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("finalize: commit: %w", err)
+	}
+
+	if socialPush != nil {
+		s.social.PublishRelationshipChange(ctx, socialPush)
 	}
 
 	return &MatchFinalized{

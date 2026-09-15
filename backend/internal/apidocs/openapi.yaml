@@ -44,7 +44,7 @@ tags:
   - name: player
     description: Squad morale detail, playing-time promises, and transfer-request approval for the caller's players.
   - name: manager
-    description: The manager's job offer inbox + career actions.
+    description: Manager career surface (offer inbox, resign, and the profile page for any manager in the caller's world).
   - name: admin
     description: World lifecycle, whole-world seeding, country/league administration, offer factory, club-name parts. Admin sessions only.
   - name: competition
@@ -1192,6 +1192,154 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/managers/{id}/profile:
+    get:
+      tags: [manager]
+      summary: Manager profile page
+      operationId: getManagerProfile
+      description: |
+        Full profile for any manager in the caller's world: career stats, active
+        club, trophy cabinet, head-to-head record against the viewer's club, on-the-fly trust
+        score, and the relationship edges (rivalries) attached to the manager and
+        their active club. Cross-world and unknown managers are 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The assembled profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagerProfile" }
+        "404":
+          description: Manager not found or not in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/messages:
+    get:
+      tags: [manager]
+      summary: Direct-message inbox
+      operationId: listMessages
+      description: |
+        The caller's inbound direct messages (newest first, capped at 100) plus
+        the unread count. World-scoped to the caller's manager; sender display
+        names are resolved from person records.
+      responses:
+        "200":
+          description: The inbox page.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboxMessages" }
+    post:
+      tags: [manager]
+      summary: Send a direct message
+      operationId: sendMessage
+      description: |
+        Delivers one manager→manager direct message. The body is sanitized
+        server-side (HTML tags stripped, whitespace trimmed, max 2000
+        characters); recipients must be human managers in the caller's world.
+        Rate limits: 30 messages per minute and 200 per day per sender.
+        Also publishes a MESSAGE_SENT world event and a best-effort
+        social_message realtime push to the recipient's world.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendMessageRequest" }
+            example:
+              recipient_id: 00000000-0000-4000-8000-000000000006
+              body: Good luck this weekend, rival.
+      responses:
+        "201":
+          description: The persisted message.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Message" }
+        "400":
+          description: Missing/invalid recipient or body, self-message, or a policy-bot recipient.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Recipient not found or not in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: Message body exceeds 2000 characters.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Sender over the per-minute or per-day limit.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Seconds until the limiter resets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/messages/{id}/read:
+    post:
+      tags: [manager]
+      summary: Mark a direct message read
+      operationId: markMessageRead
+      description: |
+        Idempotently stamps read_at on one of the caller's inbound messages and
+        returns the updated row. Messages that are not the caller's read as 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The message id.
+      responses:
+        "200":
+          description: The updated message.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Message" }
+        "404":
+          description: Message not found or addressed to someone else.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/relationships:
+    get:
+      tags: [manager]
+      summary: Relationship graph
+      operationId: listRelationships
+      description: |
+        Every rivalry edge attached to the caller: their personal
+        manager↔manager edges plus the club↔club edges of their active club
+        (S06-04c). Edges are auto-tracked from completed fixtures and decay
+        over long gaps. Trust is the on-the-fly SUM of the caller's
+        trust_events (match wins/losses); rivalry reads are authoritative —
+        the relationship_change realtime push is best-effort.
+      responses:
+        "200":
+          description: The caller's rivalry edges.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Relationships" }
+              example:
+                world_id: 00000000-0000-4000-8000-000000000001
+                edges:
+                  - relationship_type: rivalry
+                    entity_type: club
+                    entity_id: 00000000-0000-4000-8000-000000000014
+                    entity_name: Highfield United
+                    strength: 28
+                    trust: 0
+                    sentiment: 0
+        "404":
+          description: Caller's manager row unknown (world boundary).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/offers/{id}/accept:
     post:
       tags: [manager]
@@ -2304,6 +2452,133 @@ components:
         manager_id: { type: string, format: uuid }
         status: { type: string, enum: [pending, accepted, declined, withdrawn] }
         created_at: { type: string, format: date-time }
+    ManagerProfile:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Ada Lovelace }
+        status: { type: string, enum: [active, unemployed, sabbatical, retired] }
+        is_policy_bot: { type: boolean }
+        active_club: { $ref: "#/components/schemas/ClubRef" }
+        career: { $ref: "#/components/schemas/CareerSummary" }
+        trophies:
+          type: array
+          items: { $ref: "#/components/schemas/Trophy" }
+        trust_score: { type: integer }
+        h2h_vs_viewer: { $ref: "#/components/schemas/H2HRecord" }
+        rivalries:
+          type: array
+          items: { $ref: "#/components/schemas/RivalEdge" }
+    InboxMessages:
+      type: object
+      properties:
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/InboxMessage" }
+        unread: { type: integer, description: Messages not yet read }
+    InboxMessage:
+      allOf:
+        - $ref: "#/components/schemas/Message"
+        - type: object
+          properties:
+            sender_name: { type: string, description: Sender display name, empty for AI actors }
+    SendMessageRequest:
+      type: object
+      required: [recipient_id, body]
+      properties:
+        recipient_id: { type: string, format: uuid }
+        body:
+          type: string
+          description: Free text, sanitized server-side; max 2000 characters after stripping.
+    Message:
+      type: object
+      description: One direct message on social.messages.
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        sender_id: { type: string, format: uuid }
+        sender_type: { type: string, enum: [manager, system] }
+        recipient_id: { type: string, format: uuid }
+        recipient_type: { type: string, enum: [manager, system] }
+        subject: { type: string, nullable: true }
+        body: { type: string }
+        sent_at: { type: string, format: date-time }
+        read_at: { type: string, format: date-time, nullable: true }
+    ClubRef:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        country: { type: string }
+    CareerSummary:
+      type: object
+      properties:
+        matches: { type: integer }
+        wins: { type: integer }
+        draws: { type: integer }
+        losses: { type: integer }
+        goals_for: { type: integer }
+        goals_against: { type: integer }
+    Trophy:
+      type: object
+      properties:
+        season: { type: integer }
+        description: { type: string }
+        club_name: { type: string }
+        won_at: { type: string, format: date-time }
+    H2HRecord:
+      type: object
+      description: Head-to-head from the viewing manager's club perspective.
+      properties:
+        matches: { type: integer }
+        wins: { type: integer }
+        draws: { type: integer }
+        losses: { type: integer }
+        goals_for: { type: integer }
+        goals_against: { type: integer }
+    RivalEdge:
+      type: object
+      properties:
+        relationship_type: { type: string, example: rivalry }
+        entity_type: { type: string, enum: [manager, club] }
+        entity_id: { type: string, format: uuid }
+        entity_name: { type: string }
+        strength: { type: integer }
+        trust: { type: integer }
+        sentiment: { type: integer }
+    RelationshipEdge:
+      type: object
+      description: One auto-tracked rivalry edge (club-club or human manager-manager).
+      properties:
+        relationship_type:
+          type: string
+          example: rivalry
+        entity_type:
+          type: string
+          enum: [manager, club]
+          description: The peer attached to the caller's side
+        entity_id:
+          type: string
+          format: uuid
+        entity_name:
+          type: string
+          description: Peer display name (empty for personless AI actors)
+        strength:
+          type: integer
+          description: Accumulated rivalry strength (clamped to -100..100)
+        trust:
+          type: integer
+          description: Static on rivalry edges; trust lives on the manager's trust_events
+        sentiment:
+          type: integer
+          description: Static on rivalry edges; sentiment lives on the player-manager axis
+    Relationships:
+      type: object
+      properties:
+        world_id: { type: string, format: uuid }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/RelationshipEdge" }
     League:
       type: object
       properties:

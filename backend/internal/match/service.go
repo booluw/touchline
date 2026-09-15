@@ -13,6 +13,7 @@ import (
 
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/player"
+	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/matchsim"
@@ -61,6 +62,7 @@ type Service struct {
 	form      *form.Store
 	standings StandingsContext
 	players   *player.Service
+	social    *internalsocial.Service
 }
 
 // NewService builds the match orchestration service.
@@ -75,6 +77,15 @@ func (s *Service) WithStandingsContext(st StandingsContext) { s.standings = st }
 // runs inside the match-completion transaction. nil in tests disables it.
 func (s *Service) WithPlayers(p *player.Service) *Service {
 	s.players = p
+	return s
+}
+
+// WithSocial installs the S06-04c rivalry tracker, whose per-fixture hook runs
+// inside the match-completion transaction (edges + trust + RELATIONSHIP_CHANGED
+// outbox event) and pushes the best-effort realtime envelope after commit.
+// nil in tests disables it.
+func (s *Service) WithSocial(soc *internalsocial.Service) *Service {
+	s.social = soc
 	return s
 }
 
@@ -171,8 +182,20 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 		}
 	}
 
+	// Rivalry graph + trust deltas land atomically with the result (S06-04c).
+	var socialPush *internalsocial.RelationshipPush
+	if s.social != nil {
+		if socialPush, err = s.social.RecordCompletedMatch(ctx, tx, f.WorldID, fixtureID, f.HomeClubID, f.AwayClubID, res.HomeGoals, res.AwayGoals, now); err != nil {
+			return nil, fmt.Errorf("play fixture: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("play fixture: commit: %w", err)
+	}
+
+	if socialPush != nil {
+		s.social.PublishRelationshipChange(ctx, socialPush)
 	}
 
 	return &MatchResult{

@@ -27,6 +27,7 @@ import (
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
 	internalplayer "github.com/touchline/backend/internal/player"
+	internalsocial "github.com/touchline/backend/internal/social"
 	internalsquad "github.com/touchline/backend/internal/squad"
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/testdb"
@@ -46,7 +47,8 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 
 	cfg := pkgauth.JWTConfig{Secret: "api-integration-secret", AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
 
-	hub := realtime.NewHub(realtime.NewLocalBroker(),
+	broker := realtime.NewLocalBroker()
+	hub := realtime.NewHub(broker,
 		realtime.WithOriginPatterns(httpapi.OriginHostPattern("http://localhost:3000")))
 	go func() { _ = hub.Run(context.Background()) }()
 	t.Cleanup(func() { _ = hub.Close() })
@@ -56,6 +58,9 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 	transfersSvc.WithPlayerLifecycle(playersSvc)
 	matchSvc := internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool))
 	matchSvc.WithPlayers(playersSvc)
+	socialSvc := internalsocial.NewService(pool, nil)
+	socialSvc.WithRealtime(broker)
+	matchSvc.WithSocial(socialSvc)
 
 	s := httpapi.New(httpapi.Options{
 		Auth:          internalauth.NewService(pool, cfg),
@@ -71,6 +76,7 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 		Board:         internalboard.NewService(pool, nil, internalmanager.NewService(pool, nil)),
 		Finance:       internalfinance.NewService(pool, nil),
 		Player:        playersSvc,
+		Social:        socialSvc,
 		JWT:           cfg,
 		Pool:          pool,
 		CookiesSecure: false,

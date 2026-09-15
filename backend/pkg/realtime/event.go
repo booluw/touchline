@@ -61,6 +61,17 @@ const (
 	// minute's persisted match_events rows plus the server-computed scoreline;
 	// the client renders it verbatim and never derives outcomes.
 	EventMatchTick = "match_tick"
+	// EventSocialMessage is pushed to a world's socket feed when a direct
+	// manager→manager message lands (S06-04b). Its payload carries the
+	// persisted message plus the sender's display name; the client routes it to
+	// the recipient's inbox. Postgres stays authoritative — the push is
+	// best-effort and the inbox read remains the source of truth.
+	EventSocialMessage = "social_message"
+	// EventRelationshipChange is pushed to a world's socket feed when a
+	// completed fixture creates or updates a rivalry edge (S06-04c). Its payload
+	// carries the fixture pair plus the changed edges; the graph read (profile /
+	// /api/relationships) stays authoritative — the push is best-effort.
+	EventRelationshipChange = "relationship_change"
 	// EventPong answers a client ping.
 	EventPong = "pong"
 	// EventError reports a client-side protocol problem (unknown type, malformed

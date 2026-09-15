@@ -1,50 +1,58 @@
 package social
 
-import "github.com/google/uuid"
+import (
+	"time"
 
+	"github.com/google/uuid"
+)
+
+// Relationship is one polymorphic graph edge on social.relationships
+// (entity_a ↔ entity_b with relationship_type and signed strength/trust/
+// sentiment). Entity types are player, manager, club; relationship types
+// include rivalry, friendship, mentorship, professional_respect, dislike,
+// family, national_team, academy, former_teammate, former_manager, agent.
 type Relationship struct {
 	ID                uuid.UUID `json:"id"`
+	WorldID           uuid.UUID `json:"world_id"`
 	EntityAID         uuid.UUID `json:"entity_a_id"`
-	EntityAType       string    `json:"entity_a_type"` // player, manager, club
+	EntityAType       string    `json:"entity_a_type"`
 	EntityBID         uuid.UUID `json:"entity_b_id"`
 	EntityBType       string    `json:"entity_b_type"`
-	RelationshipType  string    `json:"relationship_type"` // friendship, rivalry, mentorship, professional_respect, dislike, family, national_team, academy, former_teammate, former_manager, agent
+	RelationshipType  string    `json:"relationship_type"`
 	Strength          int       `json:"strength"`
 	Trust             int       `json:"trust"`
 	Sentiment         int       `json:"sentiment"`
-	LastInteractionAt string    `json:"last_interaction_at"`
+	LastInteractionAt time.Time `json:"last_interaction_at"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
+// Message is one direct message on social.messages (S06-04b).
 type Message struct {
-	ID         uuid.UUID `json:"id"`
-	WorldID    uuid.UUID `json:"world_id"`
-	SenderID   uuid.UUID `json:"sender_id"`
-	ReceiverID uuid.UUID `json:"receiver_id"`
-	Content    string    `json:"content"`
-	Read       bool      `json:"read"`
-	CreatedAt  string    `json:"created_at"`
+	ID            uuid.UUID  `json:"id"`
+	WorldID       uuid.UUID  `json:"world_id"`
+	SenderID      uuid.UUID  `json:"sender_id"`
+	SenderType    string     `json:"sender_type"` // manager, system
+	RecipientID   uuid.UUID  `json:"recipient_id"`
+	RecipientType string     `json:"recipient_type"` // manager, system
+	Subject       *string    `json:"subject"`
+	Body          string     `json:"body"`
+	SentAt        time.Time  `json:"sent_at"`
+	ReadAt        *time.Time `json:"read_at"`
 }
 
+// Promise is one structured social.promises row. S06-03 writes playing-time
+// promises; later sprints extend the promise library.
 type Promise struct {
-	ID            uuid.UUID `json:"id"`
-	ManagerID     uuid.UUID `json:"manager_id"`
-	PlayerID      uuid.UUID `json:"player_id"`
-	Description   string    `json:"description"`
-	Deadline      string    `json:"deadline"`
-	Confidence    int       `json:"confidence"`
-	Importance    int       `json:"importance"`
-	Status        string    `json:"status"` // pending, fulfilled, broken
-	Consequence   string    `json:"consequence"`
-}
-
-type ManagerTrustScore struct {
-	ManagerID  uuid.UUID `json:"manager_id"`
-	WorldID    uuid.UUID `json:"world_id"`
-	Score      int       `json:"score"` // derived from event log: broken promises, honored trades, disputes
-}
-
-type Service interface {
-	GetRelationships(entityID uuid.UUID) ([]*Relationship, error)
-	SendMessage(msg *Message) error
-	GetMessages(userID uuid.UUID) ([]*Message, error)
+	ID           uuid.UUID  `json:"id"`
+	WorldID      uuid.UUID  `json:"world_id"`
+	PlayerID     uuid.UUID  `json:"player_id"`
+	ManagerID    uuid.UUID  `json:"manager_id"`
+	PromiseType  string     `json:"promise_type"`
+	Explicitness string     `json:"explicitness"`
+	Deadline     *time.Time `json:"deadline"`
+	Confidence   int        `json:"confidence"`
+	Importance   int        `json:"importance"`
+	Status       string     `json:"status"` // pending, fulfilled, broken, adapted
+	CreatedAt    time.Time  `json:"created_at"`
+	ResolvedAt   *time.Time `json:"resolved_at"`
 }
