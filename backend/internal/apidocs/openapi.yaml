@@ -37,6 +37,12 @@ tags:
     description: Club reads + lineup/tactics/training-plan commands (world-scoped to caller).
   - name: finance
     description: Club finances, ledger, contracts (owning manager only).
+  - name: transfer
+    description: Transfer market listings, bids, and negotiation (world-scoped).
+  - name: board
+    description: Board confidence, job security snapshot, and mandate negotiation for the caller's club.
+  - name: player
+    description: Squad morale detail, playing-time promises, and transfer-request approval for the caller's players.
   - name: manager
     description: The manager's job offer inbox + career actions.
   - name: admin
@@ -998,7 +1004,7 @@ paths:
       tags: [player]
       summary: One player's morale detail
       operationId: getPlayerMorale
-      description: The full morale picture of one of the caller's players with the 'why': role expectations vs the whole-season share, the satisfaction status and pull target, any open transfer request, and the durable player-manager history behind it.
+      description: "The full morale picture of one of the caller's players with the 'why': role expectations vs the whole-season share, the satisfaction status and pull target, any open transfer request, and the durable player-manager history behind it."
       parameters:
         - name: id
           in: path
@@ -1024,11 +1030,12 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/promise-playing-time:
     post:
       tags: [player]
       summary: Promise playing time
       operationId: promisePlayingTime
-      description: Records the manager's explicit increase_playing_time promise to the player. The promise is graded weekly: a share that meets the role entitlement is fulfilled, an overdue one is broken. Stopgap for satisfied-but-anxious players without opening a transfer request.
+      description: "Records the manager's explicit increase_playing_time promise to the player. The promise is graded weekly: a share that meets the role entitlement is fulfilled, an overdue one is broken. Stopgap for satisfied-but-anxious players without opening a transfer request."
       parameters:
         - name: id
           in: path
@@ -1062,7 +1069,7 @@ paths:
       tags: [player]
       summary: Approve a transfer request
       operationId: approveTransferRequest
-      description: Honors the player's open transfer request: it closes as approved and the player is listed on the market at market value (open to offers). The approval is recorded as a world event and on the player-manager relationship history.
+      description: "Honors the player's open transfer request: it closes as approved and the player is listed on the market at market value (open to offers). The approval is recorded as a world event and on the player-manager relationship history."
       parameters:
         - name: id
           in: path
@@ -1102,7 +1109,7 @@ paths:
       tags: [player]
       summary: Deny a transfer request
       operationId: denyTransferRequest
-      description: Rejects the player's open request: the player takes a morale hit and cools down before asking again. Recorded on the player-manager relationship history.
+      description: "Rejects the player's open request: the player takes a morale hit and cools down before asking again. Recorded on the player-manager relationship history."
       parameters:
         - name: id
           in: path
@@ -1319,7 +1326,12 @@ paths:
       operationId: setWorldConfig
       parameters:
         - $ref: "#/components/parameters/WorldID"
-      description: Sets one world_config key (e.g. match tick cadence).
+      description: |
+        Sets one world_config key, e.g. a tick cadence (`tick.hourly_cadence`,
+        `tick.daily_cadence`, `tick.weekly_cadence`, `tick.monthly_cadence`,
+        `tick.seasonal_cadence`; `tick.match_cadence` is seeded but ignored by
+        the world clock — see OPD-17(2)). Re-read every `SCHEDULER_POLL_INTERVAL`,
+        so a change takes effect without a redeploy.
       requestBody:
         required: true
         content:
@@ -1330,11 +1342,11 @@ paths:
               properties:
                 key:
                   type: string
-                  enum: [match_tick_cadence]
-                  example: match_tick_cadence
+                  example: tick.daily_cadence
                 value:
                   type: string
-                  example: "*/15 * * * *"
+                  description: 5-field cron spec.
+                  example: "30 0 * * *"
       responses:
         "200":
           description: Config written.
@@ -1342,7 +1354,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Status"
-              example: { ok: true }
+              example: { status: ok }
         "400":
           description: Missing key.
           content:
@@ -1929,12 +1941,64 @@ components:
       type: object
       required: [target_value]
       properties:
-        target_value: { type: string, description: Bounded numeric target as a string, e.g. "6" for finishes or "62" for points. }
+        target_value: { type: string, description: "Bounded numeric target as a string, e.g. \"6\" for finishes or \"62\" for points." }
     NegotiationResult:
       type: object
       properties:
         mandate: { $ref: "#/components/schemas/Mandate" }
         explanation: { $ref: "#/components/schemas/Explanation" }
+    SquadMorale:
+      type: object
+      description: One roster player's morale/role/playing-time read model (S06-03).
+      properties:
+        player_id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        position: { type: string }
+        squad_role: { type: string, enum: [key_player, rotation, squad_player, development] }
+        morale: { type: number, format: float }
+        playing_time_pct: { type: number, format: float, description: Whole-season minutes / (90 x club matches), capped at 1. }
+        transfer_request_status: { type: string, nullable: true, enum: [pending, approved, denied, withdrawn, auto_listed, reassured] }
+        squad_number: { type: integer, nullable: true }
+    PlayerMorale:
+      type: object
+      description: One player's full morale picture with the "why" (S06-03).
+      properties:
+        player_id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        position: { type: string }
+        squad_role: { type: string, enum: [key_player, rotation, squad_player, development] }
+        morale: { type: number, format: float }
+        playing_time_pct: { type: number, format: float }
+        expectations:
+          type: array
+          items: { $ref: "#/components/schemas/MoraleExpectation" }
+        explanation:
+          type: object
+          additionalProperties: true
+        transfer_request: { $ref: "#/components/schemas/TransferRequest" }
+        relationship_history:
+          type: array
+          description: Durable player-manager journal (history only).
+          items: { $ref: "#/components/schemas/RelationshipEvent" }
+    MoraleExpectation:
+      type: object
+      description: The agreed role vs the whole-season share and the resulting satisfaction status.
+      properties:
+        label: { type: string }
+        expected: { type: string }
+        current: { type: number, format: float }
+        status: { type: string, enum: [satisfied, neutral, unhappy, free] }
+    RelationshipEvent:
+      type: object
+      description: One journal row on the player-manager memory.
+      properties:
+        event_type: { type: string }
+        sentiment_delta: { type: integer }
+        created_at: { type: string, format: date-time }
     WorldChoice:
       type: object
       description: One joined world offered by the login world picker / registration join.
@@ -2216,6 +2280,20 @@ components:
         explanation:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/Explanation" }]
+    TransferRequest:
+      type: object
+      description: A player's open (or resolved) request to leave the club.
+      properties:
+        id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        club_id: { type: string, format: uuid }
+        manager_id: { type: string, format: uuid }
+        reason: { type: string, example: playing_time }
+        status: { type: string, enum: [pending, approved, denied, withdrawn, auto_listed, reassured] }
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        reassured_until: { type: string, format: date-time, nullable: true }
+
     JobOffer:
       type: object
       properties:

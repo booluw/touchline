@@ -2,6 +2,8 @@
 -- 0040 down: reverse player morale/appearances/requests + social journal
 -- =====================================================================
 
+DROP INDEX IF EXISTS uq_relationship_player_manager;
+
 DROP TABLE IF EXISTS social.relationship_events;
 
 DROP TABLE IF EXISTS player.player_transfer_requests;

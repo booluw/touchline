@@ -137,7 +137,7 @@ func WeeklyRecovery(current float64, professionalism int) float64 {
 	pro := clampInt(professionalism, 0, 100)
 	f := RecoveryAtPro0 + (RecoveryAtPro100-RecoveryAtPro0)*float64(pro)/100
 	alpha := WeeklyRecoveryAlpha * f
-	return round4(current + alpha*(MoraleNeutralBaseline-current))
+	return clamp01(round4(current+alpha*(MoraleNeutralBaseline-current)), 0, 1)
 }
 
 // PlayingTimeRatio converts aggregated minutes and the club's played-match

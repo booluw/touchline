@@ -14,11 +14,11 @@ import (
 	internalfinance "github.com/touchline/backend/internal/finance"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
+	internalplayer "github.com/touchline/backend/internal/player"
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	internaltraining "github.com/touchline/backend/internal/training"
 	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
-	internalplayer "github.com/touchline/backend/internal/player"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/realtime"
 )

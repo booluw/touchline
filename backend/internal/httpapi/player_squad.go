@@ -13,6 +13,8 @@ import (
 
 func playerStatus(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, internalplayer.ErrPlayerNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "player not found"})
 	case errors.Is(err, internalplayer.ErrManagerHasNoClub):
 		c.JSON(http.StatusConflict, gin.H{"error": "no active club"})
 	case errors.Is(err, internalplayer.ErrRequestNotFound):

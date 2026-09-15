@@ -45,6 +45,6 @@ const docsHTML = `<!doctype html>
   </head>
   <body>
     <script id="api-reference" data-url="/api/openapi.yaml"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.27.7/dist/browser/standalone.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1"></script>
   </body>
 </html>`

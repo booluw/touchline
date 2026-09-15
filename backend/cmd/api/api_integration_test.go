@@ -26,6 +26,7 @@ import (
 	"github.com/touchline/backend/internal/httpapi"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
+	internalplayer "github.com/touchline/backend/internal/player"
 	internalsquad "github.com/touchline/backend/internal/squad"
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/testdb"
@@ -50,6 +51,12 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 	go func() { _ = hub.Run(context.Background()) }()
 	t.Cleanup(func() { _ = hub.Close() })
 
+	transfersSvc := internaltransfer.NewService(pool, nil)
+	playersSvc := internalplayer.NewService(pool, nil, transfersSvc)
+	transfersSvc.WithPlayerLifecycle(playersSvc)
+	matchSvc := internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool))
+	matchSvc.WithPlayers(playersSvc)
+
 	s := httpapi.New(httpapi.Options{
 		Auth:          internalauth.NewService(pool, cfg),
 		World:         internalworld.NewService(pool, nil),
@@ -57,12 +64,13 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 		Club:          internalclub.NewService(pool),
 		Bootstrap:     internalbootstrap.NewService(pool, nil),
 		Competition:   internalcompetition.NewService(pool, nil),
-		Match:         internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool)),
+		Match:         matchSvc,
 		Tactics:       internaltactics.NewService(pool, nil, internalsquad.NewStore(pool)),
 		Training:      internaltraining.NewService(pool, nil),
-		Transfers:     internaltransfer.NewService(pool, nil),
+		Transfers:     transfersSvc,
 		Board:         internalboard.NewService(pool, nil, internalmanager.NewService(pool, nil)),
 		Finance:       internalfinance.NewService(pool, nil),
+		Player:        playersSvc,
 		JWT:           cfg,
 		Pool:          pool,
 		CookiesSecure: false,

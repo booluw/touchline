@@ -75,7 +75,9 @@ func loadMoraleVars(ctx context.Context, q dbtx, playerID uuid.UUID) (moraleVars
 
 // refreshShare computes and persists the player's whole-season share within
 // the club whose shirt they currently wear (a transferred player's prior-club
-// minutes never count).
+// minutes never count). Scope: completed matches only — appearances and the
+// club's completed-match count only ever exist for finished matches, and in
+// active play those span the current season.
 func refreshShare(ctx context.Context, q dbtx, playerID uuid.UUID) (float64, error) {
 	var clubID uuid.UUID
 	if err := q.QueryRow(ctx, `SELECT club_id FROM player.players WHERE id = $1`, playerID).Scan(&clubID); err != nil {
@@ -83,11 +85,16 @@ func refreshShare(ctx context.Context, q dbtx, playerID uuid.UUID) (float64, err
 	}
 	var minutes, matches int
 	err := q.QueryRow(ctx, `
-		SELECT COALESCE(SUM(pa.minutes), 0), COUNT(DISTINCT m.id)
-		FROM player.player_appearances pa
-		JOIN match.matches m ON m.id = pa.match_id
+		SELECT COALESCE((
+				SELECT SUM(pa.minutes) FROM player.player_appearances pa
+				JOIN match.matches m1 ON m1.id = pa.match_id
+				JOIN match.fixtures f1 ON f1.id = m1.fixture_id
+				WHERE pa.player_id = $1 AND (f1.home_club_id = $2 OR f1.away_club_id = $2)
+			), 0),
+		       COUNT(DISTINCT m.id)
+		FROM match.matches m
 		JOIN match.fixtures f ON f.id = m.fixture_id
-		WHERE pa.player_id = $1 AND (f.home_club_id = $2 OR f.away_club_id = $2)`,
+		WHERE m.status = 'completed' AND (f.home_club_id = $2 OR f.away_club_id = $2)`,
 		playerID, clubID,
 	).Scan(&minutes, &matches)
 	if err != nil {
