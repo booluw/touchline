@@ -90,6 +90,12 @@ func (s *server) router() *gin.Engine {
 		api.GET("/transfers/bids", s.requireAuth, s.handleListBids)
 		api.POST("/transfers/bids/:id/respond", s.requireAuth, s.handleRespondBid)
 
+		// Board (S06-02): confidence + structured mandates, sporting-target
+		// negotiation. World-scoped like the transfer market; the board is
+		// always that of the caller's current club.
+		api.GET("/managers/me/board", s.requireAuth, s.handleBoardView)
+		api.POST("/managers/me/board/mandates/:id/negotiate", s.requireAuth, s.handleNegotiateMandate)
+
 		// Admin: world lifecycle (S02-02), whole-world seeding (clubs + players
 		// + memberships, launch model), media aid offers, country-scoped league
 		// administration (S04-01).

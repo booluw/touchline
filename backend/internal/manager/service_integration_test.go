@@ -165,7 +165,7 @@ func TestJobOffer_SackAppendsNegativeReputation(t *testing.T) {
 	if _, err := svc.AcceptJobOffer(ctx, o.ID, managerRow); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if err := svc.Sack(ctx, managerRow); err != nil {
+	if err := svc.Sack(ctx, managerRow, nil); err != nil {
 		t.Fatalf("sack: %v", err)
 	}
 

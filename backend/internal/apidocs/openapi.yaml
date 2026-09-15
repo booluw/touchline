@@ -901,6 +901,65 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/managers/me/board:
+    get:
+      tags: [board]
+      summary: My club's board status
+      operationId: getBoard
+      description: The board's confidence in the caller, its factor snapshot and explanation, and the current season's structured mandates. Reading the board refreshes the current-tick snapshot (idempotent).
+      responses:
+        "200":
+          description: The board view for the caller's club.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BoardView" }
+        "409":
+          description: The manager has no active club to be judged by.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/managers/me/board/mandates/{id}/negotiate:
+    post:
+      tags: [board]
+      summary: Negotiate a mandate target
+      operationId: negotiateMandate
+      description: Proposes a bounded new target for one open sporting mandate (league_finish or points_target). Off-window proposals are rejected with 400; the board's own personality decides whether a borderline softening is accepted. Accepted proposals flip the mandate to agreed and are recorded as events.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000021" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NegotiationInput" }
+      responses:
+        "200":
+          description: The updated mandate with the board's explanation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NegotiationResult" }
+        "400":
+          description: Off-window proposal or non-negotiable mandate type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the manager's mandate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Mandate not found (or not in this world).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Mandate already resolved or the board rejected the proposal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/managers/me/offers:
     get:
       tags: [manager]
@@ -1647,6 +1706,59 @@ components:
       type: object
       properties:
         status: { type: string, example: ok }
+    Mandate:
+      type: object
+      description: One structured board target for a (club, manager, season).
+      properties:
+        id: { type: string, format: uuid }
+        club_id: { type: string, format: uuid }
+        manager_id: { type: string, format: uuid }
+        season: { type: integer }
+        category: { type: string, enum: [primary, secondary, strategic, financial] }
+        description: { type: string }
+        target_type: { type: string, enum: [league_finish, points_target, wage_structure, operating_balance] }
+        target_value: { type: string }
+        status: { type: string, enum: [pending, agreed, met, broken] }
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+    BoardSnapshot:
+      type: object
+      description: The latest job-security factor snapshot (0-100 each).
+      properties:
+        manager_id: { type: string, format: uuid }
+        club_id: { type: string, format: uuid }
+        world_tick: { type: integer }
+        scores:
+          type: object
+          properties:
+            performance_score: { type: integer }
+            expectations_score: { type: integer }
+            financial_score: { type: integer }
+            board_relationship_score: { type: integer }
+            club_dna_alignment_score: { type: integer }
+            supporter_sentiment_score: { type: integer }
+            alternatives_score: { type: integer }
+            total_score: { type: integer }
+    BoardView:
+      type: object
+      description: The board's current view for one manager.
+      properties:
+        confidence: { type: integer }
+        snapshot: { $ref: "#/components/schemas/BoardSnapshot" }
+        explanation: { $ref: "#/components/schemas/Explanation" }
+        mandates:
+          type: array
+          items: { $ref: "#/components/schemas/Mandate" }
+    NegotiationInput:
+      type: object
+      required: [target_value]
+      properties:
+        target_value: { type: string, description: Bounded numeric target as a string, e.g. "6" for finishes or "62" for points. }
+    NegotiationResult:
+      type: object
+      properties:
+        mandate: { $ref: "#/components/schemas/Mandate" }
+        explanation: { $ref: "#/components/schemas/Explanation" }
     WorldChoice:
       type: object
       description: One joined world offered by the login world picker / registration join.

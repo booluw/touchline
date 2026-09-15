@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	internalboard "github.com/touchline/backend/internal/board"
 	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/internal/playerpool"
 	"github.com/touchline/backend/pkg/eventbus"
@@ -259,6 +260,14 @@ func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worl
 		return nil, fmt.Errorf("insert club: %w", err)
 	}
 
+	// 1b. Deterministic board profile: club DNA, the owning board's persona,
+	// and the supporter group's baseline (S06-02 reads these on the weekly
+	// review). Seeded from the club's identity so the profile never changes.
+	profile, persona, _ := profileFor(clubName, clubID)
+	if err := seedBoardProfile(ctx, tx, clubID, profile, persona); err != nil {
+		return nil, err
+	}
+
 	// 2. Its policy-bot manager (offer-origination boundary stays OPD-16).
 	var managerID uuid.UUID
 	if err := tx.QueryRow(ctx, `
@@ -329,6 +338,38 @@ func GenerateAIClub(ctx context.Context, pub eventbus.Publisher, tx pgx.Tx, worl
 		SquadSize: len(players),
 		Players:   players,
 	}, nil
+}
+
+// seedBoardProfile writes the deterministic club DNA, board and supporter
+// group rows in one tx. Any column set later is fine to leave at its seeded
+// value; the review engine re-reads whatever is stored.
+func seedBoardProfile(ctx context.Context, tx pgx.Tx, clubID uuid.UUID, p clubProfile, persona internalboard.Persona) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO club.club_dna (
+			club_id, competitive_ambition, financial_philosophy, recruitment_philosophy,
+			academy_importance, patience, managerial_control, star_power_preference,
+			wage_tolerance, selling_philosophy, tactical_identity, cultural_identity, archetype)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		clubID, p.ambition, p.financialPhilosophy, p.recruitmentPhilosophy,
+		p.academyImportance, p.patience, p.managerialControl, p.starPowerPreference,
+		p.wageTolerance, p.sellingPhilosophy, p.tacticalIdentity, p.culturalIdentity, p.archetype); err != nil {
+		return fmt.Errorf("insert club dna: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO club.boards (club_id, personality_type) VALUES ($1, $2)`,
+		clubID, persona); err != nil {
+		return fmt.Errorf("insert club board: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO club.supporter_groups (
+			club_id, patience, ambition, loyalty, identity, rivalry_intensity_base,
+			financial_sensitivity, current_sentiment)
+		VALUES ($1, $2, $3, $4, $5, 0, $6, 50)`,
+		clubID, p.patience, p.ambition, p.supporterLoyalty, p.supporterIdentity,
+		p.supporterFinancialSensitivity); err != nil {
+		return fmt.Errorf("insert supporter group: %w", err)
+	}
+	return nil
 }
 
 // recordEvent appends one world.events row inside the caller's transaction and,

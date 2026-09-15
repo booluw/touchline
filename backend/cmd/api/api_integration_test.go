@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalauth "github.com/touchline/backend/internal/auth"
+	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
 	internalcompetition "github.com/touchline/backend/internal/competition"
@@ -60,6 +61,7 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 		Tactics:       internaltactics.NewService(pool, nil, internalsquad.NewStore(pool)),
 		Training:      internaltraining.NewService(pool, nil),
 		Transfers:     internaltransfer.NewService(pool, nil),
+		Board:         internalboard.NewService(pool, nil, internalmanager.NewService(pool, nil)),
 		Finance:       internalfinance.NewService(pool, nil),
 		JWT:           cfg,
 		Pool:          pool,

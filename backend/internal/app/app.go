@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/uuid"
 	internalauth "github.com/touchline/backend/internal/auth"
+	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
 	internalcompetition "github.com/touchline/backend/internal/competition"
@@ -104,6 +105,7 @@ type App struct {
 	Training  *training.Service
 	Finance   *finance.Service
 	Transfers *internaltransfer.Service
+	Board     *internalboard.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
 }
@@ -146,13 +148,15 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	trainingSvc := training.NewService(pool, bus)
 	financeSvc := finance.NewService(pool, bus)
 	transfersSvc := internaltransfer.NewService(pool, bus)
+	managerSvc := internalmanager.NewService(pool, bus)
+	boardSvc := internalboard.NewService(pool, bus, managerSvc)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
 	httpSrv := httpapi.New(httpapi.Options{
 		Auth:          internalauth.NewService(pool, jwt),
 		World:         internalworld.NewService(pool, bus),
-		Manager:       internalmanager.NewService(pool, bus),
+		Manager:       managerSvc,
 		Club:          internalclub.NewService(pool),
 		Bootstrap:     internalbootstrap.NewService(pool, bus),
 		Competition:   compSvc,
@@ -161,6 +165,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Training:      trainingSvc,
 		Finance:       financeSvc,
 		Transfers:     transfersSvc,
+		Board:         boardSvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -183,6 +188,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Training:   trainingSvc,
 		Finance:    financeSvc,
 		Transfers:  transfersSvc,
+		Board:      boardSvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -301,6 +307,11 @@ func (a *App) RunWorker(ctx context.Context) error {
 		if payload.Granularity == "weekly" {
 			if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
+			}
+			if reviewed, sacked, err := a.Board.WeeklyReview(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s weekly board review: %w", ev.WorldID, err)
+			} else {
+				log.Printf("world %s weekly board review: %d reviewed, %d sacked", ev.WorldID, reviewed, sacked)
 			}
 		}
 		if payload.Granularity == "monthly" {

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/pkg/eventbus"
+	"github.com/touchline/backend/pkg/explanation"
 )
 
 // Sentinel errors. Handlers map these to HTTP status codes; everything else
@@ -329,7 +330,7 @@ func (s *Service) AcceptJobOffer(ctx context.Context, offerID, managerID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	eventID, err := s.recordEvent(ctx, tx, worldID, "JOB_OFFER_ACCEPTED", "manager", managerID, payload)
+	eventID, err := s.recordEvent(ctx, tx, worldID, "JOB_OFFER_ACCEPTED", "manager", managerID, payload, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -386,19 +387,21 @@ func (s *Service) DeclineJobOffer(ctx context.Context, offerID, managerID uuid.U
 
 // Resign has the manager quit their current club (self-service, actor=manager).
 func (s *Service) Resign(ctx context.Context, managerID uuid.UUID) error {
-	return s.endAssignment(ctx, managerID, "resign", "manager")
+	return s.endAssignment(ctx, managerID, "resign", "manager", nil)
 }
 
-// Sack terminates the manager's assignment with cause (actor=board). Wired for
-// the future board/hiring engine (S06); nothing calls it over HTTP yet.
-func (s *Service) Sack(ctx context.Context, managerID uuid.UUID) error {
-	return s.endAssignment(ctx, managerID, "sack", "board")
+// Sack terminates the manager's assignment with cause (actor=board), carrying
+// the board's structured reasoning so the event log explains the decision.
+// Wired for the board/hiring engine (S06); explanation may be nil.
+func (s *Service) Sack(ctx context.Context, managerID uuid.UUID, exp *explanation.Explanation) error {
+	return s.endAssignment(ctx, managerID, "sack", "board", exp)
 }
 
 // endAssignment closes the current assignment: manager to unemployed, club back
 // to AI control, history row closed, event + reputation delta appended. The
-// history row is never deleted — the career log is append-only.
-func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason, actorType string) error {
+// history row is never deleted — the career log is append-only. An optional
+// explanation rides on the terminating event (MANAGER_SACKED).
+func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason, actorType string, exp *explanation.Explanation) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin end-assignment tx: %w", err)
@@ -442,7 +445,13 @@ func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason
 	if err != nil {
 		return err
 	}
-	eventID, err := s.recordEvent(ctx, tx, worldID, eventType, actorType, managerID, payload)
+	var explanationJSON []byte
+	if exp != nil {
+		if explanationJSON, err = json.Marshal(exp); err != nil {
+			return fmt.Errorf("marshal sack explanation: %w", err)
+		}
+	}
+	eventID, err := s.recordEvent(ctx, tx, worldID, eventType, actorType, managerID, payload, explanationJSON)
 	if err != nil {
 		return err
 	}
@@ -464,14 +473,15 @@ func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason
 // transactional outbox, OPD-23). Dispatch can never be lost between a committed
 // state change and a separate publish call, and publish errors are never
 // silently swallowed — a failure aborts the enclosing tx.
-func (s *Service) recordEvent(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, eventType, actorType string, actorID uuid.UUID, payload []byte) (*uuid.UUID, error) {
+func (s *Service) recordEvent(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, eventType, actorType string, actorID uuid.UUID, payload, explanationJSON []byte) (*uuid.UUID, error) {
 	actor := actorType
 	e := eventbus.Event{
-		WorldID:   worldID,
-		EventType: eventType,
-		ActorType: &actor,
-		ActorID:   &actorID,
-		Payload:   payload,
+		WorldID:     worldID,
+		EventType:   eventType,
+		ActorType:   &actor,
+		ActorID:     &actorID,
+		Payload:     payload,
+		Explanation: explanationJSON,
 	}
 	if err := eventbus.WriteTx(ctx, s.bus, tx, &e); err != nil {
 		return nil, fmt.Errorf("record %s event: %w", eventType, err)

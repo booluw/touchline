@@ -120,6 +120,8 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0035 | `finance` | Ledger accounting: `income`/`expense` correction + per-entry dedup guard (`finance.ledger_entry_scope`, S05-02) |
 | 0036 | `player` / `club` / `world` | Player lifecycle foundations: `player_origin` + `country_id` pools, academy investment tiers, seasonal street-kid intake anchor (A01) |
 | 0037 | `competition` / `world` | Launch-model seeding: season-independent `competition.club_competitions` (role league/cup, one-league-per-club) + `world.worlds.world_seed` replay seed |
+| 0038 | `transfer` | Transfer-market integrity: one active listing + one open bid unique constraints, seller/buyer foreign keys (S06-01) |
+| 0039 | `club` | Board integrity: one open mandate per (club, manager, season, category), partial over pending/agreed (S06-02) |
 
 ### River migrations (0016–0022)
 

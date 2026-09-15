@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS uq_board_mandate_open_per_category;

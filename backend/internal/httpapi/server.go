@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalauth "github.com/touchline/backend/internal/auth"
+	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
 	internalcompetition "github.com/touchline/backend/internal/competition"
@@ -36,6 +37,7 @@ type server struct {
 	trainingSvc   *internaltraining.Service
 	financeSvc    *internalfinance.Service
 	transfersSvc  *internaltransfer.Service
+	boardSvc      *internalboard.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -58,6 +60,7 @@ type Options struct {
 	Training      *internaltraining.Service
 	Finance       *internalfinance.Service
 	Transfers     *internaltransfer.Service
+	Board         *internalboard.Service
 	JWT           pkgjwt.JWTConfig
 	Pool          *pgxpool.Pool
 	CookiesSecure bool
@@ -79,6 +82,7 @@ func New(opts Options) *Server {
 		trainingSvc:   opts.Training,
 		financeSvc:    opts.Finance,
 		transfersSvc:  opts.Transfers,
+		boardSvc:      opts.Board,
 		jwtCfg:        opts.JWT,
 		pool:          opts.Pool,
 		cookiesSecure: opts.CookiesSecure,
