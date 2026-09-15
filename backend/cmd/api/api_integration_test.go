@@ -190,9 +190,9 @@ func login(t *testing.T, ts *httptest.Server, client *http.Client, email, passwo
 }
 
 // loginManager returns a manager-scoped session cookie header for the named
-// user, bypassing the login endpoint. This is the correct way to test
-// world-scoped manager reads under the phase-1 login gate (which only admits
-// admins into world-less console sessions).
+// user, bypassing the login endpoint. This keeps world-scoped manager reads
+// isolated from the account-resolution rules: fixtures mint a manager row and
+// token directly instead of going through OPD-15(4) login.
 func loginManager(t *testing.T, ts *httptest.Server, pool *pgxpool.Pool, email string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -231,12 +231,18 @@ func TestHTTPAdminWorldLifecycle(t *testing.T) {
 	testdb.MakeAdmin(t, pool, admin)
 	adminCookies := login(t, ts, client, "admin@example.com", "s3cret")
 
-	// A non-admin account cannot obtain a session at all (launch gate), so a
-	// forbidden plain login is the only 403 an outsider reaches here.
+	// A non-admin account with a joined world now logs in as a manager
+	// (OPD-15(4)); an account with NO joined world still cannot obtain a
+	// session (ErrNoManager) — that is the only login 403 an outsider reaches.
 	testdb.CreateUser(t, pool, "plain@example.com", "s3cret", []testdb.Join{{WorldID: w}})
 	if resp := post(t, ts, client, "/api/auth/login",
-		`{"email":"plain@example.com","password":"s3cret"}`, ""); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin login = %d, want 403", resp.StatusCode)
+		`{"email":"plain@example.com","password":"s3cret"}`, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("plain manager login = %d, want 200", resp.StatusCode)
+	}
+	testdb.CreateUser(t, pool, "noworld@example.com", "s3cret", nil)
+	if resp := post(t, ts, client, "/api/auth/login",
+		`{"email":"noworld@example.com","password":"s3cret"}`, ""); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("no-world login = %d, want 403", resp.StatusCode)
 	}
 
 	// Unauthenticated admin routes are 401.

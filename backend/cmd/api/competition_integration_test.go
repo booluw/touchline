@@ -37,11 +37,9 @@ func TestHTTPCompetitionAdminAndReads(t *testing.T) {
 	plain := testdb.CreateUser(t, pool, "leagueplain@example.com", "s3cret", []testdb.Join{{WorldID: mustParseUUID(t, worldID)}})
 	adminCookies := login(t, ts, client, "leagueadmin@example.com", "s3cret")
 
-	// Non-admins cannot login at all (launch gate) — the console is admin-only.
-	if resp := post(t, ts, client, "/api/auth/login",
-		`{"email":"leagueplain@example.com","password":"s3cret"}`, ""); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("plain login = %d, want 403", resp.StatusCode)
-	}
+	// A non-admin account with a joined world now resolves to a manager session
+	// (OPD-15(4)(c)) — the console stays admin-only, not the login.
+	_ = login(t, ts, client, "leagueplain@example.com", "s3cret")
 
 	// Unauthenticated admin routes are 401.
 	if resp := post(t, ts, client, "/api/admin/countries",

@@ -172,9 +172,15 @@ integration tests use the same in-process broker.
 
 - `POST /api/auth/login` — verifies credentials, resolves the manager's world,
   and sets `access_token` (Path `/`) + `refresh_token` (Path `/api/auth`)
-  httpOnly cookies. A jobless account spanning multiple worlds returns
-  `{"status":"worlds","worlds":[...]}` with **no** cookies; re-post with
-  `world_id` to pick.
+  httpOnly cookies. An admin always gets a world-less console session; a non-admin
+  resolves per OPD-15(4): the active-job world wins, a jobless multi-world account
+  returns `{"status":"worlds","worlds":[...]}` with **no** cookies (re-post with
+  `world_id` to pick), exactly one joined world auto-resolves, and no joined world
+  is `403 "no world joined"`.
+- `POST /api/auth/register` — the product signup flow (A13): creates a plain
+  (non-admin) account and, when exactly one playable world exists, joins it as an
+  unemployed manager and auto-offers the first available AI club (`world: null` /
+  `offer: null` otherwise). No session is minted; duplicate email → 409.
 - `POST /api/auth/refresh` — rotates the refresh-token session in
   `auth.sessions` (tokens stored hashed only) and sets a fresh cookie pair.
 - `GET /api/dashboard` — protected demo route; returns the empty

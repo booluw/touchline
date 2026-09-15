@@ -32,6 +32,7 @@ var (
 	ErrClubOccupied       = errors.New("club already has a human manager")
 	ErrNotAIClub          = errors.New("offer is not from an AI club")
 	ErrClubWorldMismatch  = errors.New("club is not in the candidate's world")
+	ErrNoOnboardingClub   = errors.New("no AI club is available for onboarding")
 	ErrNotEmployed        = errors.New("manager has no club")
 )
 
@@ -177,6 +178,31 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 		return nil, fmt.Errorf("commit offer: %w", err)
 	}
 	return o, nil
+}
+
+// OnboardingAIClubID deterministically picks (ORDER BY id LIMIT 1) the first
+// AI club in a world that can still issue job offers: AI-controlled, whose
+// current manager (if any) is its own policy bot. Registration (A13) uses this
+// to auto-offer a new join their first job. Returns ErrNoOnboardingClub when
+// the world has no such club (world seeded without clubs, or all go human-run).
+func (s *Service) OnboardingAIClubID(ctx context.Context, worldID uuid.UUID) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := s.pool.QueryRow(ctx, `
+		SELECT c.id
+		FROM club.clubs c
+		LEFT JOIN manager.managers m ON m.id = c.current_manager_id
+		WHERE c.world_id = $1
+		  AND c.is_ai_controlled = TRUE
+		  AND (c.current_manager_id IS NULL OR m.is_policy_bot = TRUE)
+		ORDER BY c.id
+		LIMIT 1`, worldID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNoOnboardingClub
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("pick onboarding club: %w", err)
+	}
+	return id, nil
 }
 
 // ListOffers returns the candidate's pending offers for a given world.

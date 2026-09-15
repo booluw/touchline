@@ -49,6 +49,7 @@ func (s *server) router() *gin.Engine {
 	api := r.Group("/api")
 	{
 		api.POST("/auth/login", s.handleLogin)
+		api.POST("/auth/register", s.handleRegister)
 		api.POST("/auth/refresh", s.handleRefresh)
 		api.GET("/dashboard", s.requireAuth, s.handleDashboard)
 

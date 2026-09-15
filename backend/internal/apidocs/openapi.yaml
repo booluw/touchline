@@ -121,9 +121,19 @@ paths:
       operationId: login
       security: []
       description: |
-        Validates credentials and sets the `access_token`/`refresh_token` httpOnly
-        cookies. Phase-1 launch gates login to administrators — a successful
-        login here is a world-less admin console session.
+        Validates credentials and opens a session. An administrator always gets a
+        world-less console session. Any other account is resolved per OPD-15(4):
+
+        - the account's active job world wins when it holds one;
+        - a jobless account may pass `world_id` to pick a world explicitly (403 if
+          it is not a member there);
+        - with exactly one joined world the session is minted for that world;
+        - with several joined worlds the response is a world PICKER
+          `{"status":"worlds","worlds":[...]}` — no cookies are set and the client
+          re-posts with the chosen `world_id`;
+        - an account with no joined world gets 403 (ErrNoManager).
+
+        The world resolution operates on non-archived memberships.
       requestBody:
         required: true
         content:
@@ -134,19 +144,39 @@ paths:
               properties:
                 email: { type: string, format: email, example: admin@touchline.local }
                 password: { type: string, format: password, example: changeme }
+                world_id:
+                  type: string
+                  format: uuid
+                  description: Explicit world pick for a jobless multi-world account (OPD-15(4)(b)).
+                  example: 00000000-0000-4000-8000-000000000001
       responses:
         "200":
-          description: Session established; cookies set.
+          description: |
+            Either a session (cookies set, `display_name` body) or the world
+            picker (`{"status":"worlds","worlds":[...]}`, no cookies).
           headers:
             Set-Cookie:
-              description: access_token + refresh_token httpOnly cookies.
+              description: access_token + refresh_token httpOnly cookies (session outcome only).
               schema: { type: string, example: "access_token=eyJ...; HttpOnly; Path=/; SameSite=Lax; Max-Age=900" }
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  display_name: { type: string, example: "Admin" }
+                oneOf:
+                  - title: session
+                    type: object
+                    properties:
+                      display_name: { type: string, example: "Alan Coach" }
+                      created_at: { type: string, format: date-time }
+                      is_admin: { type: boolean, example: false }
+                      id: { type: string, format: uuid }
+                  - title: worldPicker
+                    type: object
+                    required: [status, worlds]
+                    properties:
+                      status: { type: string, example: worlds }
+                      worlds:
+                        type: array
+                        items: { $ref: "#/components/schemas/WorldChoice" }
         "400":
           description: Malformed body (missing email/password).
           content:
@@ -160,11 +190,104 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
               example: { error: "invalid email or password" }
         "403":
-          description: Login is currently limited to administrators.
+          description: Account is not loggable into any world (ErrNoManager / ErrNotMember).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-              example: { error: "login is currently limited to administrators" }
+              examples:
+                noWorld:
+                  value: { error: "no world joined — an administrator must give this account a world before it can log in" }
+                notMember:
+                  value: { error: "this account is not a member of the requested world" }
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: Create a manager account (signup)
+      operationId: register
+      security: []
+      description: |
+        Product signup flow (A13). Creates a plain (non-admin) account and — when
+        there is EXACTLY one playable world (`active`/`open_beta`) — auto-joins it
+        as an unemployed manager and auto-issues a first job offer from the first
+        available AI club (deterministic by club id). With zero or several
+        playable worlds the account is created world-less (`world: null`) and an
+        administrator must join it later. Auto-offer is best-effort: when no AI
+        club is available the account is created and `offer` is null. No session
+        is minted by registration; the new manager logs in via /api/auth/login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: player@touchline.local }
+                password: { type: string, format: password, example: changeme }
+                display_name:
+                  type: string
+                  description: Defaults to the email local part.
+                  example: Alan Coach
+      responses:
+        "201":
+          description: Account created (and joined + offered when possible).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, display_name, is_admin, world, offer]
+                properties:
+                  id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  display_name: { type: string }
+                  is_admin: { type: boolean, enum: [false] }
+                  world:
+                    description: The joined world, or null when no auto-join happened.
+                    allOf:
+                      - $ref: "#/components/schemas/WorldChoice"
+                      - nullable: true
+                  offer:
+                    description: The auto-issued first job offer, or null.
+                    $ref: "#/components/schemas/JobOffer"
+              examples:
+                joined:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000100
+                    email: player@touchline.local
+                    display_name: Alan Coach
+                    is_admin: false
+                    world:
+                      world_id: 00000000-0000-4000-8000-000000000001
+                      name: Westland
+                      status: active
+                    offer:
+                      id: 00000000-0000-4000-8000-000000000009
+                      world_id: 00000000-0000-4000-8000-000000000001
+                      club_id: 00000000-0000-4000-8000-000000000005
+                      club_name: Northgate Rovers
+                      manager_id: 00000000-0000-4000-8000-000000000101
+                      status: proposed
+                      created_at: "2026-01-01T00:00:00Z"
+                worldless:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000100
+                    email: player@touchline.local
+                    display_name: Alan Coach
+                    is_admin: false
+                    world: null
+                    offer: null
+        "400":
+          description: Malformed body (missing email/password).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "email and password are required" }
+        "409":
+          description: An account with this email already exists (ErrEmailTaken).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "an account with this email already exists" }
   /api/auth/refresh:
     post:
       tags: [auth]
@@ -1326,12 +1449,20 @@ components:
       type: object
       properties:
         status: { type: string, example: ok }
+    WorldChoice:
+      type: object
+      description: One joined world offered by the login world picker / registration join.
+      required: [world_id, name, status]
+      properties:
+        world_id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [provisioning, seeding, active, open_beta, paused, archived] }
     World:
       type: object
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        status: { type: string, enum: [provisioning, seeding, active, paused, archived] }
+        status: { type: string, enum: [provisioning, seeding, active, open_beta, paused, archived] }
         created_at: { type: string, format: date-time }
     Country:
       type: object

@@ -122,11 +122,13 @@ go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names -clubdata data/
 
 ## 3. Create an admin account
 
-There is no signup endpoint (`OPD-02`); accounts are made with `cmd/user-create`.
-It creates the `auth.users` row and, **only if you pass `-world-id`**, an
-unemployed `manager.managers` row in that world. No world needs to exist first —
-the first admin can (and should) be created standalone, then creates the world
-through the admin API:
+The product signup flow is `POST /api/auth/register` (Step 8b): it creates a
+plain manager account, auto-joins the single playable world, and auto-offers a
+first AI-club job. `cmd/user-create` is the **dev/admin bootstrap**, not the
+signup flow — it creates the `auth.users` row and, **only if you pass
+`-world-id`**, an unemployed `manager.managers` row in that world. No world
+needs to exist first — the first admin can (and should) be created standalone,
+then creates the world through the admin API:
 
 ```bash
 cd backend
@@ -137,14 +139,24 @@ ADMIN_PW='change-me' go run ./cmd/user-create \
 ```
 
 `-admin` marks `auth.users.is_admin`; every `/api/admin/*` route requires it.
-Without `-admin` the same command creates a plain (jobless) account — needed only
-once the login gate opens (Phase 2 rest). Pass `-world-id` to also mint the
+Without `-admin` the same command creates a plain (jobless) account — only
+needed to bootstrap someone before any playable world exists, since regular
+signup needs at least one playable world. Pass `-world-id` to also mint the
 manager row up front if you prefer.
 
-**Login gate (Phase 1):** the login endpoint only admits administrators.
-Non-admins get `403 {"error":"login is currently limited to administrators"}` —
-there is no way for a plain account to obtain a session yet. Admin sessions are
-**world-less** (no world picker), which matters for manager-scoped reads below.
+**Login resolution (OPD-15(4)):** login is no longer admin-only. An admin
+always gets a **world-less** console session (admins run the global console, not
+a manager's world). Any other account is resolved against its
+`manager.managers` memberships (non-archived worlds only):
+
+- the world where the account holds an **active job** always wins;
+- a jobless account may post login with an explicit `world_id`;
+- with **exactly one** joined world the session is minted for it;
+- with **several** joined worlds the response is the world picker
+  `{"status":"worlds","worlds":[{world_id,name,status}]}` — no cookies set, the
+  client re-posts with the chosen `world_id`;
+- with **no** joined world login is refused
+  `403 {"error":"no world joined — …"}`.
 
 Verify by logging in (an `is_admin` flag shows up on the response):
 
@@ -366,13 +378,42 @@ the standings roll over (promotions/relegations), the season is marked
 `SEASON_COMPLETED`/`SEASON_CREATED` events ride the same transaction. No manual
 "next season" step exists.
 
-**Get a human manager into the loop — later.** Because login is admin-only in
-phase 1, a real human manager cannot yet accept a job offer; the offer/accept
-flow is exercised through minted sessions in the integration suite. When the
-login gate opens (phase 2 rest), create a plain account (Step 3 without
-`-admin`), issue it a job offer for an AI club as admin
-(`POST /api/admin/offers`), and the candidate accepts from their manager
-session.
+**Human managers play for real.** With login resolution open (Step 3), a
+registered manager (Step 8b) or `user-create` account can log in with their own
+session and accept the AI-club offer they were auto-offered on joining — or an
+admin can issue further offers (`POST /api/admin/offers`) that the candidate
+accepts from their manager session (`POST /api/offers/:id/accept`).
+
+---
+
+## 8b. Sign up a human manager (self-service registration)
+
+Once exactly one playable world exists, `POST /api/auth/register` is the product
+signup flow (dev/admin bootstrap stays `cmd/user-create`):
+
+```bash
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"player@example.com","password":"change-me","display_name":"Player"}'
+```
+
+With a single playable world the response joins the account to it as an
+unemployed manager and auto-issues a first job offer from the first available AI
+club:
+
+```json
+{"id":"…","email":"player@example.com","display_name":"Player","is_admin":false,
+ "world":{"world_id":"…","name":"…","status":"active"},
+ "offer":{"id":"…","club_id":"…","club_name":"…","status":"proposed"}}
+```
+
+Notes:
+- **Zero or two or more playable worlds** → the account is created world-less
+  (`world: null`) and an admin must join it later (`cmd/user-create -world-id`).
+- **No AI club** → `offer: null`; an admin can offer later.
+- No session is minted by registration — the new manager logs in via Step 3's
+  login resolution.
+- No email verification/recovery yet (`OPD-02`), and no signup rate limiting.
 
 ---
 
@@ -414,7 +455,10 @@ see `docs/design/finance-numerics.md`).
 | `ErrInvalidTeamCount` / 400 | `team_count` odd or < 4 | Use an even count ≥ 4 |
 | `ErrBadAdjacency` / `ErrAdjacencyMismatch` | promotion/relegation link bad, or counts asymmetric | Link a league in the same country; the league above must relegate exactly as many as the league below promotes |
 | `/api/clubs`, `/api/competitions`, … → `403 no world context` | admin console session is world-less | Use a manager-scoped session (grant the admin a manager row, Step 4) |
-| Plain account can't log in (`403`) | Phase-1 login gate is admin-only | By design (OPD-02); opens with the phase-2 rest |
+| Plain account can't log in (`403 no world joined`) | account has no `manager.managers` row in a non-archived world | Admin joins it: `cmd/user-create … -world-id`, or wait for signup to join the single playable world |
+| Login returns a world *picker* (`status: worlds`) | jobless account joined to two or more worlds | Re-post login with the chosen `world_id` (OPD-15(4)(b)) |
+| `POST /api/auth/register` returns `world: null` | zero (or two or more) playable worlds | Create/launch exactly one playable world (Step 8) then the account can be joined |
+| Registered account got no auto-offer | world has no AI club without a human manager yet | Admin issues one later (`POST /api/admin/offers`) |
 | `ErrDuplicateEntry`-style 409s on offers | manager already has a job (one-job-per-user) | Resign/sack the current assignment first |
 | `go run ./cmd/touchline serve` exits immediately | `JWT_SECRET` unset | `export JWT_SECRET=…` (set in Step 1) |
 | Scheduler fires no ticks | world not `active`/`open_beta` | Launch via Step 8 (playable worlds only) |
