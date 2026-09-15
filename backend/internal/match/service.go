@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/player"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/matchsim"
@@ -59,6 +60,7 @@ type Service struct {
 	squad     *squad.Store
 	form      *form.Store
 	standings StandingsContext
+	players   *player.Service
 }
 
 // NewService builds the match orchestration service.
@@ -68,6 +70,13 @@ func NewService(pool *pgxpool.Pool, bus Publishable, squadStore *squad.Store, fo
 
 // WithStandingsContext installs the Phase 6 standings dependency.
 func (s *Service) WithStandingsContext(st StandingsContext) { s.standings = st }
+
+// WithPlayers installs the morale/playing-time engine, whose appearances hook
+// runs inside the match-completion transaction. nil in tests disables it.
+func (s *Service) WithPlayers(p *player.Service) *Service {
+	s.players = p
+	return s
+}
 
 // PlayFixture simulates and persists ONE fixture atomically. It is idempotent:
 // a fixture already `completed` is a read-only no-op returning the persisted

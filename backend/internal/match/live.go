@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/player"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/matchsim"
 )
@@ -445,6 +446,18 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		return nil, fmt.Errorf("finalize: %w", err)
 	}
 
+	// Player appearances + morale land atomically with the result (S06-03):
+	// the pitch minutes become the whole-season share input for the two XIs.
+	if s.players != nil {
+		apps, err := s.buildAppearances(ctx, tx, sess)
+		if err != nil {
+			return nil, fmt.Errorf("finalize: appearances: %w", err)
+		}
+		if err := s.players.RecordMatchAppearances(ctx, tx, sess.MatchID, apps); err != nil {
+			return nil, fmt.Errorf("finalize: record appearances: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("finalize: commit: %w", err)
 	}
@@ -807,4 +820,112 @@ func containsInt(xs []int, v int) bool {
 		}
 	}
 	return false
+}
+
+// subRow is one persisted substitution (player coming on, player replaced).
+type subRow struct {
+	in     uuid.UUID
+	out    uuid.UUID
+	minute int
+}
+
+// buildAppearances reads the final substitution feed of a completed match and
+// turns it (with the frozen lineups) into the playing-time record the morale
+// engine needs: starters get 90 minus the minute they came off; bench players
+// get 90 minus the minute they came on (and the tail is trimmed if a
+// substitute is later replaced).
+func (s *Service) buildAppearances(ctx context.Context, tx pgx.Tx, sess *LiveSession) ([]player.Appearance, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT player_id, related_player_id, minute
+		FROM match.match_events
+		WHERE match_id = $1 AND event_type = 'substitution'
+		ORDER BY minute, sequence`, sess.MatchID)
+	if err != nil {
+		return nil, fmt.Errorf("load substitutions: %w", err)
+	}
+	defer rows.Close()
+
+	var home, away []subRow
+	for rows.Next() {
+		var in, out uuid.UUID
+		var minute int
+		if err := rows.Scan(&in, &out, &minute); err != nil {
+			return nil, fmt.Errorf("scan substitution: %w", err)
+		}
+		if in == uuid.Nil || out == uuid.Nil {
+			continue
+		}
+		if memberOf(sess.homeXI, in) {
+			home = append(home, subRow{in: in, out: out, minute: minute})
+		} else if memberOf(sess.awayXI, in) {
+			away = append(away, subRow{in: in, out: out, minute: minute})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	var appearances []player.Appearance
+	appearances = append(appearances, appearancesForSide(sess.homeXI, home)...)
+	appearances = append(appearances, appearancesForSide(sess.awayXI, away)...)
+	return appearances, nil
+}
+
+func memberOf(xi []squad.SquadMember, id uuid.UUID) bool {
+	for _, m := range xi {
+		if m.PlayerID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// appearancesForSide derives each player's minutes from the starting XI and
+// the side's completed substitutions (see buildAppearances for the rules).
+func appearancesForSide(xi []squad.SquadMember, subs []subRow) []player.Appearance {
+	minutes := make(map[uuid.UUID]int, len(xi)+len(subs))
+	for _, m := range xi {
+		minutes[m.PlayerID] = 90
+	}
+	for _, s := range subs {
+		minutes[s.out] -= 90 - s.minute
+		minutes[s.in] += 90 - s.minute
+	}
+
+	out := make([]player.Appearance, 0, len(xi)+len(subs))
+	seen := make(map[uuid.UUID]bool, len(minutes))
+	for _, m := range xi {
+		seen[m.PlayerID] = true
+		out = append(out, player.Appearance{PlayerID: m.PlayerID, Started: true, Minutes: clampPitchMinutes(minutes[m.PlayerID])})
+	}
+	for _, s := range subs {
+		if seen[s.in] {
+			continue // a sub-in is not a starter of this side
+		}
+		seen[s.in] = true
+		if got := clampPitchMinutes(minutes[s.in]); got > 0 {
+			out = append(out, player.Appearance{PlayerID: s.in, Started: false, Minutes: got})
+		}
+	}
+	return out
+}
+
+func clampPitchMinutes(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 90 {
+		return 90
+	}
+	return v
+}
+
+// startedXI reports which lineup slots are in the starting XI (helper for
+// table-driven unit tests of appearance derivation).
+func startedXI(xi []squad.SquadMember) map[uuid.UUID]bool {
+	m := make(map[uuid.UUID]bool, len(xi))
+	for _, s := range xi {
+		m[s.PlayerID] = true
+	}
+	return m
 }

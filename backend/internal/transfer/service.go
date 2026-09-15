@@ -17,18 +17,33 @@ import (
 	"github.com/touchline/backend/pkg/explanation"
 )
 
+// PlayerLifecycle is the pluggable hook the transfer completion transaction
+// calls so downstream player state (fresh-start morale, open request cleanup)
+// lands atomically with the club move. Implemented by internal/player; declared
+// here (net interface, not an import) so transfer never depends on player.
+type PlayerLifecycle interface {
+	OnPlayerTransferred(ctx context.Context, tx pgx.Tx, playerID, newClubID uuid.UUID) error
+}
+
 // Service is the transfer market engine. All writes that emit events go
 // through the transactional outbox (OPD-23) via eventbus.WriteTx inside the
 // caller's transaction; bus may be nil in tests and falls back to RecordTx.
 type Service struct {
-	pool  *pgxpool.Pool
-	bus   eventbus.Publisher
-	store *Store
+	pool            *pgxpool.Pool
+	bus             eventbus.Publisher
+	store           *Store
+	playerLifecycle PlayerLifecycle
 }
 
 // NewService wires the transfer engine onto a pool and the event bus.
 func NewService(pool *pgxpool.Pool, bus eventbus.Publisher) *Service {
 	return &Service{pool: pool, bus: bus, store: NewStore(pool)}
+}
+
+// WithPlayerLifecycle plugs the downstream hook invoked on transfer completion.
+func (s *Service) WithPlayerLifecycle(h PlayerLifecycle) *Service {
+	s.playerLifecycle = h
+	return s
 }
 
 // ---------- reads ----------
@@ -850,6 +865,13 @@ func (s *Service) acceptBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, w
 	if _, err := tx.Exec(ctx,
 		`UPDATE player.players SET club_id = $2, status = 'active' WHERE id = $1`, playerID, buyerClub); err != nil {
 		return nil, nil, fmt.Errorf("move player: %w", err)
+	}
+	// 1b. Downstream player hook (fresh-start morale, request cleanup) rides
+	// the same transaction as the club move.
+	if s.playerLifecycle != nil {
+		if err := s.playerLifecycle.OnPlayerTransferred(ctx, tx, playerID, buyerClub); err != nil {
+			return nil, nil, fmt.Errorf("player lifecycle hook: %w", err)
+		}
 	}
 
 	// 2. Terminate the seller's active contracts and end their wage

@@ -96,6 +96,15 @@ func (s *server) router() *gin.Engine {
 		api.GET("/managers/me/board", s.requireAuth, s.handleBoardView)
 		api.POST("/managers/me/board/mandates/:id/negotiate", s.requireAuth, s.handleNegotiateMandate)
 
+		// Player morale + playing time (S06-03): per-club squad overview and
+		// individual detail with the 'why'; manager-facing promise and
+		// transfer-request actions. World-scoped to the caller's manager.
+		api.GET("/clubs/:id/players", s.requireAuth, s.handleListClubPlayers)
+		api.GET("/clubs/:id/players/:playerID", s.requireAuth, s.handleGetPlayerMorale)
+		api.POST("/clubs/:id/players/:playerID/promise-playing-time", s.requireAuth, s.handlePromisePlayingTime)
+		api.POST("/clubs/:id/players/:playerID/transfer-request/approve", s.requireAuth, s.handleApproveTransferRequest)
+		api.POST("/clubs/:id/players/:playerID/transfer-request/deny", s.requireAuth, s.handleDenyTransferRequest)
+
 		// Admin: world lifecycle (S02-02), whole-world seeding (clubs + players
 		// + memberships, launch model), media aid offers, country-scoped league
 		// administration (S04-01).

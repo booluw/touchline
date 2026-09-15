@@ -960,6 +960,182 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players:
+    get:
+      tags: [player]
+      summary: My squad's morale and playing time
+      operationId: listSquadPlayers
+      description: The calling manager's active roster with each player's agreed squad role, morale (0..1), whole-season playing-time share and any open transfer request. World-scoped to the caller's manager; only the owned club is returned.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+      responses:
+        "200":
+          description: The club's squad morale overview.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  club_id: { type: string, format: uuid }
+                  players:
+                    type: array
+                    items: { $ref: "#/components/schemas/SquadMorale" }
+        "403":
+          description: No world context for the caller.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The manager has no active club.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}:
+    get:
+      tags: [player]
+      summary: One player's morale detail
+      operationId: getPlayerMorale
+      description: The full morale picture of one of the caller's players with the 'why': role expectations vs the whole-season share, the satisfaction status and pull target, any open transfer request, and the durable player-manager history behind it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The player's morale detail.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerMorale" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Player not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [player]
+      summary: Promise playing time
+      operationId: promisePlayingTime
+      description: Records the manager's explicit increase_playing_time promise to the player. The promise is graded weekly: a share that meets the role entitlement is fulfilled, an overdue one is broken. Stopgap for satisfied-but-anxious players without opening a transfer request.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: Promise recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "ok" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The manager has no active club.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/transfer-request/approve:
+    post:
+      tags: [player]
+      summary: Approve a transfer request
+      operationId: approveTransferRequest
+      description: Honors the player's open transfer request: it closes as approved and the player is listed on the market at market value (open to offers). The approval is recorded as a world event and on the player-manager relationship history.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The approved request and the created listing.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: "#/components/schemas/TransferRequest" }
+                  listing: { $ref: "#/components/schemas/Listing" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No open transfer request for this player.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Request already resolved, or the listing already exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/transfer-request/deny:
+    post:
+      tags: [player]
+      summary: Deny a transfer request
+      operationId: denyTransferRequest
+      description: Rejects the player's open request: the player takes a morale hit and cools down before asking again. Recorded on the player-manager relationship history.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The denied request.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: "#/components/schemas/TransferRequest" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No open transfer request for this player.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Request already resolved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/managers/me/offers:
     get:
       tags: [manager]

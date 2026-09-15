@@ -31,6 +31,7 @@ import (
 	internalmanager "github.com/touchline/backend/internal/manager"
 	"github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/matchday"
+	internalplayer "github.com/touchline/backend/internal/player"
 	"github.com/touchline/backend/internal/scheduler"
 	"github.com/touchline/backend/internal/squad"
 	internaltactics "github.com/touchline/backend/internal/tactics"
@@ -105,6 +106,7 @@ type App struct {
 	Training  *training.Service
 	Finance   *finance.Service
 	Transfers *internaltransfer.Service
+	Players   *internalplayer.Service
 	Board     *internalboard.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
@@ -149,6 +151,9 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	financeSvc := finance.NewService(pool, bus)
 	transfersSvc := internaltransfer.NewService(pool, bus)
 	managerSvc := internalmanager.NewService(pool, bus)
+	playerSvc := internalplayer.NewService(pool, bus, transfersSvc)
+	transfersSvc.WithPlayerLifecycle(playerSvc)
+	matches.WithPlayers(playerSvc)
 	boardSvc := internalboard.NewService(pool, bus, managerSvc)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
@@ -166,6 +171,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Finance:       financeSvc,
 		Transfers:     transfersSvc,
 		Board:         boardSvc,
+		Player:        playerSvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -188,6 +194,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Training:   trainingSvc,
 		Finance:    financeSvc,
 		Transfers:  transfersSvc,
+		Players:    playerSvc,
 		Board:      boardSvc,
 		Runner:     runner,
 		http:       httpSrv,
@@ -307,6 +314,9 @@ func (a *App) RunWorker(ctx context.Context) error {
 		if payload.Granularity == "weekly" {
 			if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
+			}
+			if err := a.Players.WeeklyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s weekly player pass: %w", ev.WorldID, err)
 			}
 			if reviewed, sacked, err := a.Board.WeeklyReview(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s weekly board review: %w", ev.WorldID, err)
