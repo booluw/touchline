@@ -196,6 +196,119 @@ func SelectStartersWithLineup(players []LoadedPlayer, lineup map[int]uuid.UUID, 
 	return xi, nil
 }
 
+// SelectStartersByFitness fills the formation preferring the freshest
+// available players (highest fitness, S06-05 "best_fitness" delegation rule):
+// each slot picks the position-fit candidate with the highest fitness, ties
+// break by member weight then anchor priority. Players without a condition
+// row score a neutral 0.5.
+func SelectStartersByFitness(players []LoadedPlayer, conds map[uuid.UUID]PlayerCondition, order []string) ([]SquadMember, error) {
+	avail := availablePlayers(players)
+	if len(avail) < len(order) {
+		return nil, fmt.Errorf("only %d available players for an %d-man XI", len(avail), len(order))
+	}
+	taken := make(map[uuid.UUID]bool, len(avail))
+	xi := make([]SquadMember, 0, len(order))
+	for _, slot := range order {
+		best := pickFreshestFor(slot, avail, taken, conds)
+		if best == nil {
+			best = pickFreshestForAny(avail, taken, conds)
+		}
+		if best == nil {
+			return nil, fmt.Errorf("cannot fill slot %q from %d available players", slot, len(avail))
+		}
+		taken[best.PlayerID] = true
+		xi = append(xi, asSquadMember(*best))
+	}
+	return xi, nil
+}
+
+// SelectStartersRotated fields a freshest-legs XI that rests the incumbent
+// starting eleven (S06-05 "rotate" delegation rule): when a club has a full
+// XI's worth of alternatives beyond its strongest available XI, that stronger
+// group is benched and the freshest reserve-heavy XI goes out. Squads too thin
+// to form an alternative XI fall back to the freshest available selection.
+func SelectStartersRotated(players []LoadedPlayer, conds map[uuid.UUID]PlayerCondition, order []string) ([]SquadMember, error) {
+	best, err := SelectStarters(players, order)
+	if err != nil {
+		return nil, err
+	}
+	bestIDs := make(map[uuid.UUID]bool, len(best))
+	for _, m := range best {
+		bestIDs[m.PlayerID] = true
+	}
+	rest := make([]LoadedPlayer, 0, len(players))
+	for _, p := range players {
+		if !bestIDs[p.PlayerID] {
+			rest = append(rest, p)
+		}
+	}
+	if len(availablePlayers(rest)) >= len(order) {
+		return SelectStartersByFitness(rest, conds, order)
+	}
+	return SelectStartersByFitness(players, conds, order)
+}
+
+// pickFreshestFor prefers the position-fit candidate with the highest fitness
+// (ties: member weight, then anchor priority).
+func pickFreshestFor(slot string, avail []LoadedPlayer, taken map[uuid.UUID]bool, conds map[uuid.UUID]PlayerCondition) *LoadedPlayer {
+	var best *LoadedPlayer
+	for i := range avail {
+		p := &avail[i]
+		if taken[p.PlayerID] {
+			continue
+		}
+		if positionFit(p.Position, slot) <= 0 {
+			continue
+		}
+		if best == nil || fresherThan(p, best, conds, slot) {
+			best = p
+		}
+	}
+	return best
+}
+
+func pickFreshestForAny(avail []LoadedPlayer, taken map[uuid.UUID]bool, conds map[uuid.UUID]PlayerCondition) *LoadedPlayer {
+	var best *LoadedPlayer
+	for i := range avail {
+		p := &avail[i]
+		if taken[p.PlayerID] {
+			continue
+		}
+		if best == nil || fresherThan(p, best, conds, "") {
+			best = p
+		}
+	}
+	return best
+}
+
+// fresherThan ranks candidates for a fitness-first selection: fitness first
+// (neutral 0.5 when missing), then fit (when a slot is given), then weight.
+func fresherThan(a, b *LoadedPlayer, conds map[uuid.UUID]PlayerCondition, slot string) bool {
+	fa := fitnessOr(a.PlayerID, conds, 0.5)
+	fb := fitnessOr(b.PlayerID, conds, 0.5)
+	if fa != fb {
+		return fa > fb
+	}
+	if slot != "" {
+		if ga, gb := positionFit(a.Position, slot), positionFit(b.Position, slot); ga != gb {
+			return ga > gb
+		}
+	}
+	if wa, wb := memberWeight(*a), memberWeight(*b); wa != wb {
+		return wa > wb
+	}
+	return priorityScore(asSquadMember(*a)) > priorityScore(asSquadMember(*b))
+}
+
+// fitnessOr returns a player's fitness value from a condition map, or a
+// default when the player has no condition row.
+func fitnessOr(pid uuid.UUID, conds map[uuid.UUID]PlayerCondition, def float64) float64 {
+	if c, ok := conds[pid]; ok {
+		return c.Fitness
+	}
+	return def
+}
+
 // asSquadMember converts a LoadedPlayer into the aggregation unit, fixing its
 // AttributeWeight = the member's own (attack+defense) weighted-score mean —
 // the same per-position profiles BuildSquadRatings uses, so selection ranking

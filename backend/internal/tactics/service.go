@@ -119,12 +119,34 @@ type worldRef struct {
 //   - exactly eleven distinct squad players, one per slot (0..10); the
 //     UNIQUE(club_id, player_id) constraint is validated before writing.
 func (s *Service) SetLineup(ctx context.Context, actor Actor, clubID uuid.UUID, slots []LineupInput) error {
+	if err := validateLineupSlots(slots); err != nil {
+		return err
+	}
+	if err := s.requireOwnership(ctx, actor.ManagerID, clubID); err != nil {
+		return err
+	}
+	return s.setLineup(ctx, actor, clubID, slots)
+}
+
+// SetLineupForClub writes a club's XI on behalf of a delegated actor (the
+// absence policy bot). Same validation and transactional rules as SetLineup,
+// minus the ownership gate: the bot has no current_club_id, so ownership is
+// established by the caller (the policy engine only ever targets a club it is
+// authorised to delegate for).
+func (s *Service) SetLineupForClub(ctx context.Context, actor Actor, clubID uuid.UUID, slots []LineupInput) error {
+	if err := validateLineupSlots(slots); err != nil {
+		return err
+	}
+	return s.setLineup(ctx, actor, clubID, slots)
+}
+
+// validateLineupSlots enforces the twelve-distinct-entries shape invariants.
+func validateLineupSlots(slots []LineupInput) error {
 	if len(slots) != 11 {
 		return ErrInvalidLineup
 	}
 	slotsByPos := make(map[int]uuid.UUID, len(slots))
 	seen := make(map[uuid.UUID]bool, len(slots))
-	playerIDs := make([]uuid.UUID, 0, len(slots))
 	for _, in := range slots {
 		if in.Slot < 0 || in.Slot > 10 {
 			return ErrInvalidLineup
@@ -137,13 +159,21 @@ func (s *Service) SetLineup(ctx context.Context, actor Actor, clubID uuid.UUID, 
 		}
 		seen[in.PlayerID] = true
 		slotsByPos[in.Slot] = in.PlayerID
+	}
+	return nil
+}
+
+// setLineup is the shared lineup write core: deadline check + transactional
+// replace + event. The caller has already established authorisation.
+func (s *Service) setLineup(ctx context.Context, actor Actor, clubID uuid.UUID, slots []LineupInput) error {
+	slotsByPos := make(map[int]uuid.UUID, len(slots))
+	playerIDs := make([]uuid.UUID, 0, len(slots))
+	for _, in := range slots {
+		slotsByPos[in.Slot] = in.PlayerID
 		playerIDs = append(playerIDs, in.PlayerID)
 	}
 
 	if _, err := s.requireClub(ctx, clubID); err != nil {
-		return err
-	}
-	if err := s.requireOwnership(ctx, actor.ManagerID, clubID); err != nil {
 		return err
 	}
 
@@ -231,6 +261,23 @@ func (s *Service) GetLineup(ctx context.Context, clubID uuid.UUID) (LineupView, 
 // (design §3: style in the approved five; formation in the style's allowed
 // set, default first when unset). Same ownership/deadline rules as SetLineup.
 func (s *Service) SetTactics(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string) error {
+	if err := s.requireOwnership(ctx, actor.ManagerID, clubID); err != nil {
+		return err
+	}
+	return s.setTactics(ctx, actor, clubID, style, formation)
+}
+
+// SetTacticsForClub writes a club's style/formation on behalf of a delegated
+// actor (the absence policy bot). Same validation and transactional rules as
+// SetTactics without the ownership gate — the caller (policy engine) has
+// already established delegated authorisation.
+func (s *Service) SetTacticsForClub(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string) error {
+	return s.setTactics(ctx, actor, clubID, style, formation)
+}
+
+// setTactics is the shared style/formation write core: style validation,
+// formation normalisation, club check, transactional upsert + event.
+func (s *Service) setTactics(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string) error {
 	if !matchsim.IsStyle(style) {
 		return ErrInvalidStyle
 	}
@@ -252,9 +299,6 @@ func (s *Service) SetTactics(ctx context.Context, actor Actor, clubID uuid.UUID,
 
 	club, err := s.requireClub(ctx, clubID)
 	if err != nil {
-		return err
-	}
-	if err := s.requireOwnership(ctx, actor.ManagerID, clubID); err != nil {
 		return err
 	}
 

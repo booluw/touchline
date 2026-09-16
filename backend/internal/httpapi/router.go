@@ -109,6 +109,16 @@ func (s *server) router() *gin.Engine {
 		api.GET("/managers/me/board", s.requireAuth, s.handleBoardView)
 		api.POST("/managers/me/board/mandates/:id/negotiate", s.requireAuth, s.handleNegotiateMandate)
 
+		// PolicyBot (S06-05): per-manager delegation policies and absence
+		// state. World-scoped to the caller's manager via session identity.
+		api.GET("/managers/me/policies/:type", s.requireAuth, s.handleGetPolicy)
+		api.PUT("/managers/me/policies/:type", s.requireAuth, s.handleUpsertPolicy)
+		api.DELETE("/managers/me/policies/:type", s.requireAuth, s.handleDeletePolicy)
+		api.GET("/managers/me/absence", s.requireAuth, s.handleGetAbsence)
+		api.PUT("/managers/me/absence", s.requireAuth, s.handleSetAway)
+		api.DELETE("/managers/me/absence", s.requireAuth, s.handleClearAway)
+		api.GET("/managers/me/absence-summary", s.requireAuth, s.handleGetAbsenceSummary)
+
 		// Player morale + playing time (S06-03): per-club squad overview and
 		// individual detail with the 'why'; manager-facing promise and
 		// transfer-request actions. World-scoped to the caller's manager.

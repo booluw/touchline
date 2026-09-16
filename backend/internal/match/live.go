@@ -140,6 +140,11 @@ func (s *Service) KickoffMatchday(ctx context.Context, worldID uuid.UUID, matchd
 
 	out := make([]*LiveSession, 0, len(ids))
 	for _, id := range ids {
+		if s.absence != nil {
+			if err := s.absence.EnsureMatchInputs(ctx, id); err != nil {
+				return out, fmt.Errorf("kickoff matchday: absence inputs %s: %w", id, err)
+			}
+		}
 		sess, err := s.kickoffFixture(ctx, id)
 		if err != nil {
 			return out, err

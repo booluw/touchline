@@ -79,14 +79,27 @@ type PlanView struct {
 // current world tick); swapping plans mid-week gives no rebate and resets the
 // applied-week stamp.
 func (s *Service) SubmitPlan(ctx context.Context, actor Actor, clubID uuid.UUID, archetype string) error {
+	if err := s.requireOwnership(ctx, actor.ManagerID, clubID); err != nil {
+		return err
+	}
+	return s.submitPlan(ctx, actor, clubID, archetype)
+}
+
+// SubmitPlanForClub writes a club's training plan on behalf of a delegated
+// actor (the absence policy bot). Same validation and transactional rules as
+// SubmitPlan without the ownership gate — the caller (policy engine) has
+// already established delegated authorisation.
+func (s *Service) SubmitPlanForClub(ctx context.Context, actor Actor, clubID uuid.UUID, archetype string) error {
+	return s.submitPlan(ctx, actor, clubID, archetype)
+}
+
+// submitPlan is the shared training-plan write core.
+func (s *Service) submitPlan(ctx context.Context, actor Actor, clubID uuid.UUID, archetype string) error {
 	if !IsArchetype(archetype) {
 		return ErrInvalidArchetype
 	}
 	club, err := s.requireClub(ctx, clubID)
 	if err != nil {
-		return err
-	}
-	if err := s.requireOwnership(ctx, actor.ManagerID, clubID); err != nil {
 		return err
 	}
 

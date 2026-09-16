@@ -54,6 +54,15 @@ type StandingsContext interface {
 	IsDeadRubber(ctx context.Context, fixtureID uuid.UUID) (bool, error)
 }
 
+// AbsenceDelegator is the S06-05 pre-kickoff hook. The policy engine implements
+// it: before a fixture is frozen the engine tallies each side's attendance and,
+// for away managers, writes the delegated XI/tactics (the league's manager-only
+// inputs the snapshot freezes). The interface lives in match so the policybot
+// package is never imported by the simulation core (no import cycle).
+type AbsenceDelegator interface {
+	EnsureMatchInputs(ctx context.Context, fixtureID uuid.UUID) error
+}
+
 // Service orchestrates one deterministic matchday at a time.
 type Service struct {
 	pool      *pgxpool.Pool
@@ -63,6 +72,7 @@ type Service struct {
 	standings StandingsContext
 	players   *player.Service
 	social    *internalsocial.Service
+	absence   AbsenceDelegator
 }
 
 // NewService builds the match orchestration service.
@@ -89,10 +99,23 @@ func (s *Service) WithSocial(soc *internalsocial.Service) *Service {
 	return s
 }
 
+// WithPolicyBot installs the S06-05 absence-delegation hook. The given
+// delegator is invoked for every scheduled fixture immediately before its
+// simulation snapshot is frozen. nil leaves the hook disabled.
+func (s *Service) WithPolicyBot(a AbsenceDelegator) *Service {
+	s.absence = a
+	return s
+}
+
 // PlayFixture simulates and persists ONE fixture atomically. It is idempotent:
 // a fixture already `completed` is a read-only no-op returning the persisted
 // match. Statuses other than `scheduled` (postponed/cancelled) are errors.
 func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchResult, error) {
+	if s.absence != nil {
+		if err := s.absence.EnsureMatchInputs(ctx, fixtureID); err != nil {
+			return nil, fmt.Errorf("play fixture: absence inputs: %w", err)
+		}
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("play fixture: begin: %w", err)

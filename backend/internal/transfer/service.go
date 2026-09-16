@@ -461,12 +461,27 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 // club, a human counter is answered by the policy automatically; an accepted
 // bid runs the atomic completion.
 func (s *Service) RespondToBid(ctx context.Context, actor Actor, worldID, bidID uuid.UUID, action string, terms *Terms) (Bid, *CompletedTransfer, *explanation.Explanation, error) {
-	if !ValidRespondActions[action] {
-		return Bid{}, nil, nil, ErrInvalidActionForRole
-	}
 	clubID, err := s.actorClub(ctx, actor.ManagerID)
 	if err != nil {
 		return Bid{}, nil, nil, err
+	}
+	return s.respondToBid(ctx, actor, worldID, clubID, bidID, action, terms)
+}
+
+// RespondToBidForClub runs a negotiation response on behalf of a delegated
+// actor (the absence policy bot). Same validation and transactional rules as
+// RespondToBid without the actorClub ownership lookup — the caller (policy
+// engine) passes the club it is authorised to negotiate for.
+func (s *Service) RespondToBidForClub(ctx context.Context, actor Actor, worldID, clubID, bidID uuid.UUID, action string, terms *Terms) (Bid, *CompletedTransfer, *explanation.Explanation, error) {
+	return s.respondToBid(ctx, actor, worldID, clubID, bidID, action, terms)
+}
+
+// respondToBid is the shared negotiation core, parameterised by the acting
+// club. Only the actor identity (a human manager or the policy bot) differs
+// between the two public entry points.
+func (s *Service) respondToBid(ctx context.Context, actor Actor, worldID, clubID, bidID uuid.UUID, action string, terms *Terms) (Bid, *CompletedTransfer, *explanation.Explanation, error) {
+	if !ValidRespondActions[action] {
+		return Bid{}, nil, nil, ErrInvalidActionForRole
 	}
 	cf, err := s.store.ClubFitness(ctx, clubID)
 	if err != nil {

@@ -41,6 +41,8 @@ tags:
     description: Transfer market listings, bids, and negotiation (world-scoped).
   - name: board
     description: Board confidence, job security snapshot, and mandate negotiation for the caller's club.
+  - name: policy
+    description: S06-05 delegation policies and absence state for the caller's manager.
   - name: player
     description: Squad morale detail, playing-time promises, and transfer-request approval for the caller's players.
   - name: manager
@@ -966,6 +968,130 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/managers/me/policies/{type}:
+    get:
+      tags: [policy]
+      summary: Get my delegation policy
+      operationId: getPolicy
+      description: Returns the manager's saved policy for the given type (squad, transfer, or training). 404 if none is saved.
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema: { type: string, enum: [squad, transfer, training] }
+      responses:
+        "200":
+          description: The saved policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Policy" }
+        "404":
+          description: No policy saved for this type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      tags: [policy]
+      summary: Save or replace my delegation policy
+      operationId: upsertPolicy
+      description: Creates or replaces the manager's policy for the given type. A saved policy overrides the assistant default; deleting it restores the default.
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema: { type: string, enum: [squad, transfer, training] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [params]
+              properties:
+                params: { type: object }
+      responses:
+        "200":
+          description: The persisted policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Policy" }
+        "400":
+          description: Invalid policy type or params.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [policy]
+      summary: Delete my delegation policy
+      operationId: deletePolicy
+      description: Removes a saved policy row; subsequent delegated actions fall back to the assistant default. Deleting an absent row is a no-op (404).
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema: { type: string, enum: [squad, transfer, training] }
+      responses:
+        "204":
+          description: Policy deleted.
+        "404":
+          description: No policy was saved for this type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/managers/me/absence:
+    get:
+      tags: [policy]
+      summary: My absence state
+      operationId: getAbsence
+      description: The manager's current away-mode status, associated clubs and the next scheduled fixture. The delegation_active flag is true when the policybot is currently acting on the manager's clubs.
+      responses:
+        "200":
+          description: The absence view.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AbsenceView" }
+    put:
+      tags: [policy]
+      summary: Toggle explicit away mode
+      operationId: setAway
+      description: Turns explicit away mode on or off. Toggling on activates delegation immediately and clears the missed-fixture streak. Toggling off reverses delegation until the streak rebuilds. The auto-away flag is always cleared on explicit toggle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [away]
+              properties:
+                away: { type: boolean }
+      responses:
+        "204":
+          description: Away mode updated.
+        "400":
+          description: Missing or invalid away payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [policy]
+      summary: Clear away mode
+      operationId: clearAway
+      description: Convenience alias for PUT with away=false.
+      responses:
+        "204":
+          description: Away mode cleared.
+  /api/managers/me/absence-summary:
+    get:
+      tags: [policy]
+      summary: Delegation dashboard summary
+      operationId: getAbsenceSummary
+      description: "Aggregated view of the manager's delegation status: away flags, consecutive missed fixtures, which policy types are active, whether delegation is possible (has at least one club), and the next upcoming fixture."
+      responses:
+        "200":
+          description: The absence summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AbsenceSummary" }
   /api/clubs/{id}/players:
     get:
       tags: [player]
@@ -2716,5 +2842,44 @@ components:
         data:
           type: object
           additionalProperties: true
+    Policy:
+      type: object
+      properties:
+        world_id: { type: string, format: uuid }
+        manager_id: { type: string, format: uuid }
+        type: { type: string, enum: [squad, transfer, training] }
+        params: { type: object, additionalProperties: true }
+        enabled: { type: boolean }
+        updated_at: { type: string, format: date-time }
+    AbsenceView:
+      type: object
+      properties:
+        manager_id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        absence_state: { $ref: "#/components/schemas/AbsenceState" }
+        club_ids:
+          type: array
+          items: { type: string, format: uuid }
+        next_fixture_at: { type: string, format: date-time, nullable: true }
+        delegation_active: { type: boolean }
+    AbsenceState:
+      type: object
+      properties:
+        away_since: { type: string, format: date-time, nullable: true }
+        away_auto: { type: boolean }
+        consecutive_missed: { type: integer }
+        last_activity_at: { type: string, format: date-time, nullable: true }
+    AbsenceSummary:
+      type: object
+      properties:
+        away: { type: boolean }
+        away_auto: { type: boolean }
+        away_since: { type: string, format: date-time, nullable: true }
+        consecutive_missed: { type: integer }
+        active_policies:
+          type: array
+          items: { type: string }
+        next_fixture_at: { type: string, format: date-time, nullable: true }
+        delegatable: { type: boolean }
 security:
   - sessionCookie: []

@@ -32,6 +32,7 @@ import (
 	"github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/matchday"
 	internalplayer "github.com/touchline/backend/internal/player"
+	"github.com/touchline/backend/internal/policybot"
 	"github.com/touchline/backend/internal/scheduler"
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
@@ -110,6 +111,7 @@ type App struct {
 	Players   *internalplayer.Service
 	Board     *internalboard.Service
 	Social    *internalsocial.Service
+	Policy    *policybot.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
 }
@@ -147,6 +149,8 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	squadStore := squad.NewStore(pool)
 	formStore := form.NewStore(pool)
 
+	tacticsSvc := internaltactics.NewService(pool, bus, squadStore)
+
 	matches := match.NewService(pool, bus, squadStore, formStore)
 	compSvc := internalcompetition.NewService(pool, bus)
 	trainingSvc := training.NewService(pool, bus)
@@ -160,6 +164,8 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	socialSvc.WithRealtime(broker)
 	matches.WithSocial(socialSvc)
 	boardSvc := internalboard.NewService(pool, bus, managerSvc)
+	policySvc := policybot.NewService(pool, bus, squadStore, tacticsSvc, trainingSvc, transfersSvc)
+	matches.WithPolicyBot(policySvc)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
@@ -171,13 +177,14 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Bootstrap:     internalbootstrap.NewService(pool, bus),
 		Competition:   compSvc,
 		Match:         matches,
-		Tactics:       internaltactics.NewService(pool, bus, squadStore),
+		Tactics:       tacticsSvc,
 		Training:      trainingSvc,
 		Finance:       financeSvc,
 		Transfers:     transfersSvc,
 		Board:         boardSvc,
 		Player:        playerSvc,
 		Social:        socialSvc,
+		Policy:        policySvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -203,6 +210,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Players:    playerSvc,
 		Board:      boardSvc,
 		Social:     socialSvc,
+		Policy:     policySvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -314,11 +322,17 @@ func (a *App) RunWorker(ctx context.Context) error {
 			}()
 		}
 		if payload.Granularity == "daily" {
+			if err := a.Policy.RespondToBidsForAbsent(ctx, ev.WorldID); err != nil {
+				return fmt.Errorf("world %s daily policy bids: %w", ev.WorldID, err)
+			}
 			if err := a.Transfers.DailyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s daily transfer market: %w", ev.WorldID, err)
 			}
 		}
 		if payload.Granularity == "weekly" {
+			if err := a.Policy.EnsureTraining(ctx, ev.WorldID); err != nil {
+				return fmt.Errorf("world %s weekly policy training: %w", ev.WorldID, err)
+			}
 			if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
 			}

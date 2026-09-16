@@ -12,7 +12,9 @@ const identityKey = "identity"
 
 // requireAuth rejects requests without a valid access-token cookie. The JWT
 // carries only manager_id + user_id; world_id is never in the token (OPD-15) —
-// handlers resolve it from manager.managers when they need it.
+// handlers resolve it from manager.managers when they need it. After
+// validation the manager's activity heartbeat is updated (throttled to once per
+// hour by the store) so the absence engine can track fixture attendance.
 func (s *server) requireAuth(c *gin.Context) {
 	raw, err := c.Cookie(accessCookie)
 	if err != nil || raw == "" {
@@ -27,6 +29,11 @@ func (s *server) requireAuth(c *gin.Context) {
 	}
 
 	c.Set(identityKey, identity)
+
+	if s.policySvc != nil {
+		_ = s.policySvc.TouchActivity(c.Request.Context(), identity.ManagerID)
+	}
+
 	c.Next()
 }
 
