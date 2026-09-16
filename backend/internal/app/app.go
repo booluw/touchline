@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/google/uuid"
+	internalacademy "github.com/touchline/backend/internal/academy"
 	internalauth "github.com/touchline/backend/internal/auth"
 	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
@@ -114,6 +115,7 @@ type App struct {
 	Social    *internalsocial.Service
 	Policy    *policybot.Service
 	Dashboard *internaldashboard.Service
+	Academy   *internalacademy.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
 }
@@ -170,6 +172,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	matches.WithPolicyBot(policySvc)
 	dashSvc := internaldashboard.NewService(pool, bus)
 	dashSvc.WithRealtime(broker)
+	academySvc := internalacademy.NewService(pool, bus)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
@@ -190,6 +193,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Social:        socialSvc,
 		Policy:        policySvc,
 		Dashboard:     dashSvc,
+		Academy:       academySvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -217,6 +221,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Social:     socialSvc,
 		Policy:     policySvc,
 		Dashboard:  dashSvc,
+		Academy:    academySvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -360,6 +365,22 @@ func (a *App) RunWorker(ctx context.Context) error {
 			if _, err := a.Finance.ApplyMonthlyWages(ctx, ev.WorldID, ev.WorldTick); err != nil {
 				return fmt.Errorf("world %s monthly wages: %w", ev.WorldID, err)
 			}
+			if _, err := a.Academy.Maintenance(ctx, ev.WorldID, ev.WorldTick); err != nil {
+				return fmt.Errorf("world %s academy maintenance: %w", ev.WorldID, err)
+			}
+		}
+		// Seasonal fallback (S08-01): a world without leagues never emits
+		// SEASON_COMPLETED, so the seasonal tick drives one intake per season
+		// for every academy + country. The season is derived from the canonical
+		// day counter; the intake hooks dedup per season.
+		if payload.Granularity == "seasonal" {
+			season, ref, err := a.worldSeason(ctx, ev.WorldID)
+			if err != nil {
+				return fmt.Errorf("world %s seasonal academy intake: %w", ev.WorldID, err)
+			}
+			if _, err := a.Academy.IntakeForWorld(ctx, ev.WorldID, season, ref); err != nil {
+				return fmt.Errorf("world %s seasonal academy intake: %w", ev.WorldID, err)
+			}
 		}
 		// Home dashboard realtime sweep (S07-01): after the cadence passes have
 		// run, re-snapshot every managed club and push newly surfaced items to
@@ -405,6 +426,36 @@ func (a *App) RunWorker(ctx context.Context) error {
 		}); err != nil {
 			return fmt.Errorf("subscribe %s: %w", bidType, err)
 		}
+	}
+
+	// Season rollover drives the country-scoped academy intake (S08-01): the
+	// completed league's country gets its street discovery plus every club
+	// academy's youth cohort. The eventbus is single-handler-per-type and
+	// nobody else consumes SEASON_COMPLETED.
+	if err := bus.Subscribe(ctx, "SEASON_COMPLETED", func(ev eventbus.Event) error {
+		var payload struct {
+			CountryID *uuid.UUID `json:"country_id"`
+		}
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			log.Printf("season completed %s: unreadable payload (%v); skipping", ev.ID, err)
+			return nil
+		}
+		season, ref, err := a.worldSeason(ctx, ev.WorldID)
+		if err != nil {
+			return fmt.Errorf("world %s season completed intake: %w", ev.WorldID, err)
+		}
+		if payload.CountryID == nil {
+			if _, err := a.Academy.IntakeForWorld(ctx, ev.WorldID, season, ref); err != nil {
+				return fmt.Errorf("world %s season completed intake: %w", ev.WorldID, err)
+			}
+			return nil
+		}
+		if _, err := a.Academy.IntakeForCountry(ctx, ev.WorldID, *payload.CountryID, season, ref); err != nil {
+			return fmt.Errorf("world %s country %s season completed intake: %w", ev.WorldID, *payload.CountryID, err)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("subscribe season completed: %w", err)
 	}
 
 	if err := bus.Start(ctx); err != nil {
@@ -464,6 +515,22 @@ func (a *App) RunAll(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// worldSeason derives the canonical season number and world reference date
+// from the day counter (worldDate = COALESCE(launched_at, created_at) +
+// current_day days; OPD-24). Used by the seasonal academy-intake hooks.
+func (a *App) worldSeason(ctx context.Context, worldID uuid.UUID) (int, time.Time, error) {
+	var day int64
+	var ref time.Time
+	err := a.Pool.QueryRow(ctx, `
+		SELECT w.current_day,
+		       COALESCE(w.launched_at, w.created_at) + make_interval(days => w.current_day::int)
+		FROM world.worlds w WHERE w.id = $1`, worldID).Scan(&day, &ref)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("world season: %w", err)
+	}
+	return internalacademy.SeasonForDay(day), ref, nil
 }
 
 // sweep re-enqueues committed world.events rows that never got a dispatch job.

@@ -83,4 +83,7 @@ type GeneratedPlayer struct {
 	Origin string
 	// AcademyProduct marks the player as a club-academy youth intake.
 	AcademyProduct bool
+	// Talent is the rarity draw for this prospect's ceiling floor (S08-01).
+	// It influences HiddenTraits.Potential but is not persisted itself.
+	Talent TalentClass
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	internalacademy "github.com/touchline/backend/internal/academy"
 	internalauth "github.com/touchline/backend/internal/auth"
 	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
@@ -46,6 +47,7 @@ type server struct {
 	socialSvc     *internalsocial.Service
 	policySvc     *policybot.Service
 	dashSvc       *internaldashboard.Service
+	academySvc    *internalacademy.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -73,6 +75,7 @@ type Options struct {
 	Social        *internalsocial.Service
 	Policy        *policybot.Service
 	Dashboard     *internaldashboard.Service
+	Academy       *internalacademy.Service
 	JWT           pkgjwt.JWTConfig
 	Pool          *pgxpool.Pool
 	CookiesSecure bool
@@ -99,6 +102,7 @@ func New(opts Options) *Server {
 		socialSvc:     opts.Social,
 		policySvc:     opts.Policy,
 		dashSvc:       opts.Dashboard,
+		academySvc:    opts.Academy,
 		jwtCfg:        opts.JWT,
 		pool:          opts.Pool,
 		cookiesSecure: opts.CookiesSecure,

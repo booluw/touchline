@@ -186,12 +186,21 @@ func (s *Service) emitSeasonCompleted(ctx context.Context, tx pgx.Tx, worldID uu
 	if len(order) > 0 {
 		champion = order[0]
 	}
+	// country_id lets the academy seasonal hook target just this league's
+	// country (S08-01); nil for a country-less competition.
+	var countryID *uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT country_id FROM competition.competitions WHERE id = $1`,
+		season.CompetitionID).Scan(&countryID); err != nil {
+		return fmt.Errorf("season completed: load country: %w", err)
+	}
 	return s.recordSeedEvent(ctx, tx, &eventbus.Event{
 		WorldID:   worldID,
 		EventType: "SEASON_COMPLETED",
 		Payload: mustJSON(map[string]any{
 			"season_id":        season.ID,
 			"competition_id":   season.CompetitionID,
+			"country_id":       countryID,
 			"champion_club_id": champion,
 		}),
 	})

@@ -63,6 +63,10 @@ func (s *server) router() *gin.Engine {
 		api.GET("/clubs/:id/training-plan", s.requireAuth, s.handleGetTrainingPlan)
 		api.POST("/clubs/:id/training-plan", s.requireAuth, s.handleSetTrainingPlan)
 
+		// Academy investment (S08-01): the owning manager's own club only.
+		api.GET("/clubs/:id/academy", s.requireAuth, s.handleGetAcademy)
+		api.PUT("/clubs/:id/academy", s.requireAuth, s.handleUpdateAcademy)
+
 		// Finance reads (S05-02): the owning manager's own club only. The
 		// handler resolves the club's world through ownership, so these
 		// endpoints are inherently world-scoped to the caller's manager.

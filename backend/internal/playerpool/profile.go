@@ -11,6 +11,14 @@ import (
 	"github.com/touchline/backend/pkg/playergen"
 )
 
+// PersistGeneratedPlayer writes one generated player as person.people +
+// player.players rows plus the full football profile inside the caller's tx.
+// It is the cluster-external seam for academy/street intakes (the free-agent
+// pool and drafts use the unexported helper directly); see it for semantics.
+func PersistGeneratedPlayer(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, clubID, countryID *uuid.UUID, squadNumber int, gp *playergen.GeneratedPlayer, ref time.Time) (playerID, personID uuid.UUID, err error) {
+	return persistGeneratedPlayer(ctx, tx, worldID, clubID, countryID, squadNumber, gp, ref)
+}
+
 // persistGeneratedPlayer writes one generated player as person.people +
 // player.players rows plus the full football profile (attribute EAV, hidden
 // traits, personality, initial emotional state) inside the caller's tx. It is

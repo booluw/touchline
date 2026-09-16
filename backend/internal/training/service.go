@@ -280,6 +280,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 		if c.PlayerID == uuid.Nil {
 			c = defaultCondition(p.id, p.injury)
 		}
+		net := make(map[string]int)
 
 		for _, key := range distinctKeys(a) {
 			d := attrDelta(a, p.age, key)
@@ -291,6 +292,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 			if next == attr[key] {
 				continue
 			}
+			net[key] += next - attr[key]
 			cat := playergen.CategoryForKey(key)
 			if cat == "" {
 				continue // unknown key: catalogue changed; never write garbage
@@ -312,6 +314,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 				if next == attr[key] {
 					continue
 				}
+				net[key] += next - attr[key]
 				cat := playergen.CategoryForKey(key)
 				if cat == "" {
 					continue
@@ -334,6 +337,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 			if next == attr[key] {
 				continue
 			}
+			net[key] += next - attr[key]
 			cat := playergen.CategoryForKey(key)
 			if cat == "" {
 				continue
@@ -345,6 +349,15 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 				p.id, cat, key, next); err != nil {
 				return false, fmt.Errorf("veteran decay %s: %w", key, err)
 			}
+		}
+
+		// S08-01: persist the week's net attribute movement (and the weekly
+		// morale swing as the 'morale' pseudo-key) for the read model's delta
+		// block. Only non-zero deltas land; zero-change weeks leave no row.
+		last, hasBaseline := lastMoraleValue(ctx, tx, p.id)
+		moraleDelta, writeMorale := moraleSwing(last, hasBaseline, c.Morale)
+		if err := recordDeltas(ctx, tx, p.id, weekTick, net, moraleDelta, writeMorale); err != nil {
+			return false, fmt.Errorf("delta record: %w", err)
 		}
 
 		c = applyCondition(c, a, p.position)
@@ -457,7 +470,7 @@ func loadConditions(ctx context.Context, tx pgx.Tx, playerIDs []uuid.UUID) (map[
 		return out, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT player_id, fatigue, fitness, sharpness, injury_risk, tactical_familiarity
+		SELECT player_id, fatigue, fitness, sharpness, injury_risk, tactical_familiarity, COALESCE(morale, 0.5)
 		FROM player.player_condition WHERE player_id = ANY($1)`, playerIDs)
 	if err != nil {
 		return nil, fmt.Errorf("load conditions: %w", err)
@@ -466,7 +479,7 @@ func loadConditions(ctx context.Context, tx pgx.Tx, playerIDs []uuid.UUID) (map[
 	for rows.Next() {
 		var c squad.PlayerCondition
 		if err := rows.Scan(&c.PlayerID, &c.Fatigue, &c.Fitness, &c.Sharpness,
-			&c.InjuryRisk, &c.TacticalFamiliarity); err != nil {
+			&c.InjuryRisk, &c.TacticalFamiliarity, &c.Morale); err != nil {
 			return nil, fmt.Errorf("scan condition: %w", err)
 		}
 		out[c.PlayerID] = c

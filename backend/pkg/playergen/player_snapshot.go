@@ -15,7 +15,9 @@ import "math/rand"
 
 // generateTraitsAndPersonality draws the hidden-trait row and the personality
 // row coherently: the four shared dimensions are drawn once and mirrored.
-func generateTraitsAndPersonality(rng *rand.Rand, age int) (HiddenTraits, Personality) {
+// potentialBonus is the talent class's potential-FLOOR lift (0 for the default
+// tier); it raises the bottom of the roll before clamping to [1,100].
+func generateTraitsAndPersonality(rng *rand.Rand, age int, potentialBonus int) (HiddenTraits, Personality) {
 	professionalism := rng.Intn(56) + 35 // 35..90
 	ambition := rng.Intn(66) + 25        // 25..90
 	loyalty := rng.Intn(61) + 30         // 30..90
@@ -24,7 +26,7 @@ func generateTraitsAndPersonality(rng *rand.Rand, age int) (HiddenTraits, Person
 	ht := HiddenTraits{
 		// In the [1,100] bands below, each trait's baseline lives mid-range so
 		// a generated squad is neither a dressing room of 90s nor of 10s.
-		Potential:            clampInt(70+rng.Intn(21)+(maxAge-age), 1, 100),
+		Potential:            clampInt(70+rng.Intn(21)+potentialBonus+(maxAge-age), 1, 100),
 		Consistency:          rng.Intn(61) + 30, // 30..90
 		InjurySusceptibility: rng.Intn(46) + 5,  // 5..50, low = robust
 		Adaptability:         adaptability,

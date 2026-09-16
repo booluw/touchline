@@ -29,6 +29,10 @@ type CreatePlayerOptions struct {
 	Origin string
 	// AcademyProduct marks the player as a club-academy youth intake.
 	AcademyProduct bool
+	// TalentOdds skews the rarity draw for this generation profile. Zero-value
+	// falls back to playergen.WorldTalentOdds. Academy tiers and the street
+	// intake pass their own profiles.
+	TalentOdds TalentOdds
 }
 
 // PlayerFactory creates players with nationality-weighted names and basic
@@ -117,7 +121,8 @@ func (f *PlayerFactory) CreatePlayerWithOptions(opts CreatePlayerOptions) (*Gene
 		if f.registry == nil || f.registry.Reserve(code, first, last) {
 			pos := ValidPositions[f.rng.Intn(len(ValidPositions))]
 			age := lo + f.rng.Intn(hi-lo+1)
-			ht, personality := generateTraitsAndPersonality(f.rng, age)
+			talent := rollTalent(f.rng, opts.TalentOdds)
+			ht, personality := generateTraitsAndPersonality(f.rng, age, talent.potentialBonus())
 			return &GeneratedPlayer{
 				FirstName:       first,
 				LastName:        last,
@@ -131,6 +136,7 @@ func (f *PlayerFactory) CreatePlayerWithOptions(opts CreatePlayerOptions) (*Gene
 				EmotionalState:  neutralEmotionalState(f.rng),
 				Origin:          opts.Origin,
 				AcademyProduct:  opts.AcademyProduct,
+				Talent:          talent,
 			}, nil
 		}
 	}

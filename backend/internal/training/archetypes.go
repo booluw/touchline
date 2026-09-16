@@ -209,6 +209,7 @@ func defaultCondition(pid uuid.UUID, injurySusceptibility int) squad.PlayerCondi
 		Sharpness:           0.5,
 		InjuryRisk:          risk,
 		TacticalFamiliarity: 0.5,
+		Morale:              0.5,
 	}
 }
 

@@ -93,7 +93,7 @@ func TestTraitsAndPersonalityMirrored(t *testing.T) {
 	// The four shared dimensions must agree between the two rows.
 	seen := map[string]int{}
 	for i := 0; i < 20; i++ {
-		ht, p := generateTraitsAndPersonality(newTestFactory(5).rng, 20)
+		ht, p := generateTraitsAndPersonality(newTestFactory(5).rng, 20, 0)
 		for k, a := range map[string]struct{ h, p int }{
 			"professionalism": {ht.Professionalism, p.Professionalism},
 			"ambition":        {ht.Ambition, p.Ambition},
@@ -122,9 +122,9 @@ func TestPotentialIsAgeAware(t *testing.T) {
 	const n = 300
 	var young, old float64
 	for i := 0; i < n; i++ {
-		ht, _ := generateTraitsAndPersonality(f.rng, 18) // young
+		ht, _ := generateTraitsAndPersonality(f.rng, 18, 0) // young
 		young += float64(ht.Potential)
-		ht2, _ := generateTraitsAndPersonality(f.rng, 31) // old
+		ht2, _ := generateTraitsAndPersonality(f.rng, 31, 0) // old
 		old += float64(ht2.Potential)
 	}
 	if young/n <= old/n {
@@ -138,7 +138,7 @@ func TestTemperamentSpreadsToScoutingThreshold(t *testing.T) {
 	f := newTestFactory(21)
 	volatile := 0
 	for i := 0; i < 500; i++ {
-		ht, _ := generateTraitsAndPersonality(f.rng, 20)
+		ht, _ := generateTraitsAndPersonality(f.rng, 20, 0)
 		if ht.Temperament <= 30 {
 			volatile++
 		}

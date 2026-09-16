@@ -613,6 +613,88 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/academy:
+    get:
+      tags: [clubs]
+      summary: Get the club's academy configuration
+      operationId: getAcademy
+      description: Owning manager only. Reveals tier, facilities, and annual cost.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The academy configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Academy" }
+              examples:
+                sample:
+                  value:
+                    club_id: 00000000-0000-4000-8000-000000000005
+                    world_id: 00000000-0000-4000-8000-000000000001
+                    is_active: true
+                    investment_tier: 3
+                    tier_name: Premier Prospects
+                    facility_level: 4
+                    scouting_level: 2
+                    staff_quality: 3
+                    annual_cost: 1200000
+                    upgrade_cost: 2000000
+                    youth_intake_targets: 16
+                    season_start_intake_season: 3
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      tags: [clubs]
+      summary: Update the club's academy investment or activity
+      operationId: updateAcademy
+      description: Owning manager only. Tier changes are billed immediately; toggling activity opens or shuts the academy.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                investment_tier:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  example: 4
+                is_active:
+                  type: boolean
+                  example: false
+      responses:
+        "200":
+          description: The updated academy configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Academy" }
+        "400":
+          description: Invalid tier or empty body.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/finances:
     get:
       tags: [finance]
@@ -2424,6 +2506,25 @@ components:
         archetype: { type: string }
         effective_from_tick: { type: integer }
         last_applied_week: { type: integer, nullable: true }
+    Academy:
+      type: object
+      properties:
+        club_id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        is_active: { type: boolean }
+        investment_tier: { type: integer, minimum: 1, maximum: 5 }
+        facility_level: { type: integer }
+        scouting_level: { type: integer }
+        staff_quality: { type: integer }
+        annual_cost: { type: integer, format: int64 }
+        reputation: { type: integer }
+        last_intake_season: { type: integer, nullable: true }
+        updated_at: { type: string, format: date-time }
+    AcademyUpdateRequest:
+      type: object
+      properties:
+        investment_tier: { type: integer, minimum: 1, maximum: 5 }
+        is_active: { type: boolean }
     FinancialSummary:
       type: object
       properties:

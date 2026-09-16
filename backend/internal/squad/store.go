@@ -395,7 +395,9 @@ func (s *Store) LoadTactics(ctx context.Context, clubID uuid.UUID) (TacticsRow, 
 }
 
 // PlayerCondition is one XI member's match-condition dims
-// (player.player_condition; S05-01). All values in [0,1].
+// (player.player_condition; S05-01). All values in [0,1]. Morale is the
+// S06-05 whole-hour attitude dim (0 bad .. 1 great), tracked by the player
+// package but aggregated here for the weekly training pass's read.
 type PlayerCondition struct {
 	PlayerID            uuid.UUID
 	Fatigue             float64
@@ -403,6 +405,7 @@ type PlayerCondition struct {
 	Sharpness           float64
 	InjuryRisk          float64
 	TacticalFamiliarity float64
+	Morale              float64
 }
 
 // LoadConditions reads condition rows for a set of players. Players without a

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/playergen"
 )
@@ -80,8 +82,8 @@ func SeedPool(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 			EventType: "POOL_SEEDED",
 			ActorType: &actor,
 			Payload: mustJSON(map[string]any{
-				"world_id":  worldID,
-				"count":     size,
+				"world_id":   worldID,
+				"count":      size,
 				"country_id": countryID,
 			}),
 		})
@@ -124,8 +126,11 @@ func ReplenishPool(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 }
 
 // ListFreeAgents returns a paginated slice of the pool's free agents together
-// with a total count (for pagination). Results are ordered by overall rating
-// descending then by name for deterministic paging.
+// with a total count (for pagination). Overall rating is the canonical
+// per-position OVR (squad.PositionalOverall, 99-capped) and results are
+// ordered by it descending then by name for deterministic paging. The pool is
+// bounded (PoolTargetSize per country), so the full slice is aggregated once
+// and paginated in Go — SQL AVG-overall ordering is gone by design.
 func ListFreeAgents(ctx context.Context, db Queryable,
 	worldID uuid.UUID, countryID *uuid.UUID, page, pageSize int,
 ) ([]FreeAgent, int, error) {
@@ -150,44 +155,76 @@ func ListFreeAgents(ctx context.Context, db Queryable,
 		return []FreeAgent{}, 0, nil
 	}
 
-	offset := (page - 1) * pageSize
 	rows, err := db.Query(ctx, `
 		SELECT p.id, pe.first_name, pe.last_name, pe.display_name,
 		       pe.nationality_code, pe.date_of_birth, p.primary_position, p.origin,
-		       COALESCE(ROUND(AVG(a.value))::int, 0) AS overall,
-		       COALESCE(p.market_value, 0)::bigint
+		       COALESCE(p.market_value, 0)::bigint,
+		       COALESCE(AVG(a.value) FILTER (WHERE a.attribute_category = 'technical'), 0)::int,
+		       COALESCE(AVG(a.value) FILTER (WHERE a.attribute_category = 'physical'), 0)::int,
+		       COALESCE(AVG(a.value) FILTER (WHERE a.attribute_category = 'mental'), 0)::int,
+		       COALESCE(AVG(a.value) FILTER (WHERE a.attribute_category = 'tactical'), 0)::int,
+		       COALESCE(AVG(a.value) FILTER (WHERE a.attribute_category = 'positional'), 0)::int,
+		       COALESCE(AVG(a.value) FILTER (WHERE a.attribute_category = 'goalkeeping'), 0)::int
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
 		LEFT JOIN player.player_attributes a ON a.player_id = p.id
 		WHERE p.world_id = $1 AND p.club_id IS NULL AND p.status = 'free_agent'
 		  AND ($2::uuid IS NULL OR p.country_id IS NOT DISTINCT FROM $2)
-		GROUP BY p.id, pe.id
-		ORDER BY overall DESC, pe.last_name, pe.first_name
-		LIMIT $3 OFFSET $4`,
-		worldID, countryID, pageSize, offset,
+		GROUP BY p.id, pe.id`,
+		worldID, countryID,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query free agents: %w", err)
 	}
 	defer rows.Close()
 
-	var agents []FreeAgent
+	type candidate struct {
+		fa  FreeAgent
+		ovr int
+	}
+	var cands []candidate
 	for rows.Next() {
-		var fa FreeAgent
+		var c candidate
 		var dob interface{}
-		if err := rows.Scan(&fa.ID, &fa.FirstName, &fa.LastName, &fa.DisplayName,
-			&fa.NationalityCode, &dob, &fa.PrimaryPosition, &fa.Origin,
-			&fa.OverallRating, &fa.MarketValue); err != nil {
+		var cats squad.AttributeSnapshot
+		if err := rows.Scan(&c.fa.ID, &c.fa.FirstName, &c.fa.LastName, &c.fa.DisplayName,
+			&c.fa.NationalityCode, &dob, &c.fa.PrimaryPosition, &c.fa.Origin,
+			&c.fa.MarketValue, &cats.Technical, &cats.Physical, &cats.Mental,
+			&cats.Tactical, &cats.Positional, &cats.Goalkeeping); err != nil {
 			return nil, 0, fmt.Errorf("scan free agent: %w", err)
 		}
 		if t, ok := dob.(interface{ Format(layout string) string }); ok {
-			fa.DateOfBirth = t.Format("2006-01-02")
+			c.fa.DateOfBirth = t.Format("2006-01-02")
 		}
-		fa.PersonID = uuid.Nil // populated below
-		agents = append(agents, fa)
+		c.ovr = squad.PositionalOverall(c.fa.PrimaryPosition, cats)
+		c.fa.OverallRating = c.ovr
+		cands = append(cands, c)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate free agents: %w", err)
+	}
+
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].ovr != cands[j].ovr {
+			return cands[i].ovr > cands[j].ovr
+		}
+		if cands[i].fa.LastName != cands[j].fa.LastName {
+			return cands[i].fa.LastName < cands[j].fa.LastName
+		}
+		return cands[i].fa.FirstName < cands[j].fa.FirstName
+	})
+
+	lo := (page - 1) * pageSize
+	if lo > len(cands) {
+		lo = len(cands)
+	}
+	hi := lo + pageSize
+	if hi > len(cands) {
+		hi = len(cands)
+	}
+	agents := make([]FreeAgent, 0, hi-lo)
+	for i := lo; i < hi; i++ {
+		agents = append(agents, cands[i].fa)
 	}
 
 	// Second pass: person_id is needed for the API response but the first

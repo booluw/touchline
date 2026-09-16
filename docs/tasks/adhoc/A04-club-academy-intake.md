@@ -1,6 +1,6 @@
 # A04 — Club academy system and seasonal intake
 
-**Status:** Not started
+**Status:** Implemented  
 **Sprint:** Ad-hoc (player lifecycle)
 **Source:** PRD §23; user design session
 **Depends on:** A01, A03
@@ -36,6 +36,22 @@ func (s *Service) IntakeForClub(ctx context.Context, clubID, countryID uuid.UUID
 // IntakeForWorld runs IntakeForClub for every non-shuttered academy in the world.
 func (s *Service) IntakeForWorld(ctx context.Context, worldID, countryID uuid.UUID, seasonNumber int, ref time.Time) (int, error)
 ```
+
+## Delivery evidence
+
+- **`internal/academy`** (new package, `model.go`/`store.go`/`service.go`): `Service{EnsureAcademies, GetAcademy, RequireOwnership, SetInvestment, SetActive, IntakeForClub, IntakeForCountry, IntakeForWorld}`; deterministic per world+club+season intake keys (replays stable), ability/quality helpers (`ProspectCountForTier`, `QualityOffsetForTier`, `TalentOddsForTier`), tier tables + annual cost, 3-season youth-contract numerics. Tests green (`internal/academy/model_test.go` + integration Intake test).
+- **`internal/playerpool`**: `PersistGeneratedPlayer` exported and used by academy intake to land intake youth rows; free-agent listing surfaces canonical `PositionalOverall` (read-model OVR) — `internal/playerpool/pool.go` + profile.go.
+- **`pkg/playergen`**: region-parameterizable youth quality + `roll` machinery (tier odds/floor) from S08-01; talent/potential numerics landed.
+- **`internal/finance`**: `SignAcademyProspects` (youth contract + `finance.wage_commitments` twin, per-player partial-unique idempotency) + `AcademyLedger` maintenance debit; `YouthWeeklyWage` tier-scaled. Tests green.
+- **`internal/training`**: weekly `PlayerAttributeChanges` recording incl. morale-pseudo-key deltas (`internal/training/deltas.go`), migration `0043_player_attribute_changes` + `0044_youth_contracts`; `applyClubWeekly` persists net deltas + morale swing. Tests green.
+- **`internal/competition`**: `SEASON_COMPLETED` payload carries `country_id` (rollover.go); `internal/app` wires academy maintenance + seasonal intake (WORLD_TICK monthly debit idempotent per tick; SEASON_COMPLETED → `IntakeForCountry`/`IntakeForWorld` fallback for league-less worlds).
+- **HTTP + docs**: `GET/PUT /api/clubs/:id/academy` handlers in `internal/httpapi/academy_handlers.go`, wired in router + server, documented in openapi.yaml, docs-coverage test green; design doc `docs/design/academy-numerics.md` (single source of numerics truth).
+
+## Acceptance criteria
+
+- `go test ./internal/academy/...` — unit + intake.
+- `go mod build` clean.
+- API returns academy config.
 
 ### Intake formula
 

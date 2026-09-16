@@ -39,6 +39,23 @@ func MeanAttribute(attrs map[string]int) int {
 	return int(math.Round(float64(sum) / float64(len(attrs))))
 }
 
+// YouthContractYears is the fixed academy prospect deal length (S08-01):
+// prospects sign through their development window rather than a
+// senior age-based term.
+const YouthContractYears = 3
+
+// YouthWeeklyWage is the academy prospect's tier-based weekly wage
+// (docs/design/academy-numerics.md §2): tier 1..5 pays £500..£2,500/wk.
+func YouthWeeklyWage(tier int) int {
+	if tier < 1 {
+		tier = 1
+	}
+	if tier > 5 {
+		tier = 5
+	}
+	return tier * 500
+}
+
 // ContractSeasons returns the standard contract length in full seasons for
 // a player of the given age.
 func ContractSeasons(age int) int {
