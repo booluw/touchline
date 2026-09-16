@@ -11,6 +11,7 @@ import (
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
 	internalcompetition "github.com/touchline/backend/internal/competition"
+	internaldashboard "github.com/touchline/backend/internal/dashboard"
 	internalfinance "github.com/touchline/backend/internal/finance"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalmatch "github.com/touchline/backend/internal/match"
@@ -44,6 +45,7 @@ type server struct {
 	playerSvc     *internalplayer.Service
 	socialSvc     *internalsocial.Service
 	policySvc     *policybot.Service
+	dashSvc       *internaldashboard.Service
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -70,6 +72,7 @@ type Options struct {
 	Player        *internalplayer.Service
 	Social        *internalsocial.Service
 	Policy        *policybot.Service
+	Dashboard     *internaldashboard.Service
 	JWT           pkgjwt.JWTConfig
 	Pool          *pgxpool.Pool
 	CookiesSecure bool
@@ -95,6 +98,7 @@ func New(opts Options) *Server {
 		playerSvc:     opts.Player,
 		socialSvc:     opts.Social,
 		policySvc:     opts.Policy,
+		dashSvc:       opts.Dashboard,
 		jwtCfg:        opts.JWT,
 		pool:          opts.Pool,
 		cookiesSecure: opts.CookiesSecure,

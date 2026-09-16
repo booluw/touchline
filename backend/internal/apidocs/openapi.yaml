@@ -325,28 +325,34 @@ paths:
   /api/dashboard:
     get:
       tags: [dashboard]
-      summary: Session dashboard aggregate
+      summary: Home dashboard aggregate (S07-01)
       operationId: dashboard
       description: |
-        Protected endpoint proving the session round-trip; the S07-01
-        aggregation returns the empty shape the frontend already types against.
+        The manager's home feed: urgent, important and interesting items
+        aggregated from the world's already-persisted state (open bid threads,
+        expiring contracts, imminent fixtures, board confidence, finances,
+        player morale, table position, rival results, market news). Postgres is
+        authoritative; the same items are pushed incrementally over the socket
+        as `dashboard_update` events. A manager with no active club gets empty
+        sections rather than an error.
       responses:
         "200":
           description: Aggregated dashboard feed.
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  urgent: { type: array, items: {}, example: [] }
-                  important: { type: array, items: {}, example: [] }
-                  interesting: { type: array, items: {}, example: [] }
+              schema: { $ref: "#/components/schemas/DashboardSnapshot" }
         "401":
           description: No valid access_token cookie.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               example: { error: "unauthorized" }
+        "403":
+          description: The caller has no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "no world context" }
   /api/clubs:
     get:
       tags: [clubs]
@@ -2164,6 +2170,58 @@ components:
       required: [error]
       properties:
         error: { type: string, example: internal error }
+    DashboardItem:
+      type: object
+      description: |
+        One home-feed entry. ID is a stable dedupe key (e.g. "bids:<uuid>",
+        "contracts:<uuid>") the client uses to merge realtime
+        `dashboard_update` items without refetching.
+      required: [id, priority, category, title, description, created_at]
+      properties:
+        id: { type: string, example: "bids:3b1e..." }
+        priority:
+          type: string
+          enum: [urgent, important, interesting]
+        category:
+          type: string
+          enum: [bids, contracts, match, board, finance, morale, standings, rivals, market]
+          example: bids
+        title: { type: string, example: "Bid on Jordan Cole for £10,000,000" }
+        description: { type: string, example: "Northbridge want your player." }
+        created_at: { type: string, format: date-time }
+        action:
+          $ref: "#/components/schemas/DashboardAction"
+    DashboardAction:
+      type: object
+      description: |
+        The deep-link the client follows when the user taps an item. Kind
+        selects the screen; the pointed IDs scope it (all optional).
+      properties:
+        kind:
+          type: string
+          enum: [respond_bid, renew_contract, set_lineup, view_board, view_finances, view_player, view_standings, view_fixture]
+          example: respond_bid
+        club_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        fixture_id: { type: string, format: uuid }
+        bid_id: { type: string, format: uuid }
+    DashboardSnapshot:
+      type: object
+      description: "The GET /api/dashboard body: the three ranked feed sections."
+      required: [urgent, important, interesting]
+      properties:
+        urgent:
+          type: array
+          description: Act now — open bids, expiring contracts, imminent fixtures, critical board confidence, unresolved financial crisis.
+          items: { $ref: "#/components/schemas/DashboardItem" }
+        important:
+          type: array
+          description: Decide soon — board-confidence drops, negative cash, unhappy players / transfer requests.
+          items: { $ref: "#/components/schemas/DashboardItem" }
+        interesting:
+          type: array
+          description: Ambient context — table position, rival results, market news.
+          items: { $ref: "#/components/schemas/DashboardItem" }
     Status:
       type: object
       properties:

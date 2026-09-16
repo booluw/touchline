@@ -72,6 +72,13 @@ const (
 	// carries the fixture pair plus the changed edges; the graph read (profile /
 	// /api/relationships) stays authoritative — the push is best-effort.
 	EventRelationshipChange = "relationship_change"
+	// EventDashboardUpdate is pushed to a manager's socket feed when the home
+	// dashboard aggregator surfaces new items (S07-01): init / bid events and
+	// the world-tick sweep. Its payload is a DashboardUpdatePayload carrying
+	// the section and the not-yet-pushed items; the GET /api/dashboard read
+	// stays authoritative — the push is best-effort and the client dedupes by
+	// stable item ID.
+	EventDashboardUpdate = "dashboard_update"
 	// EventPong answers a client ping.
 	EventPong = "pong"
 	// EventError reports a client-side protocol problem (unknown type, malformed

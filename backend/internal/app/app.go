@@ -24,6 +24,7 @@ import (
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
 	internalclub "github.com/touchline/backend/internal/club"
 	internalcompetition "github.com/touchline/backend/internal/competition"
+	internaldashboard "github.com/touchline/backend/internal/dashboard"
 	"github.com/touchline/backend/internal/eventoutbox"
 	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/internal/form"
@@ -112,6 +113,7 @@ type App struct {
 	Board     *internalboard.Service
 	Social    *internalsocial.Service
 	Policy    *policybot.Service
+	Dashboard *internaldashboard.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
 }
@@ -166,6 +168,8 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	boardSvc := internalboard.NewService(pool, bus, managerSvc)
 	policySvc := policybot.NewService(pool, bus, squadStore, tacticsSvc, trainingSvc, transfersSvc)
 	matches.WithPolicyBot(policySvc)
+	dashSvc := internaldashboard.NewService(pool, bus)
+	dashSvc.WithRealtime(broker)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
@@ -185,6 +189,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Player:        playerSvc,
 		Social:        socialSvc,
 		Policy:        policySvc,
+		Dashboard:     dashSvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -211,6 +216,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Board:      boardSvc,
 		Social:     socialSvc,
 		Policy:     policySvc,
+		Dashboard:  dashSvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -355,9 +361,50 @@ func (a *App) RunWorker(ctx context.Context) error {
 				return fmt.Errorf("world %s monthly wages: %w", ev.WorldID, err)
 			}
 		}
+		// Home dashboard realtime sweep (S07-01): after the cadence passes have
+		// run, re-snapshot every managed club and push newly surfaced items to
+		// the affected managers' socket feeds. Best-effort; the GET read stays
+		// authoritative.
+		if err := a.Dashboard.PushWorldDelta(ctx, ev.WorldID); err != nil {
+			return fmt.Errorf("world %s dashboard sweep: %w", ev.WorldID, err)
+		}
 		return nil
 	}); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
+	}
+
+	// Transfer-market events push an urgent dashboard item to the selling
+	// club's manager the moment a bid lands/counters/resolves (S07-01). The
+	// eventbus is single-handler-per-type and nobody else consumes these types.
+	for _, bidType := range []string{
+		internaltransfer.EventBidPlaced,
+		internaltransfer.EventBidCountered,
+		internaltransfer.EventBidAccepted,
+		internaltransfer.EventBidRejected,
+	} {
+		if err := bus.Subscribe(ctx, bidType, func(ev eventbus.Event) error {
+			var payload struct {
+				BidID         uuid.UUID `json:"bid_id"`
+				SellingClubID uuid.UUID `json:"selling_club_id"`
+			}
+			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+				log.Printf("bid event %s: unreadable payload (%v); skipping", ev.ID, err)
+				return nil
+			}
+			if payload.SellingClubID == uuid.Nil {
+				return nil
+			}
+			managerID, err := a.Dashboard.ManagerForClub(ctx, ev.WorldID, payload.SellingClubID)
+			if err != nil {
+				return nil
+			}
+			if err := a.Dashboard.PushCategory(ctx, ev.WorldID, managerID, internaldashboard.PriorityUrgent); err != nil {
+				log.Printf("world %s dashboard bid push: %v", ev.WorldID, err)
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("subscribe %s: %w", bidType, err)
+		}
 	}
 
 	if err := bus.Start(ctx); err != nil {

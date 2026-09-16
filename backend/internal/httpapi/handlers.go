@@ -157,20 +157,6 @@ func (s *server) handleRegister(c *gin.Context) {
 	})
 }
 
-// handleDashboard is a protected endpoint proving the session round-trip. The
-// aggregation itself is S07-01; it returns the exact empty shape the frontend
-// useDashboard composable already types against.
-func (s *server) handleDashboard(c *gin.Context) {
-	identity, _ := c.Get(identityKey)
-	_ = identity // identity is available to the S07-01 aggregator
-
-	c.JSON(http.StatusOK, gin.H{
-		"urgent":      []any{},
-		"important":   []any{},
-		"interesting": []any{},
-	})
-}
-
 // setAuthCookies writes the httpOnly cookie pair. SameSite=Lax: dev runs the
 // Nuxt client on :3000 against the API on :8080 — different origins but the
 // same site (host localhost), so Lax cookies are sent on fetch. Secure is only
