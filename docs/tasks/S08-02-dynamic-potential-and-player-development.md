@@ -1,6 +1,6 @@
 # S08-02 — Implement dynamic potential growth and age-curve player development
 
-**Status:** In progress — engine + weekly integration implemented; final verification pending  
+**Status:** Completed  
 **Sprint:** 08 — Academies and player development  
 **Source:** PRD §10; technical plan §16; OPENCODE.md  
 **Depends on:** S04-02 (asserts S08-02 in the task list), S08-01
@@ -11,11 +11,11 @@ Build the dynamic player potential and progression engine. Rather than static fi
 
 ## Acceptance criteria
 
-- `player.player_attributes` updates dynamically following periodic development ticks.
-- Young players receiving regular first-team match minutes experience accelerated attribute growth and potential ceiling expansion.
-- Lack of playing time or poor training discipline causes young player development to stagnate.
-- Veteran players follow realistic physical attribute decay curves while preserving or increasing tactical/mental attributes.
-- All attribute adjustments produce auditable event records accompanied by `Explanation` objects detailing development drivers (e.g., "+2 Stamina from high match minutes and quality training").
+- ✅ `player.player_attributes` updates dynamically following periodic development ticks — the S08-01 weekly sweep folds dev multipliers into growth and persists `player.player_development` state (`training_service.go` applyClubWeekly; `internal/development`.
+- ✅ Young players receiving regular first-team match minutes experience accelerated attribute growth and potential ceiling expansion — dev-engine unit tests (age-curve ordering, flex expansion) + `TestDevelopmentWeeklyFlexExpansion` (19-year-old elite wonderkid 85→87 potential, budget 3→2).
+- ✅ Lack of playing time or poor training discipline causes young player development to stagnate — stagnation counter + ×0.85 gate at `StagnatingThreshold`; `TestDevelopmentWeeklyStagnationWritesState` (counter 1→2→3 over three bench weeks).
+- ✅ Veteran players follow realistic physical attribute decay curves while preserving or increasing tactical/mental attributes — age-curve factors (30+: physical ×0.55, mental ×1.15).
+- ✅ All attribute adjustments produce auditable event records accompanied by `Explanation` objects detailing development drivers — per-club `DEVELOPMENT_WEEK` event with per-player explanations (subject `player_development`), surfaced via the read endpoint's `drivers`.
 
 ## Design decisions (implemented)
 
@@ -28,6 +28,7 @@ Build the dynamic player potential and progression engine. Rather than static fi
 ## Delivery evidence
 
 - `internal/development` pure engine + unit tests (`go test ./internal/development/`): age-curve ordering, minutes/stagnation, potential-ceiling trickle, flex expansion + budget/lock, age-lock, legacy-no-ceiling, deterministic replay, Overall blend, explanation auditability.
-- Sweep integration compiles and unit-tests clean; deterministic weekly model test updated to fold development multipliers; integration-tagged suite compiles (`go vet -tags integration ./internal/training/`), full DB verification pending CI.
-- Manager-facing read surface: `GET /api/clubs/:id/players/:playerID/development` (`internal/player.GetPlayerDevelopmentDetail` + `internal/httpapi`) returns the observable trajectory (last_eval_week, cum_dev_weeks, consecutive_stagnant_weeks, `stagnating` per `development.StagnatingThreshold`, recent attribute deltas excluding the morale pseudo-key) and the stored `DEVELOPMENT_WEEK` drivers (PRD §54 — stored, never recomputed). The hidden potential ceiling / expansion budget / lock state are **never** exposed (design: managers see trajectory, not headroom). `cmd/api/player_development_integration_test.go` covers 200-with-state+drivers, never-evaluated zeros, 403 other-club, 400 invalid id, 401 anonymous, and asserts ceiling keys are absent from the body.
+- Sweep integration compiles and unit-tests clean; the deterministic weekly model test (TestApplyWeeklyMatchesDeterministicModel) is updated to fold the development multipliers into expected values; the DB dev suite (`internal/training/dev_integration_test.go`) and the dev HTTP suite (`cmd/api/player_development_integration_test.go`) run in CI (`-p 1 -tags integration`; `./internal/training/...` now in the integration job).
+- Manager-facing read surface: `GET /api/clubs/:id/players/:playerID/development` (`internal/player.GetPlayerDevelopmentDetail` + `internal/httpapi` + OpenAPI `internal/apidocs/openapi.yaml`, cross-checked by the router/OpenAPI coverage test) returns the observable trajectory (last_eval_week, cum_dev_weeks, consecutive_stagnant_weeks, `stagnating` per `development.StagnatingThreshold`, recent attribute deltas excluding the morale pseudo-key) and the stored `DEVELOPMENT_WEEK` drivers (PRD §54 — stored, never recomputed). The hidden potential ceiling / expansion budget / lock state are **never** exposed (design: managers see trajectory, not headroom). `cmd/api/player_development_integration_test.go` covers 200-with-state+drivers, never-evaluated zeros, 403 other-club, 400 invalid id, 401 anonymous, and asserts ceiling keys are absent from the body.
+- Verification: `go build ./...` + `go vet ./...` + `go vet -tags integration ./internal/{training,player}/... ./cmd/api/...` clean; full unit suite (`go test ./pkg/... ./internal/... ./cmd/...`) green incl. the dev-engine tests and the training deterministic-model test folded with development multipliers. The DB-level integration suites (`internal/training` dev tests + `cmd/api` dev HTTP test) use the shared `testdb` harness and run in CI — `./internal/training/...` added to the CI integration job (`.github/workflows/ci.yml`) so the S08-02 dev suite executes; run locally only with Docker or `TEST_DATABASE_URL`.
 - Docs: `backend/docs/design/development-numerics.md`; OPENCODE.md repo-layout + status note.
