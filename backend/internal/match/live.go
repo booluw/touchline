@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/injury"
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/matchsim"
@@ -461,6 +462,12 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		if err := s.players.RecordMatchAppearances(ctx, tx, sess.MatchID, apps); err != nil {
 			return nil, fmt.Errorf("finalize: record appearances: %w", err)
 		}
+	}
+
+	// Match injuries land atomically with the result (S08-03), mirroring the
+	// quick-play path.
+	if _, err := injury.PersistMatch(ctx, tx, s.bus, sess.WorldID, sess.worldTick, sess.MatchID, sess.Seed, now, injuryCandidates(res)); err != nil {
+		return nil, fmt.Errorf("finalize: injuries: %w", err)
 	}
 
 	// Rivalry graph + trust deltas land atomically with the result (S06-04c).

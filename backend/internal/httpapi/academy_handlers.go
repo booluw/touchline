@@ -84,3 +84,43 @@ func (s *server) handleUpdateAcademy(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, a)
 }
+
+// handleGetMedicalFacility returns the owning manager's medical facility
+// (S08-03), resolving straight to the neutral default level until built.
+func (s *server) handleGetMedicalFacility(c *gin.Context) {
+	clubID, managerID, ok := s.ownedClubParams(c)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	if err := s.academySvc.RequireOwnership(ctx, managerID, clubID); err != nil {
+		academyStatus(c, err)
+		return
+	}
+	f, err := s.academySvc.GetMedicalFacility(ctx, clubID)
+	if err != nil {
+		academyStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, f)
+}
+
+// handleUpgradeMedical raises the owning manager's medical facility one level,
+// charging the club account, and returns the resulting facility (S08-03).
+func (s *server) handleUpgradeMedical(c *gin.Context) {
+	clubID, managerID, ok := s.ownedClubParams(c)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	if err := s.academySvc.RequireOwnership(ctx, managerID, clubID); err != nil {
+		academyStatus(c, err)
+		return
+	}
+	f, err := s.academySvc.UpgradeMedical(ctx, managerID, clubID)
+	if err != nil {
+		academyStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, f)
+}

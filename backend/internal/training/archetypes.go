@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/touchline/backend/internal/injury"
 	"github.com/touchline/backend/internal/squad"
 )
 
@@ -195,6 +196,20 @@ func applyDelta(v int, d float64, rng *rand.Rand) int {
 		return 100
 	}
 	return v
+}
+
+// planIntensity is the normalized weekly workload a plan applies to a player of
+// a given age (0..1): the sum of the week's positive growth deltas against the
+// documented saturation volume. Heavier plans raise the weekly training-injury
+// probability (S08-03).
+func planIntensity(a Archetype, age int) float64 {
+	total := 0.0
+	for _, key := range distinctKeys(a) {
+		if d := attrDelta(a, age, key); d > 0 {
+			total += d
+		}
+	}
+	return clamp01(total / injury.TrainingVolumeSaturation)
 }
 
 // defaultsCondition is the lazy baseline (design §2.2: seeded at squad

@@ -67,6 +67,10 @@ func (s *server) router() *gin.Engine {
 		api.GET("/clubs/:id/academy", s.requireAuth, s.handleGetAcademy)
 		api.PUT("/clubs/:id/academy", s.requireAuth, s.handleUpdateAcademy)
 
+		// Medical facility (S08-03): the owning manager's own club only.
+		api.GET("/clubs/:id/medical-facility", s.requireAuth, s.handleGetMedicalFacility)
+		api.PUT("/clubs/:id/medical-facility", s.requireAuth, s.handleUpgradeMedical)
+
 		// Finance reads (S05-02): the owning manager's own club only. The
 		// handler resolves the club's world through ownership, so these
 		// endpoints are inherently world-scoped to the caller's manager.
@@ -129,6 +133,8 @@ func (s *server) router() *gin.Engine {
 		api.GET("/clubs/:id/players", s.requireAuth, s.handleListClubPlayers)
 		api.GET("/clubs/:id/players/:playerID", s.requireAuth, s.handleGetPlayerMorale)
 		api.GET("/clubs/:id/players/:playerID/development", s.requireAuth, s.handleGetPlayerDevelopment)
+		api.GET("/clubs/:id/players/:playerID/injury", s.requireAuth, s.handleGetPlayerInjury)
+		api.POST("/clubs/:id/players/:playerID/rush-return", s.requireAuth, s.handleRushReturn)
 		api.POST("/clubs/:id/players/:playerID/promise-playing-time", s.requireAuth, s.handlePromisePlayingTime)
 		api.POST("/clubs/:id/players/:playerID/transfer-request/approve", s.requireAuth, s.handleApproveTransferRequest)
 		api.POST("/clubs/:id/players/:playerID/transfer-request/deny", s.requireAuth, s.handleDenyTransferRequest)

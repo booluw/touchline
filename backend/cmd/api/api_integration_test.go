@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	internalacademy "github.com/touchline/backend/internal/academy"
 	internalauth "github.com/touchline/backend/internal/auth"
 	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
@@ -35,6 +37,7 @@ import (
 	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgauth "github.com/touchline/backend/pkg/auth"
+	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/realtime"
 )
 
@@ -77,6 +80,7 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 		Finance:       internalfinance.NewService(pool, nil),
 		Player:        playersSvc,
 		Social:        socialSvc,
+		Academy:       internalacademy.NewService(pool, logOnlyBus{}),
 		JWT:           cfg,
 		Pool:          pool,
 		CookiesSecure: false,
@@ -84,6 +88,16 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 		Hub:           hub,
 	})
 	return s, pool
+}
+
+// logOnlyBus satisfies eventbus.Publisher by recording events into world.events
+// inside the caller's transaction without dispatching any river job — the
+// academy service short-circuits when handed a nil bus, so the test server
+// hands it a bus that at least persists the audit row.
+type logOnlyBus struct{}
+
+func (logOnlyBus) PublishTx(ctx context.Context, tx pgx.Tx, e *eventbus.Event) error {
+	return eventbus.RecordTx(ctx, tx, e)
 }
 
 // testHTTPServer boots the real Gin router against a migrated, truncated DB

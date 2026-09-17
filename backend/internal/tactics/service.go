@@ -32,13 +32,14 @@ const (
 
 // Sentinel errors surfaced to HTTP handlers (409 on deadline hits).
 var (
-	ErrClubNotFound     = errors.New("club not found")
-	ErrNotOwned         = errors.New("manager does not control this club")
-	ErrWorldNotActive   = errors.New("world is not accepting gameplay operations")
-	ErrFixtureLive      = errors.New("club has a live fixture; the change applies from the next fixture")
-	ErrInvalidStyle     = errors.New("style must be one of the approved five")
-	ErrInvalidFormation = errors.New("formation is not allowed for this style")
-	ErrInvalidLineup    = errors.New("lineup must name eleven distinct squad players, one per slot")
+	ErrClubNotFound      = errors.New("club not found")
+	ErrNotOwned          = errors.New("manager does not control this club")
+	ErrWorldNotActive    = errors.New("world is not accepting gameplay operations")
+	ErrFixtureLive       = errors.New("club has a live fixture; the change applies from the next fixture")
+	ErrInvalidStyle      = errors.New("style must be one of the approved five")
+	ErrInvalidFormation  = errors.New("formation is not allowed for this style")
+	ErrInvalidLineup     = errors.New("lineup must name eleven distinct squad players, one per slot")
+	ErrPlayerUnavailable = errors.New("lineup includes a player unavailable for selection")
 )
 
 // Publishable is the event sink (may be nil in the API process; the
@@ -181,13 +182,20 @@ func (s *Service) setLineup(ctx context.Context, actor Actor, clubID uuid.UUID, 
 	if err != nil {
 		return fmt.Errorf("lineup: load squad: %w", err)
 	}
-	roster := make(map[uuid.UUID]bool, len(players))
+	byID := make(map[uuid.UUID]squad.LoadedPlayer, len(players))
 	for _, p := range players {
-		roster[p.PlayerID] = true
+		byID[p.PlayerID] = p
 	}
 	for _, pid := range playerIDs {
-		if !roster[pid] {
+		p, ok := byID[pid]
+		if !ok {
 			return ErrInvalidLineup
+		}
+		// A07 gate (S08-03): an injured, suspended, contract-less or
+		// underage-street player cannot be named in the XI. The whole lineup
+		// is rejected; nothing is written.
+		if !p.Available {
+			return ErrPlayerUnavailable
 		}
 	}
 

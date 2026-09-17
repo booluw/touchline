@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/form"
+	"github.com/touchline/backend/internal/injury"
 	"github.com/touchline/backend/internal/player"
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
@@ -183,6 +184,14 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 
 	if _, err := persistEvents(ctx, tx, matchID, res.Events, 0); err != nil {
 		return nil, fmt.Errorf("play fixture: %w", err)
+	}
+
+	// Injuries land atomically with the result (S08-03): the engine's
+	// attribution already linked each injury event to a player; the store
+	// derives severity/duration deterministically from the seeded stream, the
+	// player's fatigue + susceptibility and the club's medical facility.
+	if _, err := injury.PersistMatch(ctx, tx, s.bus, f.WorldID, tick, matchID, seed, now, injuryCandidates(res)); err != nil {
+		return nil, fmt.Errorf("play fixture: injuries: %w", err)
 	}
 
 	if err := s.applyForm(ctx, tx, homePlan, awayPlan, res, tick); err != nil {
@@ -434,6 +443,31 @@ func appearancesFromRatings(xi []squad.SquadMember, ratings []matchsim.PlayerRat
 			Goals:    r.Goals + r.PenaltiesScored,
 			Assists:  r.Assists,
 		})
+	}
+	return out
+}
+
+// injuryCandidates exposes the engine's attributed injury events (v1.6 already
+// resolved the injured player) plus the minutes each actually played, exactly
+// the inputs the injury store needs to derive severity and duration.
+func injuryCandidates(res matchsim.MatchResult) []injury.Candidate {
+	minutes := make(map[string]int, len(res.HomePlayerRatings)+len(res.AwayPlayerRatings))
+	for _, pr := range res.HomePlayerRatings {
+		minutes[pr.PlayerID] = pr.Minutes
+	}
+	for _, pr := range res.AwayPlayerRatings {
+		minutes[pr.PlayerID] = pr.Minutes
+	}
+	var out []injury.Candidate
+	for _, ev := range res.Events {
+		if ev.Type != matchsim.EventInjury || ev.PlayerID == "" {
+			continue
+		}
+		pid, err := uuid.Parse(ev.PlayerID)
+		if err != nil {
+			continue
+		}
+		out = append(out, injury.Candidate{PlayerID: pid, Minutes: minutes[ev.PlayerID]})
 	}
 	return out
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/development"
+	"github.com/touchline/backend/internal/injury"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/world"
 	"github.com/touchline/backend/pkg/eventbus"
@@ -279,6 +281,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 		return false, err
 	}
 	devRec := make([]devWeekPlayer, 0, len(players))
+	injuredCount := 0
 
 	for _, p := range players {
 		attr := attrs[p.id]
@@ -395,6 +398,38 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 			return false, fmt.Errorf("condition: %w", err)
 		}
 
+		// S08-03: weekly training injuries. Deterministic per (week, player) on
+		// the dedicated training stream; the accumulated injury risk, the plan's
+		// workload and the player's fatigue gate how often, and the engine
+		// resolves type/severity/duration against the club's medical facility.
+		// Recovery weeks never injure and a player already sidelined cannot roll
+		// again, so the open-injury row is the single source of truth.
+		if !a.Recovery && c.InjuryRisk > 0 {
+			seed := injury.WeekStream(weekTick, p.id, "training")
+			if injury.TrainingHit(seed, c.InjuryRisk, planIntensity(a, p.age)) {
+				if _, _, _, open, err := injury.OpenForPlayer(ctx, tx, p.id); err != nil {
+					return false, fmt.Errorf("training injury open check: %w", err)
+				} else if !open {
+					med, err := injury.MedicalLevel(ctx, tx, clubID)
+					if err != nil {
+						return false, err
+					}
+					rec, err := injury.RecurrenceForPlayer(ctx, tx, p.id)
+					if err != nil {
+						return false, err
+					}
+					injured, err := injury.PersistTraining(ctx, tx, s.bus, worldID, weekTick,
+						clubID, p.id, c.Fatigue, p.injury, med, rec, seed)
+					if err != nil {
+						return false, err
+					}
+					if injured {
+						injuredCount++
+					}
+				}
+			}
+		}
+
 		// S08-02: persist the development outcome (potential/lock + weekly
 		// state) and collect this player's explanation for the club event.
 		if err := s.recordDevelopment(ctx, tx, p, dc, devOut); err != nil {
@@ -416,6 +451,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 	payload, _ := json.Marshal(map[string]string{
 		"club_id":   clubID.String(),
 		"archetype": archetype,
+		"injuries":  strconv.Itoa(injuredCount),
 	})
 	if err := s.recordSystemEvent(ctx, tx, worldID, weekTick, EventTrainingWeek, payload); err != nil {
 		return false, err

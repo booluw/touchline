@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/touchline/backend/internal/injury"
 	"github.com/touchline/backend/internal/transfer"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -26,6 +27,11 @@ func (s *Service) WeeklyTick(ctx context.Context, worldID uuid.UUID, worldTick i
 		if err := s.clubWeeklyPass(ctx, worldID, worldTick, clubID); err != nil {
 			return err
 		}
+	}
+	// Injury recovery is world-scoped (one tx): setbacks first, then every due
+	// recovery closes with PLAYER_RECOVERED + injury_return history (S08-03).
+	if _, err := injury.RecoverDue(ctx, s.pool, s.bus, worldID, worldTick, time.Now().UTC()); err != nil {
+		return err
 	}
 	if s.transfers != nil {
 		return s.autoListStale(ctx, worldID, worldTick)

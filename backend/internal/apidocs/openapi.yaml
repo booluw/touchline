@@ -695,6 +695,59 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/medical-facility:
+    get:
+      tags: [clubs]
+      summary: Get the club's medical facility
+      operationId: getMedicalFacility
+      description: Owning manager only. Returns the medical-staff level 1..10 that shortens injury recovery and lowers recurrence risk; a club that never built a facility reads as the neutral level 5 (S08-03). No row is written on read.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The medical facility.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MedicalFacility" }
+              examples:
+                sample:
+                  value:
+                    club_id: 00000000-0000-4000-8000-000000000005
+                    level: 6
+                    upgraded_at: "2026-03-02T09:15:00Z"
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      tags: [clubs]
+      summary: Upgrade the club's medical facility one level
+      operationId: upgradeMedicalFacility
+      description: Owning manager only. The step is debited from the club account (cumulative £200k × step), materialising the medical row at the neutral level on first use, and MEDICAL_FACILITY_UPGRADED broadcasts the change. At level 10 the current facility is returned unchanged.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The upgraded medical facility.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MedicalFacility" }
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/finances:
     get:
       tags: [finance]
@@ -1424,6 +1477,68 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "404":
           description: Player not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/injury:
+    get:
+      tags: [player]
+      summary: One player's open injury
+      operationId: getPlayerInjury
+      description: "One of the caller's players' current injury (S08-03): type, severity 1..10, expected recovery date, recurrence risk and the read-time derived recovery progress 0..1 plus days remaining. Returns null when the player is fit."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The player's open injury, or null.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerInjury" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Player not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/rush-return:
+    post:
+      tags: [player]
+      summary: Rush a player back from injury
+      operationId: rushPlayerReturn
+      description: "Owning manager only (S08-03). Closes the player's open injury immediately, stamping the rushed-return recurrence floor (0.65) and emitting PLAYER_RUSHED_RETURN. The manager gambles a far higher recurrence risk against an immediate return; the risk feeds the player's next injury roll."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The closed injury with actual recovery date.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerInjury" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Player not found, or no open injury to rush back.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -2624,6 +2739,21 @@ components:
         applied_week: { type: integer, format: int64 }
         attribute_key: { type: string }
         delta: { type: integer }
+    PlayerInjury:
+      type: object
+      description: "One player's current injury (S08-03). recovery_progress is derived at read time (elapsed / planned recovery window), never stored; actual_recovery_date is only present once the injury has closed."
+      nullable: true
+      properties:
+        injury_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        injury_type: { type: string, enum: [muscle, ligament, bone, concussion, illness, recurring] }
+        severity: { type: integer, minimum: 1, maximum: 10 }
+        occurred_at: { type: string, format: date-time }
+        expected_recovery_date: { type: string, format: date-time }
+        recurrence_risk: { type: number, format: float, minimum: 0, maximum: 1 }
+        recovery_progress: { type: number, format: float, minimum: 0, maximum: 1 }
+        days_remaining: { type: integer }
+        actual_recovery_date: { type: string, format: date-time, nullable: true }
     WorldChoice:
       type: object
       description: One joined world offered by the login world picker / registration join.
@@ -2731,6 +2861,13 @@ components:
         reputation: { type: integer }
         last_intake_season: { type: integer, nullable: true }
         updated_at: { type: string, format: date-time }
+    MedicalFacility:
+      type: object
+      description: "A club's medical-staff level 1..10 (S08-03). Clubs without a medical row read as the neutral level 5."
+      properties:
+        club_id: { type: string, format: uuid }
+        level: { type: integer, minimum: 1, maximum: 10 }
+        upgraded_at: { type: string, format: date-time, nullable: true, description: Null before the club ever upgrades. }
     AcademyUpdateRequest:
       type: object
       properties:

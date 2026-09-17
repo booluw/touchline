@@ -19,6 +19,8 @@ func playerStatus(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"error": "no active club"})
 	case errors.Is(err, internalplayer.ErrRequestNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "no open transfer request"})
+	case errors.Is(err, internalplayer.ErrNoOpenInjury):
+		c.JSON(http.StatusNotFound, gin.H{"error": "no open injury"})
 	case errors.Is(err, internalplayer.ErrPlayerNotInClub):
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 	case errors.Is(err, internalplayer.ErrRequestResolved):
@@ -102,6 +104,61 @@ func (s *server) handleGetPlayerDevelopment(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, detail)
+}
+
+// handleGetPlayerInjury returns the owning player's open injury with the
+// read-time derived recovery progress, or null when fit
+// (GET /api/clubs/:id/players/:playerID/injury).
+func (s *server) handleGetPlayerInjury(c *gin.Context) {
+	clubID, ok := clubParam(c)
+	if !ok {
+		return
+	}
+	playerID, err := uuid.Parse(c.Param("playerID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		return
+	}
+	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
+	_ = clubID // ownership already enforced inside the player service via manager
+	v, err := s.playerSvc.GetPlayerInjury(c.Request.Context(), worldID, ident.ManagerID, playerID)
+	if err != nil {
+		playerStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, v)
+}
+
+// handleRushReturn closes the owning player's open injury early, raising the
+// recurrence risk (POST /api/clubs/:id/players/:playerID/rush-return).
+func (s *server) handleRushReturn(c *gin.Context) {
+	clubID, ok := clubParam(c)
+	if !ok {
+		return
+	}
+	playerID, err := uuid.Parse(c.Param("playerID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		return
+	}
+	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
+	_ = clubID // ownership already enforced inside the player service via manager
+	v, err := s.playerSvc.RushReturn(c.Request.Context(), worldID, ident.ManagerID, playerID)
+	if err != nil {
+		playerStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, v)
 }
 
 // handlePromisePlayingTime records an explicit playing-time promise to the
