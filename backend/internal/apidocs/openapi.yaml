@@ -799,6 +799,158 @@ paths:
                       end_date: "2028-06-30"
                       release_clause: 25000000
                       status: active
+  /api/worlds/{worldID}/countries/{countryID}/free-agents:
+    get:
+      tags: [player]
+      summary: Free-agent pool
+      operationId: listFreeAgents
+      description: Lists free agents in a world/country with optional position, age, and nationality filters, paged. Scoped to the caller's own world.
+      parameters:
+        - name: worldID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+        - name: countryID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
+        - name: position
+          in: query
+          required: false
+          schema: { type: string, example: GK }
+        - name: age_min
+          in: query
+          required: false
+          schema: { type: integer, example: 20 }
+        - name: age_max
+          in: query
+          required: false
+          schema: { type: integer, example: 30 }
+        - name: nationality
+          in: query
+          required: false
+          schema: { type: string, example: NG }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 25 }
+      responses:
+        "200":
+          description: The paged free-agent pool.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FreeAgentList" }
+  /api/clubs/{id}/free-agent-signings:
+    post:
+      tags: [player]
+      summary: Sign a free agent
+      operationId: signFreeAgent
+      description: Signs a free agent for the owning club, creating the professional contract and wage commitment and logging PLAYER_SIGNED.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FreeAgentSigningInput" }
+      responses:
+        "201":
+          description: Player signed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OkResponse" }
+        "400":
+          description: Invalid payload (incl. street-origin players under 18).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the club's manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Player is not a free agent or the club cannot afford the wage.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/players/{playerID}/release:
+    post:
+      tags: [player]
+      summary: Release a player
+      operationId: releasePlayer
+      description: Terminates the player's contract and returns them to the free-agent pool, logging PLAYER_RELEASED. Admin or the owning club's manager only.
+      parameters:
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000c" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReleasePlayerInput" }
+      responses:
+        "200":
+          description: Player released.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OkResponse" }
+        "403":
+          description: Not an admin or the player's club manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Player not found or has no active contract.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/players/bulk:
+    post:
+      tags: [admin, player]
+      summary: Bulk-create players into a country pool
+      operationId: adminBulkCreatePlayers
+      description: Admins inject generated free agents into a country pool by declaring count, age band, quality, optional positions/nationality and origin (A10). Emits ADMIN_BULK_PLAYER_CREATED.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+        - name: countryID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000a" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BulkCreatePlayersInput" }
+      responses:
+        "201":
+          description: Players created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BulkCreateResult" }
+        "400":
+          description: Malformed payload or validation error.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/transfers/listings:
     get:
       tags: [transfer]
@@ -2581,6 +2733,65 @@ components:
         end_date: { type: string, format: date }
         release_clause: { type: integer, format: int64, nullable: true }
         status: { type: string }
+    FreeAgent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        person_id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        nationality_code: { type: string }
+        date_of_birth: { type: string, format: date }
+        age: { type: integer }
+        primary_position: { type: string }
+        origin: { type: string, enum: [street, academy] }
+        overall_rating: { type: integer }
+        market_value: { type: integer, format: int64 }
+    FreeAgentList:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FreeAgent" }
+        total: { type: integer }
+    FreeAgentSigningInput:
+      type: object
+      required: [player_id, weekly_wage, years]
+      properties:
+        player_id: { type: string, format: uuid }
+        weekly_wage: { type: integer, format: int64, example: 45000 }
+        years: { type: integer, example: 3 }
+    ReleasePlayerInput:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, example: terminated by manager }
+    OkResponse:
+      type: object
+      properties:
+        ok: { type: boolean, example: true }
+    BulkCreatePlayersInput:
+      type: object
+      required: [count, age_min, age_max, quality]
+      properties:
+        count: { type: integer, minimum: 1, maximum: 500, example: 50 }
+        age_min: { type: integer, minimum: 13, maximum: 38, example: 17 }
+        age_max: { type: integer, minimum: 13, maximum: 38, example: 25 }
+        quality: { type: string, enum: [low, mid, high, elite], example: mid }
+        positions:
+          type: array
+          items: { type: string }
+          example: ["CM", "ST", "GK"]
+        nationality: { type: string, example: NG }
+        origin: { type: string, example: generated }
+    BulkCreateResult:
+      type: object
+      properties:
+        created: { type: integer, example: 50 }
+        player_ids:
+          type: array
+          items: { type: string, format: uuid }
     Listing:
       type: object
       properties:

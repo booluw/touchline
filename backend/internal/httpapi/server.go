@@ -24,6 +24,7 @@ import (
 	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
+	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/realtime"
 )
 
@@ -53,6 +54,7 @@ type server struct {
 	cookiesSecure bool
 	appOrigin     string
 	hub           *realtime.Hub
+	bus           eventbus.Publisher
 }
 
 // Options assembles a server. Every service is already constructed and bound to
@@ -81,6 +83,7 @@ type Options struct {
 	CookiesSecure bool
 	AppOrigin     string
 	Hub           *realtime.Hub
+	Bus           eventbus.Publisher
 }
 
 // New builds a server from the supplied services.
@@ -108,6 +111,7 @@ func New(opts Options) *Server {
 		cookiesSecure: opts.CookiesSecure,
 		appOrigin:     opts.AppOrigin,
 		hub:           opts.Hub,
+		bus:           opts.Bus,
 	}}
 }
 

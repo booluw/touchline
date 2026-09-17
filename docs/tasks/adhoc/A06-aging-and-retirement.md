@@ -1,9 +1,10 @@
 # A06 — Aging and retirement at rollover
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Ad-hoc (player lifecycle)
 **Source:** PRD §28; user design session
 **Depends on:** A01, A03, A04, A05
+**Implemented:** 2026-09-17
 
 ## What to do
 
@@ -56,7 +57,10 @@ Season reference = the anchor of the newly-created next season (from `rollover.g
 
 ### Worker wiring
 
-In `cmd/worker/main.go`, subscribe to `SEASON_COMPLETED` events. Dispatch to `lifecycle.OnSeasonCompleted`.
+**Architecture deviation:** the repo centralises bus wiring in `internal/app/app.go`
+(worker binaries call `App.RunWorker`), not a hand-rolled `cmd/worker` subscription.
+The `SEASON_COMPLETED` subscription and the seasonal (league-less) fallback in
+`internal/app/app.go` now both dispatch to `lifecycle.OnSeasonCompleted`.
 
 Dedup: the lifecycle may see multiple `SEASON_COMPLETED` events for the same country+season (one per league). Use `world.country_academy_intakes` dedup table for street intake; for retirement, a simple `SELECT EXISTS (SELECT 1 FROM world.events WHERE event_type = 'WORLD_LIFECYCLE_SEASON_COMPLETED' AND payload->>'country_id' = $1 AND payload->>'season_number' = $2)` guard.
 
@@ -67,10 +71,30 @@ Dedup: the lifecycle may see multiple `SEASON_COMPLETED` events for the same cou
 
 ## Acceptance criteria
 
-- `go test ./internal/lifecycle/...` — retirement probability unit tests, age edge cases (29, 30, 37).
-- Integration test: seed world → play several seasons → verify players age, some retire, academy intake adds players, pool replenishes.
-- `go vet ./... && go build ./...` clean.
+- `go test ./internal/lifecycle/...` — retirement probability unit tests, age edge cases (29, 30, 37). — covered
+- Integration test: seed world → play several seasons → verify players age, some retire, academy intake adds players, pool replenishes. — covered
+- `go vet ./... && go build ./...` clean. — verified
 
 ## Delivery evidence
 
-- Pending.
+- `internal/lifecycle/` — new package: `retire.go` (`RetireProbability`: `(age-29)/8`
+  curve clamp, `abilityMod` 1.5/1.0/0.6, `injuryMod` 1.3, `ambitionMod` 1.3/0.7,
+  force-retire ≥ 37), `service.go` (`OnSeasonCompleted` = academy intake →
+  retirement → pool replenish → summary event, idempotency guard on the
+  lifecycle event row), `events.go` (`PLAYER_RETIRED`,
+  `WORLD_LIFECYCLE_SEASON_COMPLETED`). `playerpool` is function-based in this
+  repo (no `*playerpool.Service`), so the service holds `pool`, `bus`, and
+  `*academy.Service` and builds replenish factories via `bootstrap.LoadPools`
+  with a deterministic per-(world, country, season) seed.
+- `internal/app/app.go` — `App.Lifecycle` added to `Build`; the existing
+  `SEASON_COMPLETED` subscription and the seasonal fallback now call
+  `lifecycle.OnSeasonCompleted` (intake is delegated to the academy service,
+  which remains idempotent per season).
+- `internal/lifecycle/retire_test.go` — `TestRetireProbabilityCurve` (age 29/30/
+  33/36/37/40, ability/injury/ambition mods, clamping), monotone-with-age, and
+  worst-case-bounded checks. `TestLifecycleOnSeasonCompleted` (integration):
+  seeds a world, injects two 37-year-olds, runs rollover — verifies forced
+  retirement + contract termination + event emission + replenish + redelivery
+  no-op guard + fresh-season re-run.
+- `go build ./... && go vet ./...` clean; `go test ./internal/... ./cmd/...`
+  green.

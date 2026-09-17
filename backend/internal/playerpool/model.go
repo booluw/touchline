@@ -78,3 +78,12 @@ type FreeAgent struct {
 	OverallRating   int       `json:"overall_rating"`
 	MarketValue     int64     `json:"market_value"`
 }
+
+// FreeAgentFilter narrows ListFreeAgents. A nil pointer field is unfiltered.
+type FreeAgentFilter struct {
+	CountryID   *uuid.UUID `json:"country_id"`
+	Position    *string    `json:"position"`
+	AgeMin      *int       `json:"age_min"`
+	AgeMax      *int       `json:"age_max"`
+	Nationality *string    `json:"nationality"`
+}

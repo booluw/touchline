@@ -130,9 +130,11 @@ func ReplenishPool(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 // per-position OVR (squad.PositionalOverall, 99-capped) and results are
 // ordered by it descending then by name for deterministic paging. The pool is
 // bounded (PoolTargetSize per country), so the full slice is aggregated once
-// and paginated in Go — SQL AVG-overall ordering is gone by design.
+// and paginated in Go — SQL AVG-overall ordering is gone by design. An empty
+// filter skips all optional predicates; position/age/nationality are applied
+// after loading so paging always reflects the filtered set.
 func ListFreeAgents(ctx context.Context, db Queryable,
-	worldID uuid.UUID, countryID *uuid.UUID, page, pageSize int,
+	worldID uuid.UUID, filter FreeAgentFilter, page, pageSize int,
 ) ([]FreeAgent, int, error) {
 	if page < 1 {
 		page = 1
@@ -146,7 +148,7 @@ func ListFreeAgents(ctx context.Context, db Queryable,
 		SELECT COUNT(*) FROM player.players p
 		WHERE p.world_id = $1 AND p.club_id IS NULL AND p.status = 'free_agent'
 		  AND ($2::uuid IS NULL OR p.country_id IS NOT DISTINCT FROM $2)`,
-		worldID, countryID,
+		worldID, filter.CountryID,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count free agents: %w", err)
 	}
@@ -171,17 +173,13 @@ func ListFreeAgents(ctx context.Context, db Queryable,
 		WHERE p.world_id = $1 AND p.club_id IS NULL AND p.status = 'free_agent'
 		  AND ($2::uuid IS NULL OR p.country_id IS NOT DISTINCT FROM $2)
 		GROUP BY p.id, pe.id`,
-		worldID, countryID,
+		worldID, filter.CountryID,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query free agents: %w", err)
 	}
 	defer rows.Close()
 
-	type candidate struct {
-		fa  FreeAgent
-		ovr int
-	}
 	var cands []candidate
 	for rows.Next() {
 		var c candidate
@@ -193,15 +191,22 @@ func ListFreeAgents(ctx context.Context, db Queryable,
 			&cats.Tactical, &cats.Positional, &cats.Goalkeeping); err != nil {
 			return nil, 0, fmt.Errorf("scan free agent: %w", err)
 		}
-		if t, ok := dob.(interface{ Format(layout string) string }); ok {
-			c.fa.DateOfBirth = t.Format("2006-01-02")
+		birth, _ := dob.(time.Time)
+		if !birth.IsZero() {
+			c.fa.DateOfBirth = birth.Format("2006-01-02")
 		}
+		c.fa.Age = yearsSince(birth, time.Now().UTC())
 		c.ovr = squad.PositionalOverall(c.fa.PrimaryPosition, cats)
 		c.fa.OverallRating = c.ovr
 		cands = append(cands, c)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate free agents: %w", err)
+	}
+
+	if len(cands) > 0 {
+		cands = applyFreeAgentFilter(cands, filter)
+		total = len(cands)
 	}
 
 	sort.SliceStable(cands, func(i, j int) bool {
@@ -264,4 +269,49 @@ func ListFreeAgents(ctx context.Context, db Queryable,
 type Queryable interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// candidate is a free-agent row plus its aggregated positional overall, used
+// for in-memory sort/filter/pagination after the attribute aggregation pass.
+type candidate struct {
+	fa  FreeAgent
+	ovr int
+}
+
+// yearsSince computes whole calendar years elapsed since birth.
+func yearsSince(birth, ref time.Time) int {
+	if birth.IsZero() {
+		return 0
+	}
+	y := ref.Year() - birth.Year()
+	if ref.Month() < birth.Month() || (ref.Month() == birth.Month() && ref.Day() < birth.Day()) {
+		y--
+	}
+	if y < 0 {
+		y = 0
+	}
+	return y
+}
+
+// applyFreeAgentFilter narrows a fully-loaded pool slice by the optional
+// position/age/nationality predicates. Country scoping is already applied in
+// SQL; these filters exist because overall requires attribute aggregation.
+func applyFreeAgentFilter(cands []candidate, f FreeAgentFilter) []candidate {
+	filtered := cands[:0]
+	for _, c := range cands {
+		if f.Position != nil && *f.Position != "" && c.fa.PrimaryPosition != *f.Position {
+			continue
+		}
+		if f.AgeMin != nil && c.fa.Age < *f.AgeMin {
+			continue
+		}
+		if f.AgeMax != nil && c.fa.Age > *f.AgeMax {
+			continue
+		}
+		if f.Nationality != nil && *f.Nationality != "" && c.fa.NationalityCode != *f.Nationality {
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	return filtered
 }

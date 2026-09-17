@@ -38,6 +38,10 @@ func squadTemplate(size int) [][]string {
 	return out
 }
 
+// Template exposes the position template for callers (e.g. the lifecycle AI
+// auto-fill) that need to reason about positional squad coverage.
+func Template(size int) [][]string { return squadTemplate(size) }
+
 // poolCandidate is a free-agent loaded from the DB for draft selection.
 type poolCandidate struct {
 	ID              uuid.UUID

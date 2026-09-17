@@ -24,6 +24,9 @@ type CreatePlayerOptions struct {
 	// drawing from the weighted nationality pool. The caller must provide a
 	// code that exists in ref.nationalities.
 	Nationality string
+	// Positions, when non-empty, restricts the primary position draw to this
+	// subset of ValidPositions (empty = any valid position).
+	Positions []string
 	// Origin propagates to the GeneratedPlayer. The calling layer is
 	// responsible for persisting this alongside the player.
 	Origin string
@@ -119,7 +122,7 @@ func (f *PlayerFactory) CreatePlayerWithOptions(opts CreatePlayerOptions) (*Gene
 			return nil, err
 		}
 		if f.registry == nil || f.registry.Reserve(code, first, last) {
-			pos := ValidPositions[f.rng.Intn(len(ValidPositions))]
+			pos := pickPosition(f.rng, opts.Positions)
 			age := lo + f.rng.Intn(hi-lo+1)
 			talent := rollTalent(f.rng, opts.TalentOdds)
 			ht, personality := generateTraitsAndPersonality(f.rng, age, talent.potentialBonus())
@@ -150,4 +153,23 @@ func displayName(first, last string) string {
 		return last
 	}
 	return first
+}
+
+// pickPosition draws a primary position from the allowed subset, or from the
+// full ValidPositions catalogue when the subset is empty. Positions outside
+// ValidPositions are silently dropped so callers can pass unvalidated input.
+func pickPosition(rng *rand.Rand, allowed []string) string {
+	valid := make([]string, 0, len(allowed))
+	for _, a := range allowed {
+		for _, v := range ValidPositions {
+			if a == v {
+				valid = append(valid, a)
+				break
+			}
+		}
+	}
+	if len(valid) > 0 {
+		return valid[rng.Intn(len(valid))]
+	}
+	return ValidPositions[rng.Intn(len(ValidPositions))]
 }

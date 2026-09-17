@@ -28,9 +28,22 @@ type LoadedPlayer struct {
 	Position string
 	Status   string
 
+	// Origin is the player's creation route ('generated' | 'club_academy' |
+	// 'street'). Street-origin players are match-ineligible until 18 (A07).
+	Origin string
+
+	// ComputedAge is the player's age on the squad's onDate, derived from
+	// person.people.date_of_birth against the fixture matchday.
+	ComputedAge int
+
+	// HasActiveContract reports whether the player holds an active
+	// professional contract (A07 eligibility gate).
+	HasActiveContract bool
+
 	// Available reports whether the player may start on `onDate`: club-held,
-	// not retired/suspended/on-loan status, and no open injury whose
-	// expected_recovery_date still covers the matchday.
+	// not retired/suspended/on-loan status, no open injury whose
+	// expected_recovery_date still covers the matchday, an active contract,
+	// and — for street-origin players — the 18+ age floor (A07).
 	Available bool
 
 	Leadership int
@@ -147,10 +160,15 @@ func (s *Store) LoadSquad(ctx context.Context, clubID uuid.UUID, onDate time.Tim
 // in one pass, leaving sentiment to the caller.
 func (s *Store) loadPlayerRows(ctx context.Context, clubID uuid.UUID, onDate time.Time) ([]LoadedPlayer, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.id, p.primary_position, p.status,
+		SELECT p.id, p.primary_position, p.status, p.origin,
 		       COALESCE(h.consistency, 50), COALESCE(h.temperament, 50),
 		       COALESCE(h.pressure_handling, 50), COALESCE(h.professionalism, 50),
 		       COALESCE(h.adaptability, 50), COALESCE(ps.leadership, 50),
+		       COALESCE(EXTRACT(YEAR FROM age($2::date, pe.date_of_birth::date))::int, 0) AS computed_age,
+		       CASE WHEN EXISTS (
+		            SELECT 1 FROM player.contracts c
+		            WHERE c.player_id = p.id AND c.status = 'active')
+		       THEN TRUE ELSE FALSE END AS has_contract,
 		       CASE WHEN EXISTS (
 		            SELECT 1 FROM player.injuries i
 		            WHERE i.player_id = p.id
@@ -158,6 +176,7 @@ func (s *Store) loadPlayerRows(ctx context.Context, clubID uuid.UUID, onDate tim
 		              AND i.expected_recovery_date >= $2::date)
 		       THEN TRUE ELSE FALSE END
 		FROM player.players p
+		LEFT JOIN person.people pe ON pe.id = p.person_id
 		LEFT JOIN player.player_hidden_traits h ON h.player_id = p.id
 		LEFT JOIN player.player_personality  ps ON ps.player_id = p.id
 		WHERE p.club_id = $1
@@ -171,14 +190,15 @@ func (s *Store) loadPlayerRows(ctx context.Context, clubID uuid.UUID, onDate tim
 	for rows.Next() {
 		var (
 			p                                   LoadedPlayer
-			open                                bool
+			open, hasContract                   bool
 			cons, temp, pres, prof, adapt, lead int
 		)
-		if err := rows.Scan(&p.PlayerID, &p.Position, &p.Status,
-			&cons, &temp, &pres, &prof, &adapt, &lead, &open); err != nil {
+		if err := rows.Scan(&p.PlayerID, &p.Position, &p.Status, &p.Origin,
+			&cons, &temp, &pres, &prof, &adapt, &lead, &p.ComputedAge, &hasContract, &open); err != nil {
 			return nil, fmt.Errorf("scan player: %w", err)
 		}
-		p.Available = p.Status == "active" && !open
+		p.HasActiveContract = hasContract
+		p.Available = MatchEligible(p.Status, p.Origin, hasContract, open, p.ComputedAge)
 		p.Leadership = lead
 		p.Hidden = PlayerHiddenTraitsSnapshot{
 			Consistency: cons, Temperament: temp, PressureHandling: pres,
@@ -277,6 +297,15 @@ func categoryMean(vals []int) int {
 		sum += v
 	}
 	return int(math.Round(float64(sum) / float64(len(vals))))
+}
+
+// MatchEligible is the persisted match-eligibility gate (A07): a player may
+// start when they hold an active professional contract AND are neither a
+// street-origin player under 18. `active` = not retired/suspended/on-loan;
+// `open` = an open injury still covering the matchday.
+func MatchEligible(status, origin string, hasContract, open bool, computedAge int) bool {
+	return status == "active" && hasContract && !open &&
+		(origin != "street" || computedAge >= 18)
 }
 
 // LoadClubDNA loads the competitiveness slice of club.dna.

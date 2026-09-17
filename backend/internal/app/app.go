@@ -30,6 +30,7 @@ import (
 	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/httpapi"
+	internallifecycle "github.com/touchline/backend/internal/lifecycle"
 	internalmanager "github.com/touchline/backend/internal/manager"
 	"github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/matchday"
@@ -116,6 +117,7 @@ type App struct {
 	Policy    *policybot.Service
 	Dashboard *internaldashboard.Service
 	Academy   *internalacademy.Service
+	Lifecycle *internallifecycle.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
 }
@@ -173,6 +175,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	dashSvc := internaldashboard.NewService(pool, bus)
 	dashSvc.WithRealtime(broker)
 	academySvc := internalacademy.NewService(pool, bus)
+	lifecycleSvc := internallifecycle.NewService(pool, bus, academySvc)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
@@ -199,6 +202,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		CookiesSecure: cfg.Env != "development",
 		AppOrigin:     cfg.AppOrigin,
 		Hub:           hub,
+		Bus:           bus,
 	})
 
 	return &App{
@@ -222,6 +226,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Policy:     policySvc,
 		Dashboard:  dashSvc,
 		Academy:    academySvc,
+		Lifecycle:  lifecycleSvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -370,16 +375,16 @@ func (a *App) RunWorker(ctx context.Context) error {
 			}
 		}
 		// Seasonal fallback (S08-01): a world without leagues never emits
-		// SEASON_COMPLETED, so the seasonal tick drives one intake per season
-		// for every academy + country. The season is derived from the canonical
-		// day counter; the intake hooks dedup per season.
+		// SEASON_COMPLETED, so the seasonal tick drives the full lifecycle
+		// once per season — intake, retirement, pool replenish (A06). The
+		// hooks dedup per season.
 		if payload.Granularity == "seasonal" {
 			season, ref, err := a.worldSeason(ctx, ev.WorldID)
 			if err != nil {
-				return fmt.Errorf("world %s seasonal academy intake: %w", ev.WorldID, err)
+				return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
 			}
-			if _, err := a.Academy.IntakeForWorld(ctx, ev.WorldID, season, ref); err != nil {
-				return fmt.Errorf("world %s seasonal academy intake: %w", ev.WorldID, err)
+			if _, err := a.Lifecycle.OnSeasonCompleted(ctx, ev.WorldID, nil, season, ref); err != nil {
+				return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
 			}
 		}
 		// Home dashboard realtime sweep (S07-01): after the cadence passes have
@@ -428,10 +433,10 @@ func (a *App) RunWorker(ctx context.Context) error {
 		}
 	}
 
-	// Season rollover drives the country-scoped academy intake (S08-01): the
-	// completed league's country gets its street discovery plus every club
-	// academy's youth cohort. The eventbus is single-handler-per-type and
-	// nobody else consumes SEASON_COMPLETED.
+	// Season rollover drives the player lifecycle (S08-01, A06): the completed
+	// league's country gets its street discovery plus every club academy's youth
+	// cohort, then the world's retirement pass and pool replenishment run. The
+	// eventbus is single-handler-per-type and nobody else consumes SEASON_COMPLETED.
 	if err := bus.Subscribe(ctx, "SEASON_COMPLETED", func(ev eventbus.Event) error {
 		var payload struct {
 			CountryID *uuid.UUID `json:"country_id"`
@@ -442,16 +447,10 @@ func (a *App) RunWorker(ctx context.Context) error {
 		}
 		season, ref, err := a.worldSeason(ctx, ev.WorldID)
 		if err != nil {
-			return fmt.Errorf("world %s season completed intake: %w", ev.WorldID, err)
+			return fmt.Errorf("world %s season completed lifecycle: %w", ev.WorldID, err)
 		}
-		if payload.CountryID == nil {
-			if _, err := a.Academy.IntakeForWorld(ctx, ev.WorldID, season, ref); err != nil {
-				return fmt.Errorf("world %s season completed intake: %w", ev.WorldID, err)
-			}
-			return nil
-		}
-		if _, err := a.Academy.IntakeForCountry(ctx, ev.WorldID, *payload.CountryID, season, ref); err != nil {
-			return fmt.Errorf("world %s country %s season completed intake: %w", ev.WorldID, *payload.CountryID, err)
+		if _, err := a.Lifecycle.OnSeasonCompleted(ctx, ev.WorldID, payload.CountryID, season, ref); err != nil {
+			return fmt.Errorf("world %s season completed lifecycle: %w", ev.WorldID, err)
 		}
 		return nil
 	}); err != nil {

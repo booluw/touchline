@@ -1,9 +1,10 @@
 # A07 — Match eligibility gate
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Ad-hoc (player lifecycle)
 **Source:** User design session
 **Depends on:** A01, A03
+**Implemented:** 2026-09-17
 
 ## What to do
 
@@ -47,18 +48,28 @@ type LoadedPlayer struct {
     // ... existing fields ...
     Origin     string
     ComputedAge int
+    HasActiveContract bool
 }
 ```
 
 ## Acceptance criteria
 
-- Street-origin player aged 17 with active contract: `Available = false`.
-- Street-origin player aged 18 with active contract: `Available = true`.
-- Academy product aged 16 with active contract: `Available = true`.
-- Any player with no active contract: `Available = false`.
-- `go test ./internal/squad/...` — eligibility unit tests.
-- `go vet ./... && go build ./...` clean.
+- Street-origin player aged 17 with active contract: `Available = false`. — covered
+- Street-origin player aged 18 with active contract: `Available = true`. — covered
+- Academy product aged 16 with active contract: `Available = true`. — covered
+- Any player with no active contract: `Available = false`. — covered
+- `go test ./internal/squad/...` — eligibility unit tests. — see `TestMatchEligibleA07`
+- `go vet ./... && go build ./...` clean. — verified
 
 ## Delivery evidence
 
-- Pending.
+- `internal/squad/store.go` — `loadPlayerRows` now selects `p.origin`, LEFT JOINs
+  `person.people` for `computed_age`, and computes `has_contract` via
+  `EXISTS(player.contracts ... status='active')`. `LoadedPlayer` gains
+  `Origin`, `ComputedAge`, `HasActiveContract`. The eligibility rule is
+  factored into a pure `MatchEligible(status, origin, hasContract, open, computedAge)`
+  helper so it is unit-testable without a DB.
+- `internal/squad/store_test.go` — `TestMatchEligibleA07` covers the four
+  acceptance cases plus retired/injured/on-loan/open-injury variants.
+  `go test ./internal/squad/...` passes.
+- `go build ./... && go vet ./...` clean.

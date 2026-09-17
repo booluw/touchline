@@ -110,6 +110,54 @@ func TestCreatePlayerWithOptionsOriginAndAcademy(t *testing.T) {
 	}
 }
 
+func TestCreatePlayerWithOptionsRestrictedPositions(t *testing.T) {
+	f := optionFactory(4)
+	for i := 0; i < 120; i++ {
+		p, err := f.CreatePlayerWithOptions(CreatePlayerOptions{Positions: []string{"GK", "ST"}})
+		if err != nil {
+			t.Fatalf("CreatePlayerWithOptions: %v", err)
+		}
+		if p.PrimaryPosition != "GK" && p.PrimaryPosition != "ST" {
+			t.Fatalf("position = %q, want GK|ST", p.PrimaryPosition)
+		}
+	}
+}
+
+func TestPickPositionIgnoresUnknownAndFallsBack(t *testing.T) {
+	// Unknown positions are dropped; nothing valid falls back to any position.
+	f := optionFactory(8)
+	rng := f.Rng()
+	if got := pickPosition(rng, []string{"XX", "YY"}); got != "GK" && got != "ST" && !containsValid(got) {
+		t.Fatalf("pickPosition on invalid input returned %q, want a valid fallback", got)
+	}
+	for i := 0; i < 50; i++ {
+		if got := pickPosition(rng, []string{"XX"}); !containsValid(got) {
+			t.Fatalf("pickPosition(%q) = %q, want valid position", "XX", got)
+		}
+	}
+	if got := pickPosition(rng, []string{"GK", "CB", "RB"}); !contains(got, "GK", "CB", "RB") {
+		t.Fatalf("pickPosition with valid subset = %q, not in subset", got)
+	}
+}
+
+func containsValid(p string) bool {
+	for _, v := range ValidPositions {
+		if p == v {
+			return true
+		}
+	}
+	return false
+}
+
+func contains(s string, members ...string) bool {
+	for _, m := range members {
+		if s == m {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCreatePlayerWithOptionsRejectsNilDeps(t *testing.T) {
 	if _, err := NewPlayerFactory(nil, NewNationalityPool(), rand.New(rand.NewSource(1))).CreatePlayerWithOptions(CreatePlayerOptions{}); err == nil {
 		t.Fatal("nil name generator should error")

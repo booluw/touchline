@@ -150,6 +150,7 @@ func (s *server) router() *gin.Engine {
 			admin.GET("/club-name-parts", s.handleListClubNameParts)
 			admin.POST("/club-name-parts", s.handleAddClubNamePart)
 			admin.DELETE("/club-name-parts/:kind/:value", s.handleRemoveClubNamePart)
+			admin.POST("/worlds/:id/countries/:countryID/players/bulk", s.handleAdminBulkCreatePlayers)
 		}
 
 		// Competition reads (S04-01): always scoped to the caller's world.
@@ -167,6 +168,13 @@ func (s *server) router() *gin.Engine {
 		api.GET("/fixtures/:id", s.requireAuth, s.handleGetFixture)
 		api.GET("/matches/:id/events", s.requireAuth, s.handleGetMatchEvents)
 		api.POST("/matches/:id/tactical", s.requireAuth, s.handleLiveTacticChange)
+
+		// Free agents (A08): pool browsing is world-scoped to the caller's own
+		// world/country; signing requires owning the club; release is for the
+		// owning club's manager or an admin.
+		api.GET("/worlds/:worldID/countries/:countryID/free-agents", s.requireAuth, s.handleListFreeAgents)
+		api.POST("/clubs/:id/free-agent-signings", s.requireAuth, s.handleSignFreeAgent)
+		api.POST("/players/:playerID/release", s.requireAuth, s.handleReleasePlayer)
 	}
 
 	return r

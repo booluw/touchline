@@ -35,3 +35,33 @@ func TestSentimentFromStatesRecencyOrder(t *testing.T) {
 		t.Fatalf("angry-newest must read negative, got %d", pairB)
 	}
 }
+
+func TestMatchEligibleA07(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      string
+		origin      string
+		hasContract bool
+		open        bool
+		age         int
+		want        bool
+	}{
+		{"street 17 with contract", "active", "street", true, false, 17, false},
+		{"street 18 with contract", "active", "street", true, false, 18, true},
+		{"street 21 with contract", "active", "street", true, false, 21, true},
+		{"academy 16 with contract", "active", "club_academy", true, false, 16, true},
+		{"generated 16 with contract", "active", "generated", true, false, 16, true},
+		{"no contract", "active", "generated", false, false, 23, false},
+		{"retired street 19", "retired", "street", true, false, 19, false},
+		{"injured with contract", "injured", "generated", true, false, 23, false},
+		{"on loan", "on_loan", "generated", true, false, 23, false},
+		{"open injury", "active", "generated", true, true, 23, false},
+	}
+	for _, c := range cases {
+		got := MatchEligible(c.status, c.origin, c.hasContract, c.open, c.age)
+		if got != c.want {
+			t.Errorf("%s: MatchEligible(%q, %q, %v, %v, %d) = %v, want %v",
+				c.name, c.status, c.origin, c.hasContract, c.open, c.age, got, c.want)
+		}
+	}
+}

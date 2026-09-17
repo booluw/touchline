@@ -1,6 +1,6 @@
 # A09 — AI auto-fill for thin squads
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Ad-hoc (player lifecycle)
 **Source:** User design session
 **Depends on:** A03, A08
@@ -50,4 +50,9 @@ Called from within `lifecycle.OnSeasonCompleted` after intake and retirement.
 
 ## Delivery evidence
 
-- Pending.
+- Implemented 2026-09-17.
+- `internal/lifecycle/autofill.go`: `TargetSquadSize = 24`, `AutoFill(ctx, tx, worldID, countryID uuid.UUID, season int, ref time.Time) (int, error)`; per-club gap-fill via `orderAutoFillCandidates` (quota gaps GK=2/DEF=7/MID=7/FWD=6, deepest first with fixed group precedence, then overall top-up); deterministic tie-break via RNG seeded `hashSeed(worldID, clubID, season)`; wage = `overall * 150`, 1-year contract; skips `ErrStreetUnder18` / `ErrClubCannotAfford`; emits one `AI_AUTO_FILL` per club.
+- Wired into `Service.OnSeasonCompleted` after intake + retirement + replenish (runs in the rollover tx); `Result.AutoFilled` reports the count.
+- Tests: `internal/lifecycle/autofill_test.go` (gap-first, gap-depth ordering, no overfill, pool exhaustion, deterministic under seed, group mapping) — `go test ./internal/lifecycle/` green; `internal/lifecycle/autofill_integration_test.go` (`//go:build integration`, `TestAutoFillRestoresThinSquad` — guts a club to 0 active, AutoFill restores ≥24, wage == overall*150, one AI_AUTO_FILL event, re-run no-op) compile-checked via `go vet -tags integration`.
+- `go vet ./... && go build ./...` clean.
+- Deviations from sketch: `AutoFill` additionally takes `season int` and `ref time.Time` (needed for the deterministic seed and contract dates); signature order is `(ctx, tx, worldID, countryID, season, ref)`.
