@@ -188,3 +188,11 @@ Coverage map — keep in sync with `docs/product_manager.md` (OPD-26..29) and th
 - Router: `cmd/api` mounts admin bulk-create (`POST /api/admin/worlds/:id/clubs` bulk player seed, A10) and free-agent/eligibility HTTP surfaces (A08/A07).
 - Design: `backend/docs/design/player-lifecycle.md` (OPD-26..29: country academy/street kids, player-pool draft, match-eligibility rule, squad size/AI fill). Migration `0036_player_lifecycle` adds player origin/age eligibility to the pool.
 - Gate: `go test -p 1 -tags integration -race ./internal/playerpool/... ./internal/lifecycle/... ./internal/academy/... ./internal/squad/...` (wired into `.github/workflows/ci.yml`).
+
+## Process — handling a task
+
+1. **Read the task doc first.** Start from the specific task file (`docs/tasks/adhoc/A0*.md`/`A1*.md` or `docs/tasks/*.md`): understand the full "What to do", its acceptance-criteria / delivery-evidence contract, and touch only what it asks for.
+2. **Read OPENCODE.md (and its cross-references).** Take in the package map, router/route list, migration tail, "not built yet" backlog, and the gates in THIS file; then cross-read the registry (`docs/product_manager.md`) and the relevant design doc(s) — for lifecycle work: `backend/docs/design/player-lifecycle.md` — so the change lines up with the whole codebase.
+3. **Implement the task.** Follow the package map + route list above; keep server-authority, event-logging, world-scoping, determinism, append-only-ledger, and structured-board-mandate constraints; back schema work with a numbered migration (next `0036+`).
+4. **Test.** Run the gate battery: `go build ./...`, `go vet ./...`, `go vet -tags integration ./...`, `go test -race ./...`, `gofmt -l` — then the DB gate (`go test -p 1 -tags integration -race ./<touched-pkgs>/...` against the CI Postgres service; those lifecycle pkgs are already wired into the ci.yml integration job). Flip the task to `Implemented` only with green evidence.
+5. **Update the API docs.** Every new/changed HTTP endpoint lands in `backend/internal/apidocs/openapi.yaml` and the router↔docs coverage gate stays green (`TestDocsCoverRouter` in `internal/httpapi/docs_coverage_test.go` — each route must be mirrored in the endpoint docs).
