@@ -55,6 +55,13 @@ type Team struct {
 	// tank; values below 1 make the side measurably late-game worse through the
 	// post-75 fatigue penalty. <=0 means "not computed" and plays a fresh squad.
 	Fitness float64
+
+	// Lineups is the optional player-level cast for attribution (v1.6): the XI,
+	// bench and penalty taker the engine resolves goal/assist/chance/card/
+	// substitution tokens to, and the per-player match ratings it derives. When
+	// nil, events carry no player ids and no per-player ratings are produced —
+	// legacy and bare-fixture callers replay the exact v1.5 feed.
+	Lineups *PlayerLineups
 }
 
 // Tactics is the per-team tactical setup consumed by the engine (v1.5). Style
@@ -62,6 +69,25 @@ type Team struct {
 // through Tuning.DefaultStyle to the identity block.
 type Tactics struct {
 	Style string
+}
+
+// PlayerRef is one lineup member the attribution pass can cast a token to. ID
+// is the club's player uuid (string) resolved upstream (internal/squad); Weight
+// is the member's attribute weight feeding the seeded weighted picks.
+type PlayerRef struct {
+	ID       string  `json:"id"`
+	Position string  `json:"position,omitempty"`
+	Weight   float64 `json:"weight,omitempty"`
+}
+
+// PlayerLineups is the player-level cast input for one side (v1.6). When a side
+// provides it, the engine resolves every castable event token to a player and
+// produces per-player match ratings; Taker names the designated penalty taker
+// (falls back to a weighted XI pick when empty).
+type PlayerLineups struct {
+	XI    []PlayerRef `json:"xi"`
+	Bench []PlayerRef `json:"bench,omitempty"`
+	Taker string      `json:"taker_id,omitempty"`
 }
 
 // LiveInput is one ordered, minute-tagged manager input (spec §2.7, OPD-21).
@@ -92,7 +118,9 @@ type Options struct {
 // MatchEvent is one ordered feed event. Type values are the exact subset of
 // the match.match_events CHECK constraint emitted by this engine (spec §3,
 // PM Part 5 §5). Detail carries the optional commentary/referee explanation
-// line (persisted as match_events.detail).
+// line (persisted as match_events.detail). PlayerID/RelatedPlayerID are the
+// resolved player links from the v1.6 attribution pass (empty when the side
+// provides no Lineups).
 type MatchEvent struct {
 	Sequence    int    `json:"sequence"`
 	Minute      int    `json:"minute"`
@@ -100,6 +128,9 @@ type MatchEvent struct {
 	ClubID      string `json:"club_id,omitempty"`
 	Description string `json:"description"`
 	Detail      string `json:"detail,omitempty"`
+
+	PlayerID        string `json:"player_id,omitempty"`
+	RelatedPlayerID string `json:"related_player_id,omitempty"`
 }
 
 // Well-known event types — the approved subset of match_events.event_type.
@@ -125,6 +156,29 @@ type MatchResult struct {
 	AwayGoals      int          `json:"away_goals"`
 	HomePossession float64      `json:"home_possession_pct"`
 	Events         []MatchEvent `json:"events"`
+
+	// HomePlayerRatings/AwayPlayerRatings are the per-player match ratings the
+	// v1.6 attribution pass derives when the sides carry Lineups. Empty for
+	// legacy callers. Goals/Assists/etc. are the attribution tallies; Minutes
+	// mirrors the appearance derivation (90 minus sub-off for starters plus
+	// post-sub minutes for bench players, clamped to [0,90]).
+	HomePlayerRatings []PlayerRating `json:"home_player_ratings,omitempty"`
+	AwayPlayerRatings []PlayerRating `json:"away_player_ratings,omitempty"`
+}
+
+// PlayerRating is one player's v1.6 match attribution: the seeded-cast
+// tallies plus the derived 1..10 match rating.
+type PlayerRating struct {
+	PlayerID        string `json:"player_id"`
+	Minutes         int    `json:"minutes"`
+	Goals           int    `json:"goals"`
+	Assists         int    `json:"assists"`
+	Chances         int    `json:"chances"`
+	YellowCards     int    `json:"yellow_cards"`
+	RedCards        int    `json:"red_cards"`
+	PenaltiesScored int    `json:"penalties_scored"`
+	PenaltiesMissed int    `json:"penalties_missed"`
+	Rating          int    `json:"rating"`
 }
 
 // Outcome labels produced by a chance draw.

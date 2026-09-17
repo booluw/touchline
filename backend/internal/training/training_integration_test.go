@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/internal/development"
 	"github.com/touchline/backend/internal/bootstrap"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/testdb"
@@ -240,12 +241,20 @@ func TestApplyWeeklyMatchesDeterministicModel(t *testing.T) {
 		if bm == nil {
 			t.Fatalf("player %s appeared during apply", pid)
 		}
-		// Every growth/decay key must equal the seeded binary-rounding stream;
-		// untouched keys must be unchanged. The service also applies the
-		// veteranDecay stream (pace/stamina −0.05 per week for age ≥ 30,
-		// non-physical plans), so the expected value must include that pass.
+		// Every growth/decay key must equal the seeded binary-rounding stream with the
+		// S08-02 development multiplier folded into positive deltas; untouched keys
+		// must be unchanged. The service also applies the veteranDecay stream
+		// (pace/stamina −0.05 per week for age ≥ 30, non-physical plans), so the
+		// expected value must include that pass. Players in this seeded club have
+		// no hidden traits, no minutes, and a neutral academy: the multiplier is
+		// a deterministic function of (age, key) applied to positive deltas only.
 		for _, key := range distinctKeys(plan) {
 			d := attrDelta(plan, bm.age, key)
+			devIn := development.Input{Age: bm.age, Position: "ST", Skills: bm.attrs}
+			devMult := development.Evaluate(devIn).Multiplier(key)
+			if d > 0 {
+				d *= devMult
+			}
 			curr := applyDelta(bm.attrs[key], d, rngForTest(42, pid, key))
 			// veteran decay pass (mirrors service.go lines 316-335).
 			if decay := veteranDecay(bm.age, plan.Key); decay != nil {

@@ -97,11 +97,16 @@ type EmotionalState struct {
 
 // ---- morale & playing time (S06-03) ----
 
-// Appearance is one player's playing-time contribution to a completed match.
+// Appearance is one player's playing-time contribution to a completed match,
+// including the engine-derived v1.6 match rating and event tallies. Rating is
+// nil for matches completed before the v1.6 attribution pass existed.
 type Appearance struct {
 	PlayerID uuid.UUID `json:"player_id"`
 	Started  bool      `json:"started"`
 	Minutes  int       `json:"minutes"`
+	Rating   *int      `json:"rating,omitempty"`
+	Goals    int       `json:"goals"`
+	Assists  int       `json:"assists"`
 }
 
 // PlayerMoraleRow is one roster player's morale/role/request read model

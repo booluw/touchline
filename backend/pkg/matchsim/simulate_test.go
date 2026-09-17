@@ -458,3 +458,251 @@ func TestStyleEffectsAreDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// lineupOptions is sampleOptions with full XI/bench lineups so the v1.6
+// attribution pass runs. IDs are non-UUID literals, exercising the fallback
+// club-seed path (the literal id bytes hashed with the cast tag).
+func lineupOptions(seed int64) Options {
+	opts := sampleOptions(seed)
+	opts.Tuning = DefaultTuning()
+	opts.Home.Lineups = &PlayerLineups{
+		XI: []PlayerRef{
+			{ID: "h1", Position: "GK", Weight: 100},
+			{ID: "h2", Position: "RB", Weight: 100},
+			{ID: "h3", Position: "CB", Weight: 100},
+			{ID: "h4", Position: "CB", Weight: 100},
+			{ID: "h5", Position: "LB", Weight: 100},
+			{ID: "h6", Position: "CM", Weight: 100},
+			{ID: "h7", Position: "CM", Weight: 100},
+			{ID: "h8", Position: "RW", Weight: 100},
+			{ID: "h9", Position: "AM", Weight: 100},
+			{ID: "h10", Position: "ST", Weight: 100},
+			{ID: "h11", Position: "ST", Weight: 100},
+		},
+		Bench: []PlayerRef{
+			{ID: "h12", Position: "CB", Weight: 55},
+			{ID: "h13", Position: "CM", Weight: 55},
+			{ID: "h14", Position: "ST", Weight: 55},
+		},
+		Taker: "h10",
+	}
+	opts.Away.Lineups = &PlayerLineups{
+		XI: []PlayerRef{
+			{ID: "a1", Position: "GK", Weight: 100},
+			{ID: "a2", Position: "RB", Weight: 100},
+			{ID: "a3", Position: "CB", Weight: 100},
+			{ID: "a4", Position: "CB", Weight: 100},
+			{ID: "a5", Position: "LB", Weight: 100},
+			{ID: "a6", Position: "CM", Weight: 100},
+			{ID: "a7", Position: "CM", Weight: 100},
+			{ID: "a8", Position: "RW", Weight: 100},
+			{ID: "a9", Position: "AM", Weight: 100},
+			{ID: "a10", Position: "ST", Weight: 100},
+			{ID: "a11", Position: "ST", Weight: 100},
+		},
+		Bench: []PlayerRef{
+			{ID: "a12", Position: "CB", Weight: 55},
+			{ID: "a13", Position: "CM", Weight: 55},
+			{ID: "a14", Position: "ST", Weight: 55},
+		},
+		Taker: "a10",
+	}
+	return opts
+}
+
+// attributionDigest serialises everything the v1.6 pass controls: event player
+// linkage and the full per-side rating lists (sorted by player id already).
+func attributionDigest(res MatchResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d-%d;", res.HomeGoals, res.AwayGoals)
+	for _, ev := range res.Events {
+		fmt.Fprintf(&b, "%d|%d|%s|%s|%s;", ev.Sequence, ev.Minute, ev.Type, ev.PlayerID, ev.RelatedPlayerID)
+	}
+	for _, pr := range res.HomePlayerRatings {
+		fmt.Fprintf(&b, "H(%s:%d:%d:%d:%d:%d:%d:%d:%d);", pr.PlayerID, pr.Minutes, pr.Goals, pr.Assists,
+			pr.Chances, pr.YellowCards, pr.RedCards, pr.PenaltiesScored, pr.PenaltiesMissed)
+	}
+	for _, pr := range res.AwayPlayerRatings {
+		fmt.Fprintf(&b, "A(%s:%d:%d:%d:%d:%d:%d:%d:%d);", pr.PlayerID, pr.Minutes, pr.Goals, pr.Assists,
+			pr.Chances, pr.YellowCards, pr.RedCards, pr.PenaltiesScored, pr.PenaltiesMissed)
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+func TestAttributionLeavesCanonicalFeedUntouched(t *testing.T) {
+	// The attribution pass is a strict post-process over its own streams: the
+	// canonical feed digest (which excludes player linkage) must be identical
+	// whether or not lineups were supplied.
+	for seed := int64(0); seed < 40; seed++ {
+		plain := Simulate(sampleOptions(seed))
+		wl := Simulate(lineupOptions(seed))
+		if canonicalDigest(plain) != canonicalDigest(wl) {
+			t.Fatalf("seed %d: lineups perturbed the canonical feed", seed)
+		}
+	}
+}
+
+func TestAttributionIsDeterministic(t *testing.T) {
+	a := attributionDigest(Simulate(lineupOptions(123)))
+	for i := 0; i < 10; i++ {
+		if got := attributionDigest(Simulate(lineupOptions(123))); got != a {
+			t.Fatalf("attribution drifted on run %d", i)
+		}
+	}
+	if attributionDigest(Simulate(lineupOptions(456))) == a {
+		t.Fatalf("different seeds produced identical attribution")
+	}
+}
+
+func TestAttributionEveryEventLinksAMember(t *testing.T) {
+	for seed := int64(0); seed < 40; seed++ {
+		res := Simulate(lineupOptions(seed))
+		member := map[string]bool{}
+		for _, r := range res.HomePlayerRatings {
+			member[r.PlayerID] = true
+		}
+		for _, r := range res.AwayPlayerRatings {
+			member[r.PlayerID] = true
+		}
+		for _, ev := range res.Events {
+			if ev.PlayerID == "" {
+				continue // kickoff/half/full/power/marker events
+			}
+			if !member[ev.PlayerID] {
+				t.Fatalf("seed %d: event #{seq %d} links unknown player %q", seed, ev.Sequence, ev.PlayerID)
+			}
+		}
+	}
+}
+
+func TestAttributionMinutesFullMatch(t *testing.T) {
+	opts := lineupOptions(7)
+	opts.Tuning.SubAutoFraction = 0
+	opts.Tuning.InjuryOnFoulFraction = 0
+	res := Simulate(opts)
+	homeXI := map[string]bool{"h1": true, "h2": true, "h3": true, "h4": true, "h5": true,
+		"h6": true, "h7": true, "h8": true, "h9": true, "h10": true, "h11": true}
+	if len(res.HomePlayerRatings) != len(homeXI) {
+		t.Fatalf("no substitutions allowed but %d home players rated", len(res.HomePlayerRatings))
+	}
+	for _, pr := range res.HomePlayerRatings {
+		if !homeXI[pr.PlayerID] {
+			t.Fatalf("bench player %s rated without any substitution", pr.PlayerID)
+		}
+		if pr.Minutes != 90 {
+			t.Fatalf("unsubstituted starter %s played %d minutes", pr.PlayerID, pr.Minutes)
+		}
+	}
+}
+
+func TestForcedSubstitutionLinksExactPlayers(t *testing.T) {
+	opts := lineupOptions(9)
+	opts.LiveInputs = []LiveInput{{
+		Minute: 60, ClubID: opts.Home.ID, Kind: "substitution",
+		Detail: map[string]any{"player_in": "h14", "player_out": "h10"},
+	}}
+	res := Simulate(opts)
+	seen := false
+	for _, ev := range res.Events {
+		if ev.Type != EventSubstitution || ev.ClubID != opts.Home.ID || ev.Minute != 60 {
+			continue
+		}
+		seen = true
+		if ev.PlayerID != "h14" || ev.RelatedPlayerID != "h10" {
+			t.Fatalf("manager substitution linked %q for %q, want h14 for h10", ev.PlayerID, ev.RelatedPlayerID)
+		}
+	}
+	if !seen {
+		t.Fatal("no 60' home substitution emitted")
+	}
+	// The sub-in is rated with a cameo's minutes (at most the 60→90 window).
+	for _, pr := range res.HomePlayerRatings {
+		if pr.PlayerID == "h14" {
+			if pr.Minutes <= 0 || pr.Minutes > 30 {
+				t.Fatalf("sub-in h14 minutes %d outside the (0,30] cameo window", pr.Minutes)
+			}
+			return
+		}
+	}
+	t.Fatal("sub-in h14 missing from home ratings")
+}
+
+func TestInjuryLinksOutgoingPlayer(t *testing.T) {
+	for seed := int64(0); seed < 300; seed++ {
+		evs := Simulate(lineupOptions(seed)).Events
+		for i, ev := range evs {
+			if ev.Type != EventInjury || i+1 >= len(evs) {
+				continue
+			}
+			next := evs[i+1]
+			if next.Type != EventSubstitution || next.Minute != ev.Minute || next.ClubID != ev.ClubID {
+				continue
+			}
+			if next.RelatedPlayerID != ev.PlayerID {
+				t.Fatalf("seed %d: injury sub's related %q != injured player %q", seed, next.RelatedPlayerID, ev.PlayerID)
+			}
+			if next.PlayerID == "" {
+				t.Fatalf("seed %d: injury sub has no incoming player", seed)
+			}
+			return
+		}
+	}
+	t.Skip("no injury-forced substitution observed across 300 seeds")
+}
+
+func TestRatingsWithinBounds(t *testing.T) {
+	for seed := int64(0); seed < 30; seed++ {
+		res := Simulate(lineupOptions(seed))
+		for _, list := range [][]PlayerRating{res.HomePlayerRatings, res.AwayPlayerRatings} {
+			for _, pr := range list {
+				if pr.Minutes < 0 || pr.Minutes > 90 {
+					t.Fatalf("seed %d: %s minutes %d out of bounds", seed, pr.PlayerID, pr.Minutes)
+				}
+				if pr.Rating < 1 || pr.Rating > 10 {
+					t.Fatalf("seed %d: %s rating %d out of bounds", seed, pr.PlayerID, pr.Rating)
+				}
+			}
+		}
+	}
+}
+
+func TestRatingsTallyToScore(t *testing.T) {
+	for seed := int64(0); seed < 30; seed++ {
+		res := Simulate(lineupOptions(seed))
+		hg, ag := 0, 0
+		for _, pr := range res.HomePlayerRatings {
+			hg += pr.Goals + pr.PenaltiesScored
+		}
+		for _, pr := range res.AwayPlayerRatings {
+			ag += pr.Goals + pr.PenaltiesScored
+		}
+		if hg != res.HomeGoals || ag != res.AwayGoals {
+			t.Fatalf("seed %d: tallied %d-%d != score %d-%d", seed, hg, ag, res.HomeGoals, res.AwayGoals)
+		}
+	}
+}
+
+func TestPenaltyTakerDrawsNoCast(t *testing.T) {
+	// With a designated taker, penalty shots link that exact player and never
+	// draw from the side's stream (the taker is resolved by pick, not chosen).
+	// The taker must carry PenaltiesScored+PenaltiesMissed == penalty events.
+	res := Simulate(lineupOptions(11))
+	for _, pr := range res.HomePlayerRatings {
+		if pr.PlayerID == "h10" {
+			pens := 0
+			for _, ev := range res.Events {
+				if (ev.Type == EventPenaltyScored || ev.Type == EventPenaltyMissed) && ev.ClubID == "home-club" {
+					if ev.PlayerID == "h10" {
+						pens++
+					} else if ev.PlayerID != "" {
+						t.Fatalf("penalty linked %q, want taker h10", ev.PlayerID)
+					}
+				}
+			}
+			if pr.PenaltiesScored+pr.PenaltiesMissed != pens {
+				t.Fatalf("taker tallies %d penalties, feed shows %d", pr.PenaltiesScored+pr.PenaltiesMissed, pens)
+			}
+		}
+	}
+}

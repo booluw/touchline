@@ -435,6 +435,7 @@ type PlayerCondition struct {
 	InjuryRisk          float64
 	TacticalFamiliarity float64
 	Morale              float64
+	PlayingTimePct      float64 // whole-season share (S06-03), [0,1]
 }
 
 // LoadConditions reads condition rows for a set of players. Players without a
@@ -445,7 +446,7 @@ func (s *Store) LoadConditions(ctx context.Context, playerIDs []uuid.UUID) (map[
 		return out, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT player_id, fatigue, fitness, sharpness, injury_risk, tactical_familiarity
+		SELECT player_id, fatigue, fitness, sharpness, injury_risk, tactical_familiarity, morale, playing_time_pct
 		FROM player.player_condition
 		WHERE player_id = ANY($1)`, playerIDs)
 	if err != nil {
@@ -455,7 +456,7 @@ func (s *Store) LoadConditions(ctx context.Context, playerIDs []uuid.UUID) (map[
 	for rows.Next() {
 		var c PlayerCondition
 		if err := rows.Scan(&c.PlayerID, &c.Fatigue, &c.Fitness, &c.Sharpness,
-			&c.InjuryRisk, &c.TacticalFamiliarity); err != nil {
+			&c.InjuryRisk, &c.TacticalFamiliarity, &c.Morale, &c.PlayingTimePct); err != nil {
 			return nil, fmt.Errorf("scan condition: %w", err)
 		}
 		out[c.PlayerID] = c

@@ -9,11 +9,14 @@ import (
 // no wall clock, no global state — the same Options always produce the same
 // MatchResult (spec §3–§4, draw order below).
 //
-// Canonical draw order (replay contract, EngineVersion "1.5-proposal"): the
+// Canonical draw order (replay contract, EngineVersion "1.6-proposal"): the
 // v1.5 style/stamina levers re-weight existing draws and ratings only — they
 // never add RNG consumption — so the order below is unchanged from v1.4 and a
 // balanced-vs-balanced, fully-fit match is byte-identical to the v1.4 golden
-// digest. The "balanced" style is the identity block.
+// digest. The "balanced" style is the identity block. v1.6 (attribution,
+// addendum) is a strictly post-pass: after full time, each side's lineup casts
+// its events to players FROM ITS OWN attribution stream (never the canonical
+// one), so the v1.5 feed and digest are untouched when no lineups are present.
 //
 //	Pre-match:
 //	  1-2. variance — one triangular roll per team (home, then away) from
@@ -212,6 +215,11 @@ func Simulate(opts Options) MatchResult {
 	res.HomePossession = math.Round(float64(homeMinutes) / 90 * 100)
 	emit(90, EventFullTime, "",
 		fmt.Sprintf("Full-time! %d–%d. %s.", res.HomeGoals, res.AwayGoals, winnerName(res, home, away)), "")
+
+	// Attribution pass (v1.6, addendum): link castable events to players and
+	// derive per-side ratings. Strictly post-canonical draws, so the v1.5 draw
+	// order above is never perturbed; skipped entirely for lineup-less callers.
+	attributeMatch(opts, tuning, liveInputs, &res)
 	return res
 }
 

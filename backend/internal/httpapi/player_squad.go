@@ -76,6 +76,34 @@ func (s *server) handleGetPlayerMorale(c *gin.Context) {
 	c.JSON(http.StatusOK, detail)
 }
 
+// handleGetPlayerDevelopment returns one owned player's observable S08-02
+// development trajectory, drivers and recent attribute movement — never the
+// hidden potential ceiling (GET /api/clubs/:id/players/:playerID/development).
+func (s *server) handleGetPlayerDevelopment(c *gin.Context) {
+	clubID, ok := clubParam(c)
+	if !ok {
+		return
+	}
+	playerID, err := uuid.Parse(c.Param("playerID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		return
+	}
+	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
+	_ = clubID // ownership already enforced inside the player service via manager
+	detail, err := s.playerSvc.GetPlayerDevelopmentDetail(c.Request.Context(), worldID, ident.ManagerID, playerID)
+	if err != nil {
+		playerStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
 // handlePromisePlayingTime records an explicit playing-time promise to the
 // player (POST /api/clubs/:id/players/:playerID/promise-playing-time).
 func (s *server) handlePromisePlayingTime(c *gin.Context) {

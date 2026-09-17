@@ -128,6 +128,7 @@ func (s *server) router() *gin.Engine {
 		// transfer-request actions. World-scoped to the caller's manager.
 		api.GET("/clubs/:id/players", s.requireAuth, s.handleListClubPlayers)
 		api.GET("/clubs/:id/players/:playerID", s.requireAuth, s.handleGetPlayerMorale)
+		api.GET("/clubs/:id/players/:playerID/development", s.requireAuth, s.handleGetPlayerDevelopment)
 		api.POST("/clubs/:id/players/:playerID/promise-playing-time", s.requireAuth, s.handlePromisePlayingTime)
 		api.POST("/clubs/:id/players/:playerID/transfer-request/approve", s.requireAuth, s.handleApproveTransferRequest)
 		api.POST("/clubs/:id/players/:playerID/transfer-request/deny", s.requireAuth, s.handleDenyTransferRequest)

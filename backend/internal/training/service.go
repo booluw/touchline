@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/internal/development"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/world"
 	"github.com/touchline/backend/pkg/eventbus"
@@ -269,6 +270,16 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 		}
 	}
 
+	// S08-02: the development pass folds age-curve, playing-time, discipline,
+	// facility and potential-ceiling factors into this week's growth and
+	// decides potential flex/lock. The engine is pure; these reads are the
+	// only database the pass touches.
+	devCtxs, err := loadDevelopmentContexts(ctx, tx, players, clubID, weekTick, pidList)
+	if err != nil {
+		return false, err
+	}
+	devRec := make([]devWeekPlayer, 0, len(players))
+
 	for _, p := range players {
 		attr := attrs[p.id]
 		if attr == nil {
@@ -282,10 +293,18 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 		}
 		net := make(map[string]int)
 
+		dc := devCtxs[p.id]
+		dc.Input.Skills = attr
+		dc.Input.PlayingTimePct = c.PlayingTimePct
+		devOut := development.Evaluate(dc.Input)
+
 		for _, key := range distinctKeys(a) {
 			d := attrDelta(a, p.age, key)
 			if d == 0 {
 				continue
+			}
+			if d > 0 {
+				d *= devOut.Multiplier(key)
 			}
 			rng := rngFor(weekTick, p.id, key)
 			next := applyDelta(attr[key], d, rng)
@@ -375,6 +394,17 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 			p.id, c.Fatigue, c.Fitness, c.Sharpness, c.InjuryRisk, c.TacticalFamiliarity); err != nil {
 			return false, fmt.Errorf("condition: %w", err)
 		}
+
+		// S08-02: persist the development outcome (potential/lock + weekly
+		// state) and collect this player's explanation for the club event.
+		if err := s.recordDevelopment(ctx, tx, p, dc, devOut); err != nil {
+			return false, err
+		}
+		devRec = append(devRec, devWeekPlayer{PlayerID: p.id.String(), Explanation: devOut.Explanation})
+	}
+
+	if err := s.emitDevelopmentWeek(ctx, tx, worldID, weekTick, clubID, archetype, devRec); err != nil {
+		return false, err
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -470,7 +500,8 @@ func loadConditions(ctx context.Context, tx pgx.Tx, playerIDs []uuid.UUID) (map[
 		return out, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT player_id, fatigue, fitness, sharpness, injury_risk, tactical_familiarity, COALESCE(morale, 0.5)
+		SELECT player_id, fatigue, fitness, sharpness, injury_risk, tactical_familiarity,
+		       COALESCE(morale, 0.5), COALESCE(playing_time_pct, 0)
 		FROM player.player_condition WHERE player_id = ANY($1)`, playerIDs)
 	if err != nil {
 		return nil, fmt.Errorf("load conditions: %w", err)
@@ -479,7 +510,7 @@ func loadConditions(ctx context.Context, tx pgx.Tx, playerIDs []uuid.UUID) (map[
 	for rows.Next() {
 		var c squad.PlayerCondition
 		if err := rows.Scan(&c.PlayerID, &c.Fatigue, &c.Fitness, &c.Sharpness,
-			&c.InjuryRisk, &c.TacticalFamiliarity, &c.Morale); err != nil {
+			&c.InjuryRisk, &c.TacticalFamiliarity, &c.Morale, &c.PlayingTimePct); err != nil {
 			return nil, fmt.Errorf("scan condition: %w", err)
 		}
 		out[c.PlayerID] = c

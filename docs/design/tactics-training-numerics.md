@@ -7,6 +7,12 @@ binds them to the existing schema and the match engine. All numbers here are
 **proposal** until PM tuning sign-off; every block is config/data, never
 hardcoded in engine code.
 
+The S08-02 weekly development pass folds S05-01 growth/detrain deltas through a
+game-world multiplier (age × playing-time × discipline × facility ×
+potential-ceiling) and is the only other attribute writer's input — see
+`backend/docs/design/development-numerics.md` for those numerics. Training here
+remains what a plan *provides*; development modulates what a player *becomes*.
+
 ## 1. Tactical styles — Simple Mode
 
 The manager's tactical control in Simple Mode is **one of five styles**. Styles

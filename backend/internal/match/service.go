@@ -171,8 +171,8 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 
 	res := matchsim.Simulate(matchsim.Options{
 		Seed:   seed,
-		Home:   homePlan.team,
-		Away:   awayPlan.team,
+		Home:   lineupsTeam(homePlan),
+		Away:   lineupsTeam(awayPlan),
 		Tuning: tuning,
 	})
 
@@ -181,11 +181,7 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}
 
-	casters := map[string]*sideCaster{
-		f.HomeClubID.String(): newSideCaster(seed, f.HomeClubID, homePlan.xi, homePlan.bench, homePlan.taker),
-		f.AwayClubID.String(): newSideCaster(seed, f.AwayClubID, awayPlan.xi, awayPlan.bench, awayPlan.taker),
-	}
-	if _, err := persistEventsWithCasting(ctx, tx, matchID, res.Events, casters, 0, nil); err != nil {
+	if _, err := persistEvents(ctx, tx, matchID, res.Events, 0); err != nil {
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}
 
@@ -322,30 +318,12 @@ func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, 
 	return id, now, err
 }
 
-func persistEventsWithCasting(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, casters map[string]*sideCaster, startSeq int, forced map[int]map[string]forcedSub) ([]*MatchEventRow, error) {
+func persistEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, startSeq int) ([]*MatchEventRow, error) {
 	out := make([]*MatchEventRow, 0, len(evs))
-	for i, ev := range evs {
-		var playerID, relatedID *uuid.UUID
-		if c, ok := casters[ev.ClubID]; ok {
-			// A manager's chosen substitution replaces the caster's bench
-			// draw, EXCEPT when this substitution is the injury-forced one
-			// (preceded by an EventInjury for the same minute/club), which
-			// always keeps the injury's pending-sub player.
-			if ev.Type == matchsim.EventSubstitution {
-				injDerived := i > 0 &&
-					evs[i-1].Minute == ev.Minute &&
-					evs[i-1].ClubID == ev.ClubID &&
-					evs[i-1].Type == matchsim.EventInjury
-				if f, ok := forced[ev.Minute][ev.ClubID]; ok && !injDerived {
-					playerID, relatedID = c.resolveForced(ev, f.SubIn, f.SubOut)
-				}
-			}
-			if playerID == nil && relatedID == nil {
-				playerID, relatedID = c.resolve(ev)
-			}
-		}
+	for _, ev := range evs {
+		playerID, relatedID := eventPlayers(ev)
 		if ev.Sequence <= startSeq {
-			continue // already persisted; the caster state still advanced above
+			continue // already persisted
 		}
 		var clubID *uuid.UUID
 		if ev.ClubID != "" {
@@ -378,6 +356,86 @@ func persistEventsWithCasting(ctx context.Context, tx pgx.Tx, matchID uuid.UUID,
 		})
 	}
 	return out, nil
+}
+
+// eventPlayers converts the engine's attribution-pass linkage into row ids. A
+// blank id (a side without lineups, or a structural event) stays nil.
+func eventPlayers(ev matchsim.MatchEvent) (playerID, relatedID *uuid.UUID) {
+	if ev.PlayerID != "" {
+		if id, err := uuid.Parse(ev.PlayerID); err == nil {
+			playerID = &id
+		}
+	}
+	if ev.RelatedPlayerID != "" {
+		if id, err := uuid.Parse(ev.RelatedPlayerID); err == nil {
+			relatedID = &id
+		}
+	}
+	return playerID, relatedID
+}
+
+// lineupsTeam stamps a plan's frozen XI/bench/taker onto the engine Team so the
+// v1.6 attribution pass can link events and derive ratings for this side.
+func lineupsTeam(p *teamPlan) matchsim.Team {
+	t := p.team
+	if p.xi != nil && len(p.xi) == 0 {
+		return t
+	}
+	li := playerLineupsFor(p.xi, p.bench, p.taker)
+	if li != nil {
+		t.Lineups = li
+	}
+	return t
+}
+
+// playerLineupsFor converts snapshot lineups into the engine's attribution
+// input. Returns nil when no XI is present (a side without players).
+func playerLineupsFor(xi, bench []squad.SquadMember, taker *squad.SquadMember) *matchsim.PlayerLineups {
+	if len(xi) == 0 {
+		return nil
+	}
+	li := &matchsim.PlayerLineups{
+		XI:    make([]matchsim.PlayerRef, 0, len(xi)),
+		Bench: make([]matchsim.PlayerRef, 0, len(bench)),
+	}
+	for _, m := range xi {
+		li.XI = append(li.XI, matchsim.PlayerRef{ID: m.PlayerID.String(), Position: m.Position, Weight: m.AttributeWeight})
+	}
+	for _, m := range bench {
+		li.Bench = append(li.Bench, matchsim.PlayerRef{ID: m.PlayerID.String(), Position: m.Position, Weight: m.AttributeWeight})
+	}
+	if taker != nil {
+		li.Taker = taker.PlayerID.String()
+	}
+	return li
+}
+
+// appearancesFromRatings turns a side's v1.6 rating sheet (every XI member plus
+// each sub-in, with authoritative minutes and tallies) into the appearance
+// rows the morale/development passes persist. Players are Started when they
+// were in the starting XI; goals fold open-play + penalty goals together, the
+// persisted convention.
+func appearancesFromRatings(xi []squad.SquadMember, ratings []matchsim.PlayerRating) []player.Appearance {
+	inXI := make(map[uuid.UUID]bool, len(xi))
+	for _, m := range xi {
+		inXI[m.PlayerID] = true
+	}
+	out := make([]player.Appearance, 0, len(ratings))
+	for _, r := range ratings {
+		id, err := uuid.Parse(r.PlayerID)
+		if err != nil {
+			continue
+		}
+		out = append(out, player.Appearance{
+			PlayerID: id,
+			Started:  inXI[id],
+			Minutes:  r.Minutes,
+			Rating:   &r.Rating,
+			Goals:    r.Goals + r.PenaltiesScored,
+			Assists:  r.Assists,
+		})
+	}
+	return out
 }
 
 // eventDetail renders the engine's commentary as the match_events.detail JSONB

@@ -131,6 +131,13 @@ type Tuning struct {
 	FatigueStartMinute  int
 	FatiguePenaltyScale float64
 	FatiguePenaltyMax   float64
+
+	// Ratings is the v1.6 per-player match-rating block (proposal). It folds
+	// the attribution pass's tallies into a 1..10 rating the player development
+	// pass consumes as the real in-match performance signal. The pass itself
+	// consumes no RNG beyond the side's attribution stream. See
+	// matchsim_addendum_v1.6.md §"Per-player match ratings".
+	Ratings RatingsSpec
 }
 
 // StyleSpec is one style's numeric block (v1.5). Every field re-weights an
@@ -154,9 +161,28 @@ type OutcomeWeights struct {
 	Foul      float64
 }
 
+// RatingsSpec is the v1.6 per-player match-rating block. The attribution pass
+// starts every player at Base, adds the tally bonuses (all optional tallies
+// contribute), then prorates that contribution toward Base for part-time
+// appearances (fewer than HalfMinutes minutes), rounds, and clamps to 1..10.
+type RatingsSpec struct {
+	Base          float64
+	Goal          float64
+	Assist        float64
+	Chance        float64
+	Yellow        float64
+	Red           float64
+	PenaltyScored float64
+	PenaltyMissed float64
+	HalfMinutes   int
+}
+
 // EngineVersion is the engine_version recorded on completed matches. It bumps
 // whenever the canonical draw order or tuning structure changes (spec §4).
-const EngineVersion = "1.5-proposal"
+// v1.6 adds the attribution pass (player-linked feed + per-player ratings):
+// the pass draws only from each side's separate attribution stream, so the
+// v1.5 canonical draw order and a lineup-less caller's feed are unchanged.
+const EngineVersion = "1.6-proposal"
 
 // RefereeBiasSource values.
 const (
@@ -298,6 +324,12 @@ var ProposedTuning = Tuning{
 	FatigueStartMinute:         76,
 	FatiguePenaltyScale:        0.5,
 	FatiguePenaltyMax:          0.15,
+	Ratings: RatingsSpec{
+		Base: 6.0, Goal: 0.6, Assist: 0.3, Chance: 0.05,
+		Yellow: -0.3, Red: -1.0,
+		PenaltyScored: 0.4, PenaltyMissed: -0.6,
+		HalfMinutes: 45,
+	},
 }
 
 // DefaultTuning returns a copy of the proposed tuning so callers can mutate

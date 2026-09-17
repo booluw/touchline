@@ -1396,6 +1396,37 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/development:
+    get:
+      tags: [player]
+      summary: One player's development trajectory
+      operationId: getPlayerDevelopment
+      description: "The observable S08-02 development picture of one of the caller's players: last evaluated week, cumulative development weeks, consecutive stagnant weeks, a stagnation flag (consecutive threshold 4), the recent weekly attribute movement (excluding the morale pseudo-key) and the drivers recorded on the latest DEVELOPMENT_WEEK event (PRD §54, stored never recomputed). The hidden potential ceiling, expansion budget and lock state are never exposed."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The player's development trajectory.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerDevelopment" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Player not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/players/{playerID}/promise-playing-time:
     post:
       tags: [player]
@@ -2565,6 +2596,34 @@ components:
         event_type: { type: string }
         sentiment_delta: { type: integer }
         created_at: { type: string, format: date-time }
+    PlayerDevelopment:
+      type: object
+      description: "One player's observable S08-02 development read model. Trajectory and stored drivers only; the hidden potential ceiling / expansion budget / lock state are never surfaced."
+      properties:
+        player_id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        position: { type: string }
+        last_eval_week: { type: integer, format: int64, description: Most recent weekly tick the development pass evaluated this player (0 = never). }
+        cum_dev_weeks: { type: integer, description: Cumulative weeks evaluated. }
+        consecutive_stagnant_weeks: { type: integer, description: Consecutive weeks below 20% playing-time share. }
+        stagnating: { type: boolean, description: True from 4 consecutive stagnant weeks (matches the weekly ×0.85 growth gate). }
+        recent_deltas:
+          type: array
+          description: The eight most recent weekly attribute movements, oldest first; the morale pseudo-key row is excluded.
+          items: { $ref: "#/components/schemas/AttributeDelta" }
+        drivers:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Explanation" }]
+          description: The stored development explanation from the latest DEVELOPMENT_WEEK event, or null when the club has never had a week evaluated.
+    AttributeDelta:
+      type: object
+      description: One weekly net movement of an attribute key (player.player_attribute_changes).
+      properties:
+        applied_week: { type: integer, format: int64 }
+        attribute_key: { type: string }
+        delta: { type: integer }
     WorldChoice:
       type: object
       description: One joined world offered by the login world picker / registration join.

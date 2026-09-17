@@ -171,15 +171,20 @@ func attrDelta(a Archetype, age int, key string) float64 {
 
 // applyDelta folds a fractional weekly delta into an integer attribute value
 // with a seeded binary rounding that preserves the expectation exactly
-// (+0.3/week ≈ +1 point 30% of weeks), so small deltas still move a player
-// over a season. Deterministic for a fixed rng.
+// (+0.3/week ≈ +1 point 30% of weeks, and +2.6/week ≈ +2 points plus a 60%
+// third), so small deltas still move a player over a season and the
+// development engine's compounded deltas keep their mean. Deterministic for a
+// fixed rng.
 func applyDelta(v int, d float64, rng *rand.Rand) int {
 	if d > 0 {
-		if rng.Float64() < d {
+		v += int(d)
+		if rng.Float64() < d-float64(int(d)) {
 			v++
 		}
 	} else if d < 0 {
-		if rng.Float64() < -d {
+		neg := -d
+		v -= int(neg)
+		if rng.Float64() < neg-float64(int(neg)) {
 			v--
 		}
 	}

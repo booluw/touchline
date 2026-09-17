@@ -23,7 +23,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/touchline/backend/internal/form"
-	"github.com/touchline/backend/internal/player"
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/matchsim"
@@ -305,12 +304,13 @@ func (s *Service) resolveMatchPacing(ctx context.Context, worldID uuid.UUID) tim
 
 // PaceMinute runs the pure engine up to one simulated minute and persists
 // exactly the events of that minute: Simulate(seed + ordered inputs with
-// minute <= m). The casters are rebuilt from scratch every call and only the
-// tail beyond the last persisted sequence is written, so a crash can never
-// persist half a minute (one minute per tx) and the identical match resumes
-// from seed + snapshot + inputs. The returned rows are exactly the persisted
-// feed for this minute (S04-03 publishes them as the live match_tick
-// envelope). finished reports that full time was reached.
+// minute <= m). The engine's v1.6 attribution pass (lineups linked to the
+// frozen snapshot) resolves event players, so every persisted row carries its
+// final player ids. Only the tail beyond the last persisted sequence is
+// written, so a crash can never persist half a minute (one minute per tx) and
+// the identical match resumes from seed + snapshot + inputs. The returned rows
+// are exactly the persisted feed for this minute (S04-03 publishes them as the
+// live match_tick envelope). finished reports that full time was reached.
 func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEventRow, bool, error) {
 	if sess.nextMinute > 90 {
 		return nil, true, nil
@@ -321,10 +321,11 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 	if err != nil {
 		return nil, false, err
 	}
+	home, away := lineupsSessionTeams(sess)
 	res := matchsim.Simulate(matchsim.Options{
 		Seed:       sess.Seed,
-		Home:       sess.Home,
-		Away:       sess.Away,
+		Home:       home,
+		Away:       away,
 		Tuning:     matchsim.DefaultTuning(),
 		LiveInputs: inputsUpTo(inputs, m),
 	})
@@ -359,11 +360,7 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 		return nil, false, fmt.Errorf("pace minute: last sequence: %w", err)
 	}
 
-	casters := map[string]*sideCaster{
-		sess.HomeClubID.String(): newSideCaster(sess.Seed, sess.HomeClubID, sess.homeXI, sess.homeBench, sess.homeTaker),
-		sess.AwayClubID.String(): newSideCaster(sess.Seed, sess.AwayClubID, sess.awayXI, sess.awayBench, sess.awayTaker),
-	}
-	rows, err := persistEventsWithCasting(ctx, tx, sess.MatchID, minuteEvents, casters, lastSeq, forcedSubs(inputsUpTo(inputs, m)))
+	rows, err := persistEvents(ctx, tx, sess.MatchID, minuteEvents, lastSeq)
 	if err != nil {
 		return nil, false, fmt.Errorf("pace minute: %w", err)
 	}
@@ -394,10 +391,11 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 	if err != nil {
 		return nil, err
 	}
+	home, away := lineupsSessionTeams(sess)
 	res := matchsim.Simulate(matchsim.Options{
 		Seed:       sess.Seed,
-		Home:       sess.Home,
-		Away:       sess.Away,
+		Home:       home,
+		Away:       away,
 		Tuning:     matchsim.DefaultTuning(),
 		LiveInputs: inputs,
 	})
@@ -452,13 +450,14 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		return nil, fmt.Errorf("finalize: %w", err)
 	}
 
-	// Player appearances + morale land atomically with the result (S06-03):
-	// the pitch minutes become the whole-season share input for the two XIs.
+	// Player appearances, ratings + morale land atomically with the result
+	// (S06-03, v1.6): the engine's per-player rating sheet gives authoritative
+	// minutes and the match 1–10 ratings, which become the whole-season share
+	// input and the development pass' match-feed source for the two XIs.
 	if s.players != nil {
-		apps, err := s.buildAppearances(ctx, tx, sess)
-		if err != nil {
-			return nil, fmt.Errorf("finalize: appearances: %w", err)
-		}
+		apps := append(
+			appearancesFromRatings(sess.homeXI, res.HomePlayerRatings),
+			appearancesFromRatings(sess.awayXI, res.AwayPlayerRatings)...)
 		if err := s.players.RecordMatchAppearances(ctx, tx, sess.MatchID, apps); err != nil {
 			return nil, fmt.Errorf("finalize: record appearances: %w", err)
 		}
@@ -801,35 +800,6 @@ func inputsUpTo(inputs []matchsim.LiveInput, m int) []matchsim.LiveInput {
 	return out
 }
 
-// forcedSub carries the exact player-in/player-out a manager chose; the caster
-// uses it to link a substitution event instead of its own bench draw.
-type forcedSub struct {
-	SubIn  uuid.UUID
-	SubOut uuid.UUID
-}
-
-// forcedSubs indexes manager substitutions by (minute, club) for casting.
-func forcedSubs(inputs []matchsim.LiveInput) map[int]map[string]forcedSub {
-	out := make(map[int]map[string]forcedSub)
-	for _, in := range inputs {
-		if in.Kind != "substitution" {
-			continue
-		}
-		playerIn, _ := in.Detail["player_in"].(string)
-		playerOut, _ := in.Detail["player_out"].(string)
-		inID, err1 := uuid.Parse(playerIn)
-		outID, err2 := uuid.Parse(playerOut)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if out[in.Minute] == nil {
-			out[in.Minute] = make(map[string]forcedSub)
-		}
-		out[in.Minute][in.ClubID] = forcedSub{SubIn: inID, SubOut: outID}
-	}
-	return out
-}
-
 // containsInt reports whether xs contains v.
 func containsInt(xs []int, v int) bool {
 	for _, x := range xs {
@@ -840,110 +810,12 @@ func containsInt(xs []int, v int) bool {
 	return false
 }
 
-// subRow is one persisted substitution (player coming on, player replaced).
-type subRow struct {
-	in     uuid.UUID
-	out    uuid.UUID
-	minute int
-}
-
-// buildAppearances reads the final substitution feed of a completed match and
-// turns it (with the frozen lineups) into the playing-time record the morale
-// engine needs: starters get 90 minus the minute they came off; bench players
-// get 90 minus the minute they came on (and the tail is trimmed if a
-// substitute is later replaced).
-func (s *Service) buildAppearances(ctx context.Context, tx pgx.Tx, sess *LiveSession) ([]player.Appearance, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT player_id, related_player_id, minute
-		FROM match.match_events
-		WHERE match_id = $1 AND event_type = 'substitution'
-		ORDER BY minute, sequence`, sess.MatchID)
-	if err != nil {
-		return nil, fmt.Errorf("load substitutions: %w", err)
-	}
-	defer rows.Close()
-
-	var home, away []subRow
-	for rows.Next() {
-		var in, out uuid.UUID
-		var minute int
-		if err := rows.Scan(&in, &out, &minute); err != nil {
-			return nil, fmt.Errorf("scan substitution: %w", err)
-		}
-		if in == uuid.Nil || out == uuid.Nil {
-			continue
-		}
-		if memberOf(sess.homeXI, in) {
-			home = append(home, subRow{in: in, out: out, minute: minute})
-		} else if memberOf(sess.awayXI, in) {
-			away = append(away, subRow{in: in, out: out, minute: minute})
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	var appearances []player.Appearance
-	appearances = append(appearances, appearancesForSide(sess.homeXI, home)...)
-	appearances = append(appearances, appearancesForSide(sess.awayXI, away)...)
-	return appearances, nil
-}
-
-func memberOf(xi []squad.SquadMember, id uuid.UUID) bool {
-	for _, m := range xi {
-		if m.PlayerID == id {
-			return true
-		}
-	}
-	return false
-}
-
-// appearancesForSide derives each player's minutes from the starting XI and
-// the side's completed substitutions (see buildAppearances for the rules).
-func appearancesForSide(xi []squad.SquadMember, subs []subRow) []player.Appearance {
-	minutes := make(map[uuid.UUID]int, len(xi)+len(subs))
-	for _, m := range xi {
-		minutes[m.PlayerID] = 90
-	}
-	for _, s := range subs {
-		minutes[s.out] -= 90 - s.minute
-		minutes[s.in] += 90 - s.minute
-	}
-
-	out := make([]player.Appearance, 0, len(xi)+len(subs))
-	seen := make(map[uuid.UUID]bool, len(minutes))
-	for _, m := range xi {
-		seen[m.PlayerID] = true
-		out = append(out, player.Appearance{PlayerID: m.PlayerID, Started: true, Minutes: clampPitchMinutes(minutes[m.PlayerID])})
-	}
-	for _, s := range subs {
-		if seen[s.in] {
-			continue // a sub-in is not a starter of this side
-		}
-		seen[s.in] = true
-		if got := clampPitchMinutes(minutes[s.in]); got > 0 {
-			out = append(out, player.Appearance{PlayerID: s.in, Started: false, Minutes: got})
-		}
-	}
-	return out
-}
-
-func clampPitchMinutes(v int) int {
-	if v < 0 {
-		return 0
-	}
-	if v > 90 {
-		return 90
-	}
-	return v
-}
-
-// startedXI reports which lineup slots are in the starting XI (helper for
-// table-driven unit tests of appearance derivation).
-func startedXI(xi []squad.SquadMember) map[uuid.UUID]bool {
-	m := make(map[uuid.UUID]bool, len(xi))
-	for _, s := range xi {
-		m[s.PlayerID] = true
-	}
-	return m
+// lineupsSessionTeams stamps a session's frozen snapshot lineups onto its
+// engine teams so the v1.6 attribution pass links events for both sides and
+// Finalize can read the per-player rating sheets.
+func lineupsSessionTeams(sess *LiveSession) (matchsim.Team, matchsim.Team) {
+	home, away := sess.Home, sess.Away
+	home.Lineups = playerLineupsFor(sess.homeXI, sess.homeBench, sess.homeTaker)
+	away.Lineups = playerLineupsFor(sess.awayXI, sess.awayBench, sess.awayTaker)
+	return home, away
 }

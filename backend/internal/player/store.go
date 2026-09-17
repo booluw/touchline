@@ -110,13 +110,14 @@ func refreshShare(ctx context.Context, q dbtx, playerID uuid.UUID) (float64, err
 	return share, nil
 }
 
-// insertAppearance records one player's appearance in a completed match.
+// insertAppearance records one player's appearance in a completed match,
+// including the v1.6 rating (nil = legacy/pre-attribution match).
 func insertAppearance(ctx context.Context, q dbtx, matchID uuid.UUID, a Appearance) error {
 	_, err := q.Exec(ctx, `
-		INSERT INTO player.player_appearances (player_id, match_id, started, minutes)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO player.player_appearances (player_id, match_id, started, minutes, rating, goals, assists)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (player_id, match_id) DO NOTHING`,
-		a.PlayerID, matchID, a.Started, a.Minutes)
+		a.PlayerID, matchID, a.Started, a.Minutes, a.Rating, a.Goals, a.Assists)
 	return err
 }
 
