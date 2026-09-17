@@ -175,3 +175,14 @@ README.md, .gitignore, OPENCODE.md
 - `docs/Touchline_Technical_Implementation_Plan.md` — §3 arch diagram, §4 event core, §6 schemas, §9 match engine, §11 frontend, §12 API surface, §15 infra, §16 phases.
 - `internal/*/` structs mirror plan §6 schema table — keep in sync when writing migrations.
 - `docs/Touchline — Persistent Multiplayer Football Manager PRD.md` — sections 52–73 for UX/features; 74–77 for phase scope.
+## Ad-hoc cargo: player lifecycle (A01–A11)
+
+Coverage map — keep in sync with `docs/product_manager.md` (OPD-26..29) and the design doc `backend/docs/design/player-lifecycle.md`.
+
+- `internal/playerpool/` — player pool store: draft-from-shared-country-pool (OPD-27), free agents (A08 list/sign/release), street intake (A04, 18+ gate enforced here), club academy intake (A05). `-race` DB suite in the CI integration job.
+- `internal/lifecycle/` — aging (A06: birthday max-age, retirement/aftermath; player origin street = do/die-in-absentia path), eligibility gate (A07: 18+ for street origin), AI auto-fill backstop (A09: world #S02-01-08 reads `squad.size`; auto-fill when a manager falls below it).
+- `internal/academy/` — club academy: intake (A05, origin academy), squads subsist on academy picks; retirement aftermath demotes 65+ to alumni/pool.
+- `internal/squad/` — squad read/size model (OPD-29: target 24, AI fill if short), roster views consumed by lifecycle/autofill.
+- Router: `cmd/api` mounts admin bulk-create (`POST /api/admin/worlds/:id/clubs` bulk player seed, A10) and free-agent/eligibility HTTP surfaces (A08/A07).
+- Design: `backend/docs/design/player-lifecycle.md` (OPD-26..29: country academy/street kids, player-pool draft, match-eligibility rule, squad size/AI fill). Migration `0036_player_lifecycle` adds player origin/age eligibility to the pool.
+- Gate: `go test -p 1 -tags integration -race ./internal/playerpool/... ./internal/lifecycle/... ./internal/academy/... ./internal/squad/...` (wired into `.github/workflows/ci.yml`).

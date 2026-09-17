@@ -304,6 +304,13 @@ curl -c /tmp/jar -b /tmp/jar localhost:8080/api/competitions                    
 # memberships: SELECT competition_id FROM competition.club_competitions WHERE club_id='<club-id>'
 ```
 
+Player lifecycle additions (A01–A11, OPD-26..29):
+- `internal/playerpool` mints the country-wide player pool on world seed; free agents (A08) + AI auto-fill backstop (A09) live here.
+- `internal/lifecycle` owns aging/retirement/aftermath and the A07 eligibility gate (professional contract; street origin 18+).
+- `internal/academy` feeds street-kids (13–15, origin `street`) and club-academy (origin `academy`) intakes into the pool.
+- `internal/squad` sets the 24-player OPD-29 target; admin bulk create (A10): `POST /api/admin/worlds/:id/players/bulk`.
+- Schema: migration `0036_player_lifecycle`; design: `backend/docs/design/player-lifecycle.md`.
+
 ---
 
 ## 7. Start a season (service seam)
