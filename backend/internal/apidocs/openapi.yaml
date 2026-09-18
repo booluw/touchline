@@ -748,6 +748,53 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/dynamics:
+    get:
+      tags: [clubs]
+      summary: Dressing-room dynamics
+      operationId: getSquadDynamics
+      description: |
+        Owning manager only. Derives the dressing-room hierarchy, social
+        factions, cohesion, manager support, mood and any current unrest from
+        the player↔player social graph at read time — no denormalized faction
+        column (S09-02). Reading self-heals the graph for squads assembled
+        before S09-02 shipped.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: Computed squad dynamics.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SquadDynamics" }
+              examples:
+                sample:
+                  value:
+                    club_id: 00000000-0000-4000-8000-000000000005
+                    action: inspect
+                    cohesion: 58
+                    manager_support: 54
+                    dressing_room_mood: 63
+                    tiers:
+                      - { player_id: 00000000-0000-4000-8000-00000000000a, name: Leo Marsh, tier: team_leader }
+                    factions:
+                      - label: veteran_core
+                        leader_id: 00000000-0000-4000-8000-00000000000a
+                        members:
+                          - 00000000-0000-4000-8000-00000000000a
+                          - 00000000-0000-4000-8000-00000000000b
+                        cohesion: 61
+                        explanation: { subject: faction_cohesion, score: 61, factors: [{ label: members, delta: 2 }] }
+                    unrest:
+                      severity: 68
+                      demand: board_meeting
+                      affected: [00000000-0000-4000-8000-00000000000b]
+                    explanation: { subject: squad_dynamics, score: 1, factors: [{ label: squad members, delta: 24 }] }
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/finances:
     get:
       tags: [finance]
@@ -2868,6 +2915,66 @@ components:
         club_id: { type: string, format: uuid }
         level: { type: integer, minimum: 1, maximum: 10 }
         upgraded_at: { type: string, format: date-time, nullable: true, description: Null before the club ever upgrades. }
+    SquadDynamics:
+      type: object
+      description: "Computed dressing-room dynamics (S09-02), derived from the player↔player social graph at read time."
+      properties:
+        club_id: { type: string, format: uuid }
+        action:
+          type: string
+          enum: [inspect, missed_promise, dropped_from_starting_xi, benched_long_term, wage_cut_offered, contract_approved, transfer_bid_query, transfer_bid_blocked, released_from_squad, training_load_increased, team_talk_motivational, team_talk_critical]
+        cohesion: { type: integer, minimum: 10, maximum: 95 }
+        manager_support: { type: integer, minimum: 0, maximum: 100 }
+        dressing_room_mood: { type: integer, minimum: 0, maximum: 100 }
+        tiers:
+          type: array
+          items: { $ref: "#/components/schemas/SquadTier" }
+        factions:
+          type: array
+          items: { $ref: "#/components/schemas/Faction" }
+        contagion:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Contagion" }]
+        unrest:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SquadUnrest" }]
+        explanation:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Explanation" }]
+    SquadTier:
+      type: object
+      properties:
+        player_id: { type: string, format: uuid }
+        name: { type: string }
+        tier: { type: string, enum: [team_leader, highly_influential, influential, other] }
+    Faction:
+      type: object
+      properties:
+        label: { type: string, enum: [veteran_core, foreign_cohort, youth_alliance, neutral_room] }
+        leader_id: { type: string, format: uuid }
+        members:
+          type: array
+          items: { type: string, format: uuid }
+        cohesion: { type: integer, minimum: 10, maximum: 95 }
+        explanation: { $ref: "#/components/schemas/Explanation" }
+    Contagion:
+      type: object
+      properties:
+        source: { type: string, format: uuid }
+        confidence: { type: integer, minimum: 0, maximum: 84 }
+        affected:
+          type: array
+          items: { type: string, format: uuid }
+        explanation: { $ref: "#/components/schemas/Explanation" }
+    SquadUnrest:
+      type: object
+      properties:
+        severity: { type: integer, minimum: 0, maximum: 100 }
+        demand: { type: string, enum: [board_meeting, en_masse_transfer_requests] }
+        affected:
+          type: array
+          items: { type: string, format: uuid }
+        explanation: { $ref: "#/components/schemas/Explanation" }
     AcademyUpdateRequest:
       type: object
       properties:

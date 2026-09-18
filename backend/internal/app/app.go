@@ -27,6 +27,7 @@ import (
 	internalcompetition "github.com/touchline/backend/internal/competition"
 	internaldashboard "github.com/touchline/backend/internal/dashboard"
 	"github.com/touchline/backend/internal/eventoutbox"
+	internalfaction "github.com/touchline/backend/internal/faction"
 	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/httpapi"
@@ -165,6 +166,8 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	managerSvc := internalmanager.NewService(pool, bus)
 	playerSvc := internalplayer.NewService(pool, bus, transfersSvc)
 	transfersSvc.WithPlayerLifecycle(playerSvc)
+	factionSvc := internalfaction.NewService(pool, bus)
+	transfersSvc.WithSquadDynamics(factionSvc)
 	matches.WithPlayers(playerSvc)
 	socialSvc := internalsocial.NewService(pool, bus)
 	socialSvc.WithRealtime(broker)
@@ -197,6 +200,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Policy:        policySvc,
 		Dashboard:     dashSvc,
 		Academy:       academySvc,
+		Faction:       factionSvc,
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",

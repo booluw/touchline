@@ -1,6 +1,6 @@
 # S09-02 — Implement graph-derived squad dynamics and dressing room factions
 
-**Status:** Not started  
+**Status:** Implemented  
 **Sprint:** 09 — Relationship-driven football world  
 **Source:** PRD §15; technical plan §§6, 16; OPENCODE.md  
 **Depends on:** S06-04, S09-01
@@ -19,4 +19,41 @@ Build the squad dynamics engine using graph CTE queries over `social.relationshi
 
 ## Delivery evidence
 
-- Pending.
+- **AC1 — hierarchy/factions from the graph, no denormalization:** `internal/faction`
+  computes tiers from graph centrality and factions as connected components of
+  the player↔player `social.relationships` subgraph via an undirected recursive
+  CTE (`store.componentRoots`, root = `MIN(node)`), with a pure union-find
+  fallback in the engine. No faction/hierarchy column is persisted; reading
+  self-heals clubs whose graph predates the feature. Migration
+  `0047_player_relationship_graph` only adds partial forward/reverse player-edge
+  indexes. Covered by `TestGenerateEdgesDeterministic`,
+  `TestFactionsFromRootsAndFallback`, `TestHierarchyLeaderAndTiers`,
+  `TestGetDynamicsGeneratesIdempotentCanonicalGraph`.
+- **AC2 — leader influence / contagion degrades the faction:** `Engine.Contagion`
+  runs a deterministic bounded BFS from the action epicentre over the graph and
+  `Engine.UnrestFrom` escalates severe contagion (≥60 board meeting, ≥80
+  en-masse transfer requests). `Service.OnPlayerSold` is invoked BEFORE the
+  ownership flip so a sale is evaluated against the pre-sale room, and
+  `FormerTeammateEdges` records the bonds. Covered by
+  `TestReleasedFromSquadBoundedContagion`, `TestUnrestOnlyAfterThreshold`,
+  `TestEnMasseDemandAtTopSeverity`, `TestOnPlayerSoldEmitsUnrestAndFormerTeammates`.
+- **AC3 — Nuxt hierarchy diagram (DEFERRED):** not built. The backend read model
+  `GET /api/clubs/:id/dynamics` already returns `tiers`, `factions`, `cohesion`,
+  `manager_support` and `dressing_room_mood`, so the UI is a pure follow-on.
+- **AC4 — severe unrest → delegation:** `SQUAD_UNREST_TRIGGERED` carries the
+  demand (`board_meeting` / `en_masse_transfer_requests`), severity and affected
+  players, surfaced back through the read model's `unrest` field.
+  `TestOnPlayerSoldEmitsUnrestAndFormerTeammates` +
+  `cmd/api/faction_integration_test.go` assert the round trip.
+- **AC5 — auditable events with `Explanation`:** every engine outcome, faction,
+  contagion and unrest carries a `pkg/explanation.Explanation`; the event stores
+  it in `world.events.explanation`.
+- **Numerics:** `backend/docs/design/squad-dynamics-numerics.md` (proposal
+  constants; recalibration is a data-only change).
+- **Reserved seams:** live (non-transfer) management-action triggers are
+  unit-tested through the full action matrix but have no emitting call sites
+  yet; the UI (AC3) is deferred.
+- **Verification:** `go build ./...`, `go vet ./...`, `go vet -tags integration
+  ./...`, `go test -race ./...` and `TestDocsCoverRouter` green; the DB
+  integration suites run in CI (`./internal/faction/...` added to the CI
+  integration job) as local Docker is absent.

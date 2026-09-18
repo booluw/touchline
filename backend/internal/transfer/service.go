@@ -25,6 +25,15 @@ type PlayerLifecycle interface {
 	OnPlayerTransferred(ctx context.Context, tx pgx.Tx, playerID, newClubID uuid.UUID) error
 }
 
+// SquadDynamics is the pluggable hook the transfer completion transaction calls
+// BEFORE the ownership flip so dressing-room relationships and unrest settle
+// against the pre-sale squad, atomically with the move. Implemented by
+// internal/faction; declared here (net interface, not an import) so transfer
+// never depends on faction.
+type SquadDynamics interface {
+	OnPlayerSold(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, worldTick int64, clubID, playerID uuid.UUID) error
+}
+
 // Service is the transfer market engine. All writes that emit events go
 // through the transactional outbox (OPD-23) via eventbus.WriteTx inside the
 // caller's transaction; bus may be nil in tests and falls back to RecordTx.
@@ -33,6 +42,7 @@ type Service struct {
 	bus             eventbus.Publisher
 	store           *Store
 	playerLifecycle PlayerLifecycle
+	squadDynamics   SquadDynamics
 }
 
 // NewService wires the transfer engine onto a pool and the event bus.
@@ -43,6 +53,13 @@ func NewService(pool *pgxpool.Pool, bus eventbus.Publisher) *Service {
 // WithPlayerLifecycle plugs the downstream hook invoked on transfer completion.
 func (s *Service) WithPlayerLifecycle(h PlayerLifecycle) *Service {
 	s.playerLifecycle = h
+	return s
+}
+
+// WithSquadDynamics plugs the dressing-room hook invoked before the ownership
+// flip on transfer completion.
+func (s *Service) WithSquadDynamics(h SquadDynamics) *Service {
+	s.squadDynamics = h
 	return s
 }
 
@@ -876,7 +893,13 @@ func (s *Service) acceptBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, w
 		return nil, nil, ErrInsufficientFunds
 	}
 
-	// 1. Ownership flip.
+	// 1. Ownership flip. Before the player leaves, the dressing-room hook
+	// settles relationships and unrest against the pre-sale squad.
+	if s.squadDynamics != nil {
+		if err := s.squadDynamics.OnPlayerSold(ctx, tx, worldID, worldTick, sellerClub, playerID); err != nil {
+			return nil, nil, fmt.Errorf("squad dynamics hook: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE player.players SET club_id = $2, status = 'active' WHERE id = $1`, playerID, buyerClub); err != nil {
 		return nil, nil, fmt.Errorf("move player: %w", err)
