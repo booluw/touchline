@@ -357,7 +357,22 @@ func (s *Service) CreateLeague(ctx context.Context, p LeagueParams) (*League, er
 }
 
 // ListLeagues returns the world's leagues ordered by country, then tier.
-func (s *Service) ListLeagues(ctx context.Context, worldID uuid.UUID) ([]League, error) {
+func (s *Service) ListLeagues(ctx context.Context, countryID uuid.UUID) ([]League, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
+		       r.promotions, r.relegations, r.promotes_to_competition_id, r.relegates_to_competition_id
+		FROM competition.competitions c
+		JOIN competition.competition_rules r ON r.competition_id = c.id
+		WHERE c.country_id = $1 AND c.competition_type = 'league'
+		ORDER BY c.country_id, c.tier, c.name`, countryID)
+	if err != nil {
+		return nil, fmt.Errorf("list leagues: %w", err)
+	}
+	return scanLeagues(rows)
+}
+
+// ListLeagues returns the world's leagues ordered by country, then tier.
+func (s *Service) ListCountryLeagues(ctx context.Context, worldID uuid.UUID) ([]League, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
 		       r.promotions, r.relegations, r.promotes_to_competition_id, r.relegates_to_competition_id

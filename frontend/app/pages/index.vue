@@ -1,5 +1,12 @@
-template>
-  <div class="min-h-screen flex items-center justify-center">
+<template>
+  <div>
+    <div class="flex items-center gap-5">
+      <button class="button button--primary">Confirm</button>
+      <button class="button button--outline">Save draft</button>
+      <button class="button button--danger">Terminate contract</button>
+      <button class="button button--soft">Okay</button>
+      <button class="button">Okay</button>
+    </div>
     <main class="max-w-4xl w-full mx-auto px-6 py-16 text-center">
       <h1 class="text-5xl font-bold text-white mb-4">Touchline</h1>
       <p class="text-lg text-slate-400 mb-8">
@@ -40,6 +47,7 @@ template>
       <p v-else-if="loading" class="mt-10 text-slate-500 text-sm">Loading your dashboard…</p>
     </main>
   </div>
+  <NuxtPage />
 </template>
 
 <script setup lang="ts">

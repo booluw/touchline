@@ -1,9 +1,397 @@
-@import "tailwindcss";
-
 html {
   color-scheme: dark;
 }
 
-body {
-  @apply bg-slate-950 text-slate-100 antialiased;
+/*
+  Touchline — Cyber Brutalist theme tokens (Tailwind CSS v4)
+  --------------------------------------------------------
+  Concept: "Pitch Void" (black) + "Offside Cyan" (neon accent).
+
+  Offside Cyan is deliberately the color broadcasters draw the offside
+  line and VAR/stat overlays in — it reads as "verdict" and "data,"
+  which matches the product's explainability principle (PRD §54):
+  the UI is always showing you *why*, the same way that cyan line does.
+
+  Usage discipline (brutalism = restraint, not decoration everywhere):
+  - void-950/900 are the only page/surface backgrounds. No gradients.
+  - cyan-500 is reserved for: primary actions, active/selected state,
+    focus rings, and "explain this" affordances. NOT for icons,
+    illustration, or general emphasis — if everything glows, nothing does.
+  - Borders are solid, never soft/blurred box-shadows. Radius stays at
+    0 almost everywhere on purpose — see Radius section below.
+  - Win/loss/warning states use the semantic colors, never cyan — keeps
+    "board fired you" red distinct from "click here" cyan.
+  - Density: this is a data-heavy management sim (squad tables, ledgers,
+    fixture lists), not a marketing site. Spacing below runs tighter
+    than a typical SaaS scale on purpose — see Spacing section.
+  - "Live" (real-time match/tick state) gets its OWN color, separate
+    from cyan — "this is happening right now" is a different signal
+    from "click here," and conflating them would blunt both.
+*/
+
+@import "tailwindcss";
+
+@theme {
+  /* =========================================================
+     COLOR
+     ========================================================= */
+
+  /* ---- Pitch Void: base black ramp (cool, blue-black) ---- */
+  --color-void-950: #05070a; /* page background */
+  --color-void-900: #0a0d12; /* the black — card/surface base */
+  --color-void-850: #0e1218; /* elevated surface (modals, dropdowns) */
+  --color-void-800: #141920; /* hovered surface */
+  --color-void-700: #1e252e; /* borders, dividers */
+  --color-void-600: #2c3542; /* stronger borders, disabled fills */
+  --color-void-500: #4a5566; /* muted icons */
+  --color-void-400: #7a8494; /* secondary text */
+  --color-void-300: #a8b0bb; /* body text on dark */
+  --color-void-100: #e4e7eb; /* primary text on dark */
+  --color-void-50:  #f5f6f8; /* text on cyan / inverted surfaces */
+
+  /* ---- Offside Cyan: neon accent ramp ---- */
+  --color-cyan-900: #003a42; /* deep fill (selected row bg) */
+  --color-cyan-700: #00707e; /* pressed state */
+  --color-cyan-500: #00e8ff; /* THE accent — CTAs, focus, active nav */
+  --color-cyan-400: #3aefff; /* hover state */
+  --color-cyan-200: #a8f7ff; /* subtle text tint on dark */
+  --color-cyan-glow: rgb(0 232 255 / 0.35); /* box-shadow / outline glow, use sparingly */
+
+  /* ---- Semantic states (kept OFF the neon so meaning stays legible) ---- */
+  --color-win-500:  #3ddc84; /* result won, positive delta */
+  --color-loss-500: #ff4d4d; /* result lost, sacked, financial crisis */
+  --color-draw-500: #a8b0bb; /* draw, neutral delta */
+  --color-warn-500: #ffb800; /* board warning, contract expiring */
+
+  /* ---- Live: real-time match/tick state — deliberately distinct
+     from cyan. Cyan means "act on this"; live means "this is
+     happening now, you can't act on it, just watch." ---- */
+  --color-live-500: #ff3d81; /* magenta-pink — live badge, in-progress fixture */
+  --color-live-glow: rgb(255 61 129 / 0.4);
+
+  /* ---- Data visualization: categorical series palette.
+     Ordered for use — series 1 first, etc. Chosen to stay legible
+     on void-900 and to be distinguishable for common color-vision
+     deficiencies (avoided a red/green-only pairing as the first two
+     stops). Never reuse cyan-500 or live-500 in a chart series — both
+     are reserved UI signals, not data colors. ---- */
+  --color-chart-1: #00e8ff; /* cyan — but ONLY as a data series when no UI cyan is on-screen (e.g. isolated chart view) */
+  --color-chart-2: #ffb800; /* amber */
+  --color-chart-3: #a78bfa; /* violet */
+  --color-chart-4: #3ddc84; /* green */
+  --color-chart-5: #ff8a3d; /* orange */
+  --color-chart-6: #6ee7f5; /* pale cyan */
+  --color-chart-7: #f472b6; /* pink (distinct from live-500 — softer, desaturated) */
+  --color-chart-grid: var(--color-void-700);  /* axis lines/gridlines */
+  --color-chart-axis-text: var(--color-void-400);
+
+  /* =========================================================
+     TYPOGRAPHY
+     Three roles, clearly distinct (skill guidance: 1–2 families,
+     make them different if two — here three, because "big score
+     display" vs "body copy" vs "stat table" really do different jobs).
+     ========================================================= */
+
+  /* Display: condensed, industrial — scoreboard/ticker register.
+     Used for match scores, page titles, big dashboard numbers. */
+  --font-display: "Barlow Condensed", "Archivo Narrow", sans-serif;
+
+  /* Sans: body copy and UI chrome — slight technical edge, not a
+     default grotesk, but reads calm at paragraph length. */
+  --font-sans: "Space Grotesk", "IBM Plex Sans", sans-serif;
+
+  /* Mono: anything that IS data — stats, timestamps, ledger amounts,
+     tick counters, event feed. If it's a number the sim computed,
+     it's mono; if it's prose a human wrote, it's sans. */
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Tight scale for dense dashboards — sits a notch below typical
+     SaaS defaults so squad tables/fixture lists don't force scrolling. */
+  --text-xs:   0.6875rem; /* 11px */
+  --text-xs--line-height: 1.3;
+  --text-sm:   0.8125rem; /* 13px */
+  --text-sm--line-height: 1.35;
+  --text-base: 0.9375rem; /* 15px — the UI default, not 16px */
+  --text-base--line-height: 1.45;
+  --text-lg:   1.125rem;  /* 18px */
+  --text-lg--line-height: 1.4;
+  --text-xl:   1.375rem;  /* 22px */
+  --text-xl--line-height: 1.25;
+  --text-2xl:  1.75rem;   /* 28px */
+  --text-2xl--line-height: 1.15;
+  --text-3xl:  2.25rem;   /* 36px */
+  --text-3xl--line-height: 1.05;
+  --text-display: 3.5rem; /* 56px — match score / hero number only */
+  --text-display--line-height: 1;
+
+  --tracking-tight-brutal: -0.01em;  /* headlines */
+  --tracking-wide-brutal: 0.04em;    /* mono labels/badges ONLY — see note below */
+
+  /* Numeric alignment: apply to every stat table, ledger, and
+     score display so digit columns actually line up. Not a
+     Tailwind v4 @theme key — a utility class defined below. */
+
+  /* =========================================================
+     SPACING
+     Tailwind v4's default --spacing base (0.25rem/4px) stays as-is —
+     don't override it globally or every arbitrary p-3/gap-6 in the
+     codebase silently reflows. Instead, named component tokens below
+     give you the "required paddings" as real utilities (p-control,
+     gap-grid, etc.) so density stays consistent without hunting for
+     the right number each time.
+     ========================================================= */
+
+  --spacing-control-x: 1rem;      /* 16px — button/input horizontal padding */
+  --spacing-control-y: 0.625rem;  /* 10px — button/input vertical padding (compact, not tall) */
+  --spacing-control-sm-x: 0.625rem; /* 10px — icon buttons, table-row actions */
+  --spacing-control-sm-y: 0.375rem; /* 6px */
+
+  --spacing-card: 1.5rem;         /* 24px — panel/card padding */
+  --spacing-card-sm: 1rem;        /* 16px — dense card (list item, notification) */
+
+  --spacing-cell-x: 0.75rem;      /* 12px — table cell horizontal padding */
+  --spacing-cell-y: 0.5rem;       /* 8px — table cell vertical padding, keeps rows dense */
+
+  --spacing-gutter: 2rem;         /* 32px — page/section outer gutter */
+  --spacing-gutter-sm: 1rem;      /* 16px — mobile gutter */
+  --spacing-grid-gap: 1rem;       /* 16px — default grid/flex gap between cards */
+  --spacing-stack: 0.75rem;       /* 12px — default vertical rhythm between stacked elements */
+
+  /* =========================================================
+     LAYOUT
+     The structural numbers two engineers building different screens
+     would otherwise each guess independently.
+     ========================================================= */
+
+  --size-sidebar: 15rem;          /* 240px — primary nav rail, expanded */
+  --size-sidebar-collapsed: 3.5rem; /* 56px — icon-only rail */
+  --size-header: 3.5rem;          /* 56px — top bar height */
+  --size-content-max: 90rem;      /* 1440px — max width for a reading/table column before it re-splits into panels */
+  --size-row: 2.5rem;             /* 40px — default table row height (squad/fixture lists) */
+  --size-row-compact: 2rem;       /* 32px — ledger/event-feed rows, denser than squad tables */
+
+  /* =========================================================
+     BORDERS & RADIUS
+     Brutalism's structure comes from borders, not shadows — every
+     card/table/panel gets a real 1px edge instead of a soft shadow.
+     ========================================================= */
+
+  --border-width-hairline: 1px; /* default — dividers, table rows */
+  --border-width-brutal: 2px;   /* cards, inputs, buttons */
+  --border-width-thick: 4px;    /* urgent/alert blocks, active tab indicator */
+
+  /* Radius stays at 0 almost everywhere — this is the actual brutalist
+     signal, used deliberately, not "one soft radius on everything"
+     (the SaaS-card tell). The one exception is small status tags,
+     which get 2px so text doesn't look clipped by a hard corner. */
+  --radius-none: 0px;    /* buttons, inputs, cards, modals — default */
+  --radius-tag: 2px;     /* status pills/badges only */
+
+  /* =========================================================
+     SHADOW
+     Hard offset shadows (no blur, no soft rgba) instead of the
+     generic soft grey card shadow — a solid duplicate silhouette,
+     like a stamped/stickered look. Used only on interactive elements
+     at rest→hover→press, never as ambient card elevation.
+     ========================================================= */
+
+  --shadow-brutal-sm: 2px 2px 0 0 var(--color-void-950);
+  --shadow-brutal-md: 4px 4px 0 0 var(--color-void-950);
+  --shadow-brutal-cyan: 4px 4px 0 0 var(--color-cyan-500); /* primary CTA only */
+  --shadow-brutal-loss: 4px 4px 0 0 var(--color-loss-500); /* destructive confirm only */
+
+  /* =========================================================
+     FOCUS
+     Explicit, not implied. Every interactive element gets this —
+     never rely on the browser default outline, and never remove
+     it without replacing it.
+     ========================================================= */
+
+  --ring-width: 2px;
+  --ring-offset: 2px;
+  --ring-offset-color: var(--color-void-900); /* matches default surface so the offset doesn't flash white */
+  --color-ring: var(--color-cyan-500);
+
+  /* =========================================================
+     ICON SIZES
+     ========================================================= */
+
+  --size-icon-sm: 0.875rem; /* 14px — inline with text-sm */
+  --size-icon-md: 1.125rem; /* 18px — default control icon */
+  --size-icon-lg: 1.5rem;   /* 24px — nav/section icons */
+
+  /* =========================================================
+     STATE OPACITY
+     ========================================================= */
+
+  --opacity-disabled: 0.4;
+  --opacity-scrim: 0.7; /* modal backdrop fill — see Overlay below */
+
+  /* =========================================================
+     OVERLAY
+     ========================================================= */
+
+  --color-scrim: rgb(5 7 10 / var(--opacity-scrim)); /* void-950 at 70% — modal/drawer backdrop */
+  --color-selection-bg: var(--color-cyan-700);
+  --color-selection-text: var(--color-void-50);
+
+  /* =========================================================
+     MOTION
+     Snappy and mechanical, not eased/bouncy — a relay, not a fade.
+     Reserve --duration-base for the rare full-panel entrance (modal,
+     drawer); everything else should feel closer to instant.
+     ========================================================= */
+
+  --ease-brutal: cubic-bezier(0.2, 0, 0, 1);
+  --duration-instant: 80ms;  /* hover, focus ring, button press */
+  --duration-fast: 150ms;    /* toggle, tab switch */
+  --duration-base: 220ms;    /* modal/drawer entrance — the only "slow" one */
+  --duration-pulse: 1200ms;  /* live badge / in-progress fixture pulse */
+
+  /* =========================================================
+     Z-INDEX
+     ========================================================= */
+
+  --z-sticky-header: 100;
+  --z-dropdown: 200;
+  --z-modal-backdrop: 300;
+  --z-modal: 310;
+  --z-toast: 400;
+
+  /* =========================================================
+     BREAKPOINTS
+     Default Tailwind breakpoints stay. One addition: managers
+     genuinely run this on ultrawide monitors for squad/ledger
+     tables (PRD §62: "desktop-first"), so add a 3xl step rather
+     than letting tables stretch edge-to-edge past ~1536px.
+     ========================================================= */
+
+  --breakpoint-3xl: 1920px;
+}
+
+/* =========================================================
+   Base layer additions that aren't expressible as @theme tokens
+   ========================================================= */
+
+@layer base {
+  /* Numeric alignment for stat tables, ledgers, score displays.
+     Usage: <span class="tabular-nums-brutal">£1,264,000</span> */
+  .tabular-nums-brutal {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Square, thin, on-brand scrollbar — one rule, fits the aesthetic. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-cyan-700) var(--color-void-900);
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: var(--color-void-900);
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-cyan-700);
+    border: 2px solid var(--color-void-900); /* square corners, no border-radius */
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--color-cyan-500);
+  }
+
+  ::selection {
+    background: var(--color-selection-bg);
+    color: var(--color-selection-text);
+  }
+
+  /* Explicit focus ring — never rely on the browser default, never
+     remove this without replacing it with an equally visible one. */
+  :focus-visible {
+    outline: var(--ring-width) solid var(--color-ring);
+    outline-offset: var(--ring-offset);
+  }
+}
+
+body { @apply bg-void-950 text-void-300 antialiased font-sans; }
+
+@layer components {
+  .button {
+    @apply flex font-mono text-sm font-semibold p-3 cursor-pointer ease-brutal duration-80;
+
+    &:hover {
+      @apply text-cyan-500;
+    }
+
+    &:active {
+      @apply translate-1 shadow-none;
+    }
+
+    &.button--primary {
+      @apply bg-cyan-500 text-void-950 -translate-y-1 shadow-brutal-cyan ease-brutal duration-80;
+      @apply border-none;
+
+      &:active {
+        @apply translate-y-0 shadow-none;
+      }
+    }
+
+    &.button--danger {
+      @apply border-brutal border-loss-500 text-loss-500;
+
+      &:hover {
+        @apply bg-loss-500 text-void-950;
+      }
+    }
+
+    &.button--soft {
+      @apply bg-void-800 border-brutal border-void-700 text-void-300;
+    }
+
+    &.button--outline {
+      @apply border-brutal border-void-500 text-white;
+    }
+  }
+
+  .page__header {
+    @apply font-mono font-black text-2xl;
+  }
+
+  .card {
+    --variant: var(--color-draw-500);
+    @apply border-brutal border-void-600 font-mono p-5 flex flex-col items-start gap-2;
+    border-left-color: var(--variant);
+
+    & .card__heading {
+      @apply font-semibold text-white;
+      
+      &.card__heading--small {
+        color: var(--variant);
+        @apply text-xs uppercase;
+      }
+    }
+
+    & .card__text { @apply text-sm }
+    & .card__link {
+      background-color: var(--variant);
+      @apply inline-flex text-void-950 text-sm px-2 py-0.5 active:translate-1;
+    }
+
+    &.card--success { --variant: var(--color-win-500)}
+    &.card--danger { --variant: var(--color-loss-500)}
+    &.card--warn { --variant: var(--color-warn-500)}
+  }
+
+  .pill {
+    --variant: var(--color-cyan-500);
+    @apply px-2 py-1 text-xs rounded-tag border uppercase font-mono;
+    color: var(--variant);
+    border-color: var(--variant);
+
+
+    &.pill--success {--variant: var(--color-win-500)}
+    &.pill--warning {--variant: var(--color-warn-500)}
+    &.pill--loss {--variant: var(--color-loss-500)}
+  }
 }

@@ -7,7 +7,16 @@ export default defineNuxtConfig({
   modules: [
     '@vite-pwa/nuxt',
     '@pinia/nuxt',
+    'reka-ui/nuxt',
+    'pinia-plugin-persistedstate/nuxt'
   ],
+  piniaPluginPersistedstate: {
+    storage: 'cookies',
+    cookieOptions: {
+      sameSite: 'lax',
+    },
+    debug: true,
+  },
 
   runtimeConfig: {
     public: {

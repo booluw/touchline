@@ -38,6 +38,16 @@ func (s *server) handleCreateWorld(c *gin.Context) {
 	c.JSON(http.StatusCreated, w)
 }
 
+func (s *server) handleListWorlds(c *gin.Context) {
+	w, err := s.worldSvc.ListWorlds(c)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error" })
+	}
+
+	c.JSON(http.StatusOK, w)
+}
+
 type worldStatusRequest struct {
 	Status string `json:"status"`
 }

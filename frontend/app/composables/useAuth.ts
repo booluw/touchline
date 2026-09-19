@@ -7,6 +7,7 @@
 // { status: 'worlds', worlds: [...] } without cookies, the user picks a world,
 
 import type { User } from "~/types"
+import { useToast } from '../components/ui/Toast';
 
 // and login is re-posted with world_id.
 export interface WorldOption {
@@ -30,6 +31,7 @@ export function useAuth() {
   const { public: { apiBase } } = useRuntimeConfig()
   const { $api } = useNuxtApp()
   const store = useAuthStore()
+  const { notify } = useToast()
 
   const user = ref<string | null>(null)
   const worlds = ref<WorldOption[]>([])
@@ -43,6 +45,11 @@ export function useAuth() {
     try {
       const resp = await $api.post<User>(`${apiBase}/api/auth/login`, payload, { auth: false })
       store.setUser(resp)
+      notify({
+        title: 'Welcome back',
+        description: 'Your team awaits',
+        type: 'success'
+      })
       if (resp.is_admin) {
         navigateTo("/admin")
         return
@@ -64,6 +71,9 @@ export function useAuth() {
       method: 'POST',
       credentials: 'include',
     })
+
+    console.log(await res.json())
+
     return res.status === 200
   }
 

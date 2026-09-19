@@ -147,6 +147,7 @@ func (s *server) router() *gin.Engine {
 		// administration (S04-01).
 		admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
 		{
+			admin.GET("/worlds", s.handleListWorlds)
 			admin.POST("/worlds", s.handleCreateWorld)
 			admin.POST("/worlds/:id/status", s.handleWorldStatus)
 			admin.POST("/worlds/:id/config", s.handleWorldConfig)

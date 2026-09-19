@@ -11,4 +11,6 @@ export const useAuthStore = defineStore('auth', () => {
     setUser,
     $reset
   }
+}, {
+  persist: true
 })
