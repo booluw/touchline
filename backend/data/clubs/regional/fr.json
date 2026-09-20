@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional French club identity words: Ligue-style naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Avenir", "Croix", "Éclair", "Étoile", "Foudre", "Olympique", "Racing", "Saint",
+    "Sporting", "Union", "Valmy", "Verdun"
+  ],
+  "suffixes": [
+    "FC", "SC", "AC", "OA", "RC", "US", "SM", "Étoile", "Olympique"
+  ]
+}

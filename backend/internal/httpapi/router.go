@@ -52,6 +52,7 @@ func (s *server) router() *gin.Engine {
 		api.POST("/auth/register", s.handleRegister)
 		api.POST("/auth/refresh", s.handleRefresh)
 		api.GET("/dashboard", s.requireAuth, s.handleDashboard)
+		api.GET("/news", s.requireAuth, s.handleNews)
 
 		// Club reads (S03-01): the caller's own world only.
 		api.GET("/clubs", s.requireAuth, s.handleListClubs)
@@ -171,6 +172,8 @@ func (s *server) router() *gin.Engine {
 			admin.GET("/worlds/:id/countries/:countryID/market", s.handleAdminCountryMarket)
 			admin.GET("/worlds/:id/countries/:countryID/finance", s.handleAdminCountryFinance)
 			admin.GET("/worlds/:id/countries/:countryID/timeline", s.handleAdminCountryTimeline)
+			admin.PATCH("/worlds/:id/countries/:countryID/clubs/:clubID", s.handleAdminRenameClub)
+			admin.GET("/worlds/:id/news", s.handleAdminWorldNews)
 		}
 
 		// Competition reads (S04-01): always scoped to the caller's world.

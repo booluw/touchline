@@ -21,7 +21,7 @@ func financeStatus(c *gin.Context, err error) {
 	case errors.Is(err, finance.ErrNotOwned):
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 

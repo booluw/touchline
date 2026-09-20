@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Brazilian club identity words: Campeonato-style conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "América", "Atlético", "Central", "Comercial", "Grêmio", "Guarani", "Intercontinental", "Internacional",
+    "Ipê", "Nacional", "Operário", "Sport", "Vitória"
+  ],
+  "suffixes": [
+    "FC", "EC", "SC", "SE", "AC", "Clube", "Grêmio", "Atlético"
+  ]
+}

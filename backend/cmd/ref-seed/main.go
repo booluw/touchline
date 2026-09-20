@@ -50,6 +50,14 @@ func main() {
 	log.Printf("loaded %d club stems and %d club suffixes from %s",
 		len(clubs.Stems), len(clubs.Suffixes), *clubDataDir)
 
+	regional, err := loadRegionalClubNames(*clubDataDir)
+	if err != nil {
+		log.Fatalf("load regional club name data: %v", err)
+	}
+	for _, r := range regional {
+		log.Printf("loaded %s: %d club stems and %d club suffixes", r.Code, len(r.Stems), len(r.Suffixes))
+	}
+
 	pool, err := pgxpool.New(ctx, *databaseURL)
 	if err != nil {
 		log.Fatalf("connect to database: %v", err)
@@ -111,17 +119,23 @@ func main() {
 	// rows added through the dashboard between ingest runs (data/clubs/README).
 	clubCount := 0
 	clubBatch := &pgx.Batch{}
-	for _, stem := range clubs.Stems {
-		clubBatch.Queue(`INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
-			VALUES ('stem', $1, 1.0)
-			ON CONFLICT (kind, value) DO UPDATE SET frequency_weight = EXCLUDED.frequency_weight`, stem)
-		clubCount++
+	queueClubParts := func(countryCode string, stems, suffixes []string) {
+		for _, stem := range stems {
+			clubBatch.Queue(`INSERT INTO ref.club_name_parts (country_code, kind, value, frequency_weight)
+				VALUES ($1, 'stem', $2, 1.0)
+				ON CONFLICT (country_code, kind, value) DO UPDATE SET frequency_weight = EXCLUDED.frequency_weight`, countryCode, stem)
+			clubCount++
+		}
+		for _, suffix := range suffixes {
+			clubBatch.Queue(`INSERT INTO ref.club_name_parts (country_code, kind, value, frequency_weight)
+				VALUES ($1, 'suffix', $2, 1.0)
+				ON CONFLICT (country_code, kind, value) DO UPDATE SET frequency_weight = EXCLUDED.frequency_weight`, countryCode, suffix)
+			clubCount++
+		}
 	}
-	for _, suffix := range clubs.Suffixes {
-		clubBatch.Queue(`INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
-			VALUES ('suffix', $1, 1.0)
-			ON CONFLICT (kind, value) DO UPDATE SET frequency_weight = EXCLUDED.frequency_weight`, suffix)
-		clubCount++
+	queueClubParts("", clubs.Stems, clubs.Suffixes)
+	for _, r := range regional {
+		queueClubParts(r.Code, r.Stems, r.Suffixes)
 	}
 	if err := tx.SendBatch(ctx, clubBatch).Close(); err != nil {
 		log.Fatalf("upsert ref.club_name_parts: %v", err)

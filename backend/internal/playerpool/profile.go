@@ -3,6 +3,7 @@ package playerpool
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,6 +63,9 @@ func persistGeneratedPlayer(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, c
 	if err := persistPlayerProfile(ctx, tx, plID, gp); err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
+	log.Printf("playerpool: + %s (%s) %s %s world=%s country=%v club=%v squad=%v",
+		gp.DisplayName, gp.NationalityCode, gp.PrimaryPosition, gp.Origin,
+		worldID, countryID, clubID, num)
 	return plID, pid, nil
 }
 

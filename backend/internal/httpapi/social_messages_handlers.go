@@ -24,7 +24,7 @@ func (s *server) handleListMessages(c *gin.Context) {
 
 	messages, unread, err := s.socialSvc.ListInbox(c.Request.Context(), worldID, ident.ManagerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"messages": messages, "unread": unread})
@@ -76,7 +76,7 @@ func (s *server) handleSendMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, msg)
@@ -104,7 +104,7 @@ func (s *server) handleReadMessage(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, msg)

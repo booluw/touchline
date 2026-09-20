@@ -42,7 +42,7 @@ func (s *server) handleListFreeAgents(c *gin.Context) {
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
 	ownWorld, err := s.managerWorld(c.Request.Context(), ident.ManagerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	if ownWorld != worldID {
@@ -63,7 +63,7 @@ func (s *server) handleListFreeAgents(c *gin.Context) {
 	}
 	agents, total, err := playerpool.ListFreeAgents(c.Request.Context(), s.pool, worldID, filter, f.Page, f.Limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": agents, "total": total})
@@ -103,7 +103,7 @@ func (s *server) handleSignFreeAgent(c *gin.Context) {
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	defer tx.Rollback(ctx)
@@ -114,7 +114,7 @@ func (s *server) handleSignFreeAgent(c *gin.Context) {
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"ok": true})
@@ -160,7 +160,7 @@ func (s *server) handleReleasePlayer(c *gin.Context) {
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	defer tx.Rollback(ctx)
@@ -170,7 +170,7 @@ func (s *server) handleReleasePlayer(c *gin.Context) {
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -186,7 +186,7 @@ func poolStatus(c *gin.Context, err error) {
 	case errors.Is(err, playerpool.ErrStreetUnder18):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 
@@ -198,7 +198,7 @@ func financeOwnershipStatus(c *gin.Context, err error) {
 	case errors.Is(err, internalfinance.ErrNotOwned):
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 

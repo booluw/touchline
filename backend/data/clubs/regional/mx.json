@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Mexican club identity words: Liga MX-style conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Águila", "Azteca", "Bajío", "Dorado", "Ocelote", "Otomi", "Quetzal", "Venado"
+  ],
+  "suffixes": [
+    "FC", "CF", "Club", "Deportivo", "Atlético"
+  ]
+}

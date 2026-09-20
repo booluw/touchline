@@ -47,7 +47,7 @@ func tacticStatus(c *gin.Context, err error) {
 	case errors.Is(err, tactics.ErrPlayerUnavailable):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 
@@ -129,7 +129,7 @@ func (s *server) handleGetTrainingPlan(c *gin.Context) {
 	}
 	v, err := s.trainingSvc.GetPlan(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(200, v)
@@ -158,7 +158,7 @@ func (s *server) handleSetTrainingPlan(c *gin.Context) {
 		} else if errors.Is(err, training.ErrInvalidArchetype) {
 			c.JSON(400, gin.H{"error": err.Error()})
 		} else {
-			c.JSON(500, gin.H{"error": "internal error"})
+			internalError(c, err)
 		}
 		return
 	}

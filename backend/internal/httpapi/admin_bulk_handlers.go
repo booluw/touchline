@@ -67,14 +67,14 @@ func (s *server) handleAdminBulkCreatePlayers(c *gin.Context) {
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	defer tx.Rollback(ctx)
 
 	generator, natPool, err := internalbootstrap.LoadPools(ctx, tx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	// A per-request seed keeps the batch deterministic only in the sense of
@@ -84,11 +84,11 @@ func (s *server) handleAdminBulkCreatePlayers(c *gin.Context) {
 
 	ids, err := playerpool.BulkCreate(ctx, tx, s.bus, worldID, countryID, opts, factory, time.Now().UTC())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"created": len(ids), "player_ids": ids})

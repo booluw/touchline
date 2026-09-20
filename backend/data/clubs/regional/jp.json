@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Japanese club identity words: J-League-style nature naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Aoba", "Azusa", "Chitose", "Fuji", "Katsura", "Kitsune", "Miyama", "Murasaki",
+    "Sakura", "Takao", "Tsuki", "Ume", "Yamato"
+  ],
+  "suffixes": [
+    "FC", "SC", "United", "City"
+  ]
+}

@@ -91,9 +91,11 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 	ref := daysTruncate(worldRef)
 	log.Printf("seed world=%s: starting (world_seed=%d)", worldID, seed)
 
-	// Global club-name pools come from the reference data (data-driven, OPD-13
+	// Club-name pools come from the reference data (data-driven, OPD-13
 	// analogue): admins extend ref.club_name_parts via the dashboard or JSON.
-	stems, suffixes, err := bootstrap.LoadClubNameParts(ctx, tx)
+	// Each world country may have a regional pool (keyed by its code); the ""
+	// pool is the global fallback.
+	pools, err := bootstrap.LoadClubNamePools(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -127,18 +129,19 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 
 	result := &SeedResult{WorldID: worldID, RandomSeed: seed}
 	countries, err := tx.Query(ctx, `
-		SELECT id, name FROM world.countries WHERE world_id = $1 ORDER BY id`, worldID)
+		SELECT id, code, name FROM world.countries WHERE world_id = $1 ORDER BY id`, worldID)
 	if err != nil {
 		return nil, fmt.Errorf("list countries: %w", err)
 	}
 	type countryRow struct {
 		id   uuid.UUID
+		code string
 		name string
 	}
 	var countryRows []countryRow
 	for countries.Next() {
 		var c countryRow
-		if err := countries.Scan(&c.id, &c.name); err != nil {
+		if err := countries.Scan(&c.id, &c.code, &c.name); err != nil {
 			countries.Close()
 			return nil, fmt.Errorf("scan country: %w", err)
 		}
@@ -189,13 +192,19 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 			}
 
 			// Per-league name stream: deterministic in the league, independent
-			// of how many other leagues the world has already seeded.
+			// of how many other leagues the world has already seeded. The
+			// country's regional pool wins when present; the global pool is
+			// the fallback.
+			pool := pools[country.code]
+			if len(pool.Stems) == 0 || len(pool.Suffixes) == 0 {
+				pool = pools[""]
+			}
 			lrng := rand.New(rand.NewSource(hashMix(seed, l.ID)))
 			created := make([]uuid.UUID, 0, need)
 			names := map[string]bool{}
 			log.Printf("seed world=%s country=%s league=%s (tier %d): %d/%d teams present, creating %d club(s)", worldID, country.name, l.Name, l.Tier, len(members), l.TeamCount, need)
 			for i := 0; i < need; i++ {
-				name := nextClubName(lrng, stems, suffixes, used)
+				name := nextClubName(lrng, pool.Stems, pool.Suffixes, used)
 				generated, err := bootstrap.GenerateAIClub(ctx, s.bus, tx, worldID, name, short(name), country.name, &country.id)
 				if err != nil {
 					return nil, fmt.Errorf("generate AI club for %s: %w", l.Name, err)

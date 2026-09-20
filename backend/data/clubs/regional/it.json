@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Italian club identity words: Serie A-style descriptors (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Alpina", "Atletico", "Audace", "Aurora", "Azzurra", "Campione", "Litorale", "Lucana",
+    "Marittima", "Monte", "Rosso", "Toscana", "Virtus", "Vulcano"
+  ],
+  "suffixes": [
+    "Calcio", "FC", "AC", "AS", "US", "SC"
+  ]
+}

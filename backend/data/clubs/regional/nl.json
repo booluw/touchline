@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Dutch club identity words: Eredivisie-style conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Amstel", "Blauw", "IJssel", "Kennemer", "Lauwers", "Maas", "Meer", "Oranje",
+    "Pelikaan", "Rijn", "Schans", "Valk", "Zwaluw"
+  ],
+  "suffixes": [
+    "FC", "SC", "United", "Boys", "City", "Houden"
+  ]
+}

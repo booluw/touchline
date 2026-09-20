@@ -13,16 +13,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/squad"
+	"github.com/touchline/backend/pkg/eventbus"
 )
 
-// Service runs the read-only per-country admin dashboard queries.
+// Service runs the per-country admin dashboard queries plus the admin club
+// rename surface (which publishes CLUB_RENAMED events + news stories).
 type Service struct {
 	pool *pgxpool.Pool
+	pub  eventbus.Publisher // may be nil: log-only event writing
 }
 
 // NewService builds the country dashboard read service.
-func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+func NewService(pool *pgxpool.Pool, pub eventbus.Publisher) *Service {
+	return &Service{pool: pool, pub: pub}
 }
 
 // Sentinel errors surfaced by handlers.
@@ -516,9 +519,9 @@ func (s *Service) scanPositions(ctx context.Context, worldID, countryID uuid.UUI
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.primary_position,
 		       COUNT(*),
-		       ROUND(AVG(a.technical)::numeric, 1)::float8, ROUND(AVG(a.physical)::numeric, 1)::float8,
-		       ROUND(AVG(a.mental)::numeric, 1)::float8, ROUND(AVG(a.tactical)::numeric, 1)::float8,
-		       ROUND(AVG(a.goalkeeping)::numeric, 1)::float8, ROUND(AVG(a.positional)::numeric, 1)::float8,
+		       ROUND(COALESCE(AVG(a.technical), 0)::numeric, 1)::float8, ROUND(COALESCE(AVG(a.physical), 0)::numeric, 1)::float8,
+		       ROUND(COALESCE(AVG(a.mental), 0)::numeric, 1)::float8, ROUND(COALESCE(AVG(a.tactical), 0)::numeric, 1)::float8,
+		       ROUND(COALESCE(AVG(a.goalkeeping), 0)::numeric, 1)::float8, ROUND(COALESCE(AVG(a.positional), 0)::numeric, 1)::float8,
 		       ROUND(COALESCE(AVG(ht.potential), 0)::numeric, 1)::float8
 		FROM player.players p
 		LEFT JOIN LATERAL (
@@ -736,7 +739,7 @@ func (s *Service) completedTransfers(ctx context.Context, worldID uuid.UUID, clu
 		}
 		if r.MarketValue > 0 && r.Fee > r.MarketValue {
 			r.Overpay = true
-			pct := int((float64(r.Fee)/float64(r.MarketValue)*100) - 100)
+			pct := int((float64(r.Fee) / float64(r.MarketValue) * 100) - 100)
 			r.OverpayPct = &pct
 		}
 		out = append(out, r)
@@ -874,7 +877,7 @@ func (s *Service) Timeline(ctx context.Context, worldID, countryID uuid.UUID, da
 		  AND event_type IN ('TRANSFER_COMPLETED','BID_PLACED','BID_ACCEPTED','BID_COUNTERED',
 		                         'PLAYER_SIGNED','PLAYER_RELEASED','PLAYER_CLAIMED_FROM_POOL',
 		                         'COUNTRY_ACADEMY_INTAKE','PLAYER_RETIRED','PLAYER_LISTED',
-		                         'PLAYER_LISTING_WITHDRAWN')
+		                         'PLAYER_LISTING_WITHDRAWN','CLUB_RENAMED')
 		  AND occurred_at >= $2
 		ORDER BY occurred_at DESC
 		LIMIT $3`, worldID, since, limit)
@@ -1005,12 +1008,27 @@ func headlineFor(eventType string, payload map[string]any, names nameMaps) strin
 		}
 		return ""
 	}
+	str := func(key string) string {
+		if raw, ok := payload[key]; ok {
+			if s, ok := raw.(string); ok {
+				return s
+			}
+		}
+		return ""
+	}
 	players := first("player_id", "player_ids")
 	clubs := first("to_club_id", "from_club_id", "club_id", "selling_club_id", "bidding_club_id", "listing_club_id")
 
 	switch eventType {
 	case "TRANSFER_COMPLETED":
 		return joinNames(players, clubs)
+	case "CLUB_RENAMED":
+		oldN := str("old_name")
+		newN := str("new_name")
+		if oldN != "" && newN != "" {
+			return fmt.Sprintf("%s renamed to %s", oldN, newN)
+		}
+		return eventType
 	case "PLAYER_SIGNED", "BID_PLACED", "BID_ACCEPTED", "BID_COUNTERED", "PLAYER_RELEASED",
 		"PLAYER_CLAIMED_FROM_POOL", "PLAYER_LISTED", "PLAYER_LISTING_WITHDRAWN":
 		return fmt.Sprintf("%s: %s", eventType, joinNames(players, clubs))
@@ -1104,7 +1122,7 @@ func (s *Service) headlines(ctx context.Context, countryID uuid.UUID, clubIDs []
 		GROUP BY season_number ORDER BY season_number DESC LIMIT 1`, countryID).Scan(&intake)
 	if intake != nil {
 		hl = append(hl, Headline{Kind: "intake",
-			Title: fmt.Sprintf("%d new youth prospects in season %d", intake.PlayerCount, intake.SeasonNumber),
+			Title:      fmt.Sprintf("%d new youth prospects in season %d", intake.PlayerCount, intake.SeasonNumber),
 			OccurredAt: time.Now().UTC()})
 	}
 

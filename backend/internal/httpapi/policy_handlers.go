@@ -39,7 +39,7 @@ func (s *server) handleGetPolicy(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, p)
@@ -66,7 +66,7 @@ func (s *server) handleUpsertPolicy(c *gin.Context) {
 	}
 	p, err := s.policySvc.UpsertPolicy(c.Request.Context(), actor, worldID, actor.ManagerID, policyType, req.Params)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, p)
@@ -86,7 +86,7 @@ func (s *server) handleDeletePolicy(c *gin.Context) {
 	}
 	found, err := s.policySvc.DeletePolicy(c.Request.Context(), actor, worldID, actor.ManagerID, policyType)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	if !found {
@@ -105,7 +105,7 @@ func (s *server) handleGetAbsence(c *gin.Context) {
 	}
 	view, err := s.policySvc.GetAbsence(c.Request.Context(), worldID, actor.ManagerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, view)
@@ -126,7 +126,7 @@ func (s *server) handleSetAway(c *gin.Context) {
 		return
 	}
 	if err := s.policySvc.SetAway(c.Request.Context(), worldID, actor.ManagerID, req.Away); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -140,7 +140,7 @@ func (s *server) handleClearAway(c *gin.Context) {
 		return
 	}
 	if err := s.policySvc.SetAway(c.Request.Context(), worldID, actor.ManagerID, false); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -155,7 +155,7 @@ func (s *server) handleGetAbsenceSummary(c *gin.Context) {
 	}
 	summary, err := s.policySvc.GetAbsenceSummary(c.Request.Context(), worldID, actor.ManagerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, summary)

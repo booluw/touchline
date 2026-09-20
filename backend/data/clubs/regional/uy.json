@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Uruguayan club identity words: rioplatense naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Bella", "Cerrillada", "Ciudad", "Este", "Grande", "Lucha", "Oriental", "Palma",
+    "Plata", "Punta", "Río", "Sur"
+  ],
+  "suffixes": [
+    "FC", "CD", "CA", "Deportivo", "Atlético", "Wanderers"
+  ]
+}

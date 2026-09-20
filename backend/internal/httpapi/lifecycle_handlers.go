@@ -32,7 +32,7 @@ func (s *server) handleCreateWorld(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, w)
@@ -42,7 +42,7 @@ func (s *server) handleListWorlds(c *gin.Context) {
 	w, err := s.worldSvc.ListWorlds(c)
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error" })
+		internalError(c, err)
 	}
 
 	c.JSON(http.StatusOK, w)
@@ -75,7 +75,7 @@ func (s *server) handleWorldStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, w)
@@ -106,7 +106,7 @@ func (s *server) handleWorldConfig(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -140,7 +140,7 @@ func (s *server) handleCreateOffer(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, o)
@@ -154,12 +154,12 @@ func (s *server) handleListOffers(c *gin.Context) {
 
 	worldID, err := s.managerWorld(c.Request.Context(), ident.ManagerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	offers, err := s.mgrSvc.ListOffers(c.Request.Context(), ident.ManagerID, worldID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"offers": offers})
@@ -198,7 +198,7 @@ func (s *server) handleAcceptOffer(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, o)
@@ -223,7 +223,7 @@ func (s *server) handleDeclineOffer(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, o)
@@ -239,7 +239,7 @@ func (s *server) handleResign(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Ghanaian club identity words: tradition-rich aesthetic naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Asante", "Baobab", "Gold Coast", "Kente", "Odum", "Palm"
+  ],
+  "suffixes": [
+    "FC", "United", "SC", "Stars", "Lions", "Rangers", "Rovers", "City"
+  ]
+}

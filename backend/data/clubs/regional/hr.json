@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Croatian club identity words: Dalmatian mountain and river conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Dalmatia", "Gaj", "Jadran", "Krka", "Mosor", "Orao", "Slaven", "Velebit", "Vihor"
+  ],
+  "suffixes": [
+    "NK", "HNK", "NŠ"
+  ]
+}

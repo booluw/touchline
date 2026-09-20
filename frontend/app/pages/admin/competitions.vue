@@ -11,14 +11,19 @@ import { useAuth } from '~/composables/useAuth'
 const { user } = useAuth()
 const comp = useCompetition()
 
-// Global club-name pools (no world gate): AI clubs draw names from here.
+// Club-name pools, scoped per country ('' = global fallback): AI clubs for a
+// country draw first from its own pool, then from the global pool.
 const pools = ref<ClubNamePools>({ stems: [], suffixes: [] })
+const poolScope = ref<string>('')
+const poolCustomCode = ref('')
 const poolForm = ref<{ kind: 'stem' | 'suffix'; value: string }>({ kind: 'stem', value: '' })
 const poolsError = ref('')
 const poolsBusy = ref(false)
 
+const effectivePoolScope = computed(() => (poolScope.value === '__custom__' ? poolCustomCode.value.trim().toLowerCase() : poolScope.value))
+
 async function loadPools() {
-  pools.value = await comp.listClubNameParts()
+  pools.value = await comp.listClubNameParts(effectivePoolScope.value)
 }
 async function poolCall(fn: () => Promise<void>) {
   poolsError.value = ''
@@ -38,13 +43,13 @@ async function poolCall(fn: () => Promise<void>) {
 }
 async function doAddPart() {
   await poolCall(async () => {
-    await comp.addClubNamePart(poolForm.value.kind, poolForm.value.value.trim())
+    await comp.addClubNamePart(poolForm.value.kind, poolForm.value.value.trim(), effectivePoolScope.value)
   })
 }
 async function doRemovePart(kind: 'stem' | 'suffix', value: string) {
   poolsBusy.value = true
   try {
-    await comp.removeClubNamePart(kind, value)
+    await comp.removeClubNamePart(kind, value, effectivePoolScope.value)
   } catch (e) {
     poolsError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -155,8 +160,18 @@ async function doSeed(starterLeagueId: string) {
 
       <section class="bg-slate-800 border border-slate-700 rounded-lg p-4">
         <h2 class="text-xl font-semibold text-white mb-1">Club name pools</h2>
-        <p class="text-slate-400 text-sm mb-3">Global (all worlds): AI clubs are named stem + suffix from these pools. Add and remove freely — seeding stays deterministic.</p>
+        <p class="text-slate-400 text-sm mb-3">AI clubs draw a stem + suffix from their country's pool when one exists, else the global pool. Add and remove freely — seeding stays deterministic.</p>
         <div class="flex flex-wrap gap-2 items-end mb-4">
+          <div>
+            <label class="block text-xs text-slate-400">Scope</label>
+            <select v-model="poolScope" class="bg-slate-900 border border-slate-600 rounded px-3 py-2">
+              <option value="">Global (fallback)</option>
+              <option v-for="c in countries" :key="c.id" :value="c.code">{{ c.name }} ({{ c.code }})</option>
+              <option value="__custom__">Other code…</option>
+            </select>
+          </div>
+          <input v-if="poolScope === '__custom__'" v-model="poolCustomCode" type="text" placeholder="e.g. ar"
+                 @change="loadPools()" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 w-28" />
           <select v-model="poolForm.kind" class="bg-slate-900 border border-slate-600 rounded px-3 py-2">
             <option value="stem">Stem</option>
             <option value="suffix">Suffix</option>

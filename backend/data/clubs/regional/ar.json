@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Argentinian club identity words: River-Plate-style descriptors (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Atlético", "Bella", "Central", "Ferrocarril", "Gimnasia", "Huracán", "Independiente", "Nacional",
+    "Oriente", "River", "Sportivo"
+  ],
+  "suffixes": [
+    "FC", "CD", "CA", "SD", "AC", "Deportivo", "Atlético", "Juniors"
+  ]
+}

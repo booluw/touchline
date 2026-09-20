@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Korean club identity words: K-League-style naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Baekdu", "Cheong", "Gang", "Geumho", "Han", "Hwang", "Mudeung", "Taebaek", "Taegeuk", "Yong"
+  ],
+  "suffixes": [
+    "FC", "United", "SC", "City", "Citizens", "Warriors"
+  ]
+}

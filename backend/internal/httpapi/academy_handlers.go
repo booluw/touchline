@@ -20,7 +20,7 @@ func academyStatus(c *gin.Context, err error) {
 	case errors.Is(err, academy.ErrInvalidTier):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "investment_tier must be between 1 and 5"})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 

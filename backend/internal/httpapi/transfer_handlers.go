@@ -42,7 +42,7 @@ func transferStatus(c *gin.Context, err error) {
 		errors.Is(err, internaltransfer.ErrBidExpired):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 

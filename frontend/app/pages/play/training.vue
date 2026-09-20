@@ -17,8 +17,7 @@ onMounted(() => init().catch(() => error.value = 'Could not load your club.'))
           :class="selected === p[0] ? 'border-emerald-400 bg-emerald-950' : 'border-slate-700 bg-slate-800'"><strong>{{ p[1] }}</strong><span
             class="block text-sm text-slate-400">{{ p[2] }}</span></button></div><button @click="save"
         :disabled="store.saving"
-        class="rounded bg-emerald-600 px-4 py-2 font-medium text-white">{{ store.saving ? 'Saving…' : 'Set training
-        plan'}}</button>
+        class="rounded bg-emerald-600 px-4 py-2 font-medium text-white">{{ store.saving ? 'Saving…' : 'Set training plan'}}</button>
     </div>
   </main>
 </template>

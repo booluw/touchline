@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Colombian club identity words: Categoría-style conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Cafetero", "Cóndor", "Magdalena", "Orinoco", "Sabana", "Sinú", "Tequendama", "Vallenato"
+  ],
+  "suffixes": [
+    "FC", "CD", "Deportivo", "Atlético", "Fútbol", "Club"
+  ]
+}

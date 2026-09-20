@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional German club identity words: Bundesliga-style naming conventions without real clubs (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Adler", "Auerbach", "Bergzeit", "Borussia", "Erz", "Fortuna", "Germania", "Hanse",
+    "Kickers", "Loreley", "Preussen", "Rheintal", "Rot", "Sportfreunde", "Union", "Varus", "Wacker", "Weserbank"
+  ],
+  "suffixes": [
+    "FC", "SC", "SV", "VfB", "VfL", "04", "09", "11", "19", "Kickers", "Hansa"
+  ]
+}

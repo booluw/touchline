@@ -28,7 +28,7 @@ func (s *server) handleListRelationships(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "manager not found"})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"world_id": worldID, "edges": edges})

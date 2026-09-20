@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Spanish/Latin-Spanish club identity words: La Liga-style descriptors (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Atlético", "Balompié", "Celta", "Cultural", "Deportivo", "Español", "Gimnástico", "Ibérica",
+    "Ocaso", "Racing", "Rayo", "Real", "Sporting"
+  ],
+  "suffixes": [
+    "CF", "FC", "UD", "SD", "CD", "AD", "Real", "Deportivo", "Atlético", "Racing"
+  ]
+}

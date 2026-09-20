@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Ivorian club identity words: West-African lagoon and river naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Baobab", "Comoé", "Ébrié", "Lagune", "Marahoué", "Palm", "Sassandra"
+  ],
+  "suffixes": [
+    "FC", "SC", "CF", "United", "City", "Rangers", "Étoile"
+  ]
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -411,8 +412,8 @@ func (s *Service) IntakeForClub(ctx context.Context, clubID uuid.UUID, seasonNum
 		return nil, err
 	}
 	natBias := ""
-	if validNationality(ctx, tx, ctxClub.CountryCode) {
-		natBias = ctxClub.CountryCode
+	if code := strings.ToLower(ctxClub.CountryCode); validNationality(ctx, tx, code) {
+		natBias = code
 	}
 
 	count := ProspectCountForTier(a.InvestmentTier)

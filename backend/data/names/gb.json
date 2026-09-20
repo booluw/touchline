@@ -1,7 +1,7 @@
 {
-  "nationality": {"code": "en", "name": "England", "generation_weight": 7.5},
+  "nationality": {"code": "gb", "name": "United Kingdom", "generation_weight": 7.5},
   "provenance": {
-    "source": "Common English given/surname lists, hand-curated (see PROVENANCE.md)",
+    "source": "English given/surname lists (the former en.json data), hand-curated (see PROVENANCE.md). 'gb' is the ISO 3166-1 alpha-2 code, superseding the project 'en' slug so world country codes tally with the player pool.",
     "license": "Factual name data; see PROVENANCE.md",
     "curated_by": "Touchline data engineering (S01-04)",
     "date": "2026-09-11",

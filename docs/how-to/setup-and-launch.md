@@ -220,13 +220,20 @@ created by these calls.
 ```bash
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/countries \
   -H 'Content-Type: application/json' \
-  -d '{"world_id":"'"$WORLD_ID"'","code":"ENG","name":"England"}'
+  -d '{"world_id":"'"$WORLD_ID"'","code":"GB","name":"England"}'
 # 201: {id, world_id, code, name}
 ```
 
 Save the `id` as `$COUNTRY_ID`. Listing reads:
 `GET /api/admin/countries?world_id=$WORLD_ID` (admin) and
 `GET /api/countries` (manager-scoped, this world only).
+
+A country code is matched **case-insensitively** against the player-generator
+nationality slugs (`ref.nationalities`): `BR` → Brazilian names in that
+country's street/academy intakes, `GB` → English names, `SCO` → Scottish.
+England ships as `data/names/gb.json` (ISO 3166-1 alpha-2). After adding or
+renaming a nationality file, re-run `go run ./cmd/ref-seed` so the reference
+tables and name pools pick it up.
 
 **5.2 Create league(s)** — one per tier. `team_count` must be **even and ≥ 4**; a
 4-team league is the smallest playable season.
@@ -518,7 +525,7 @@ WORLD_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds 
   -H 'Content-Type: application/json' -d '{"name":"Demo Division"}' | jq -r .id)
 COUNTRY_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/countries \
   -H 'Content-Type: application/json' \
-  -d '{"world_id":"'"$WORLD_ID"'","code":"ENG","name":"England"}' | jq -r .id)
+  -d '{"world_id":"'"$WORLD_ID"'","code":"GB","name":"England"}' | jq -r .id)
 LEAGUE_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/leagues \
   -H 'Content-Type: application/json' \
   -d '{"country_id":"'"$COUNTRY_ID"'","name":"Premier Division","tier":1,"team_count":6}' | jq -r .id)

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Scottish club identity words: Caledonian place-feel and running-club conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Angus", "Bemersyde", "Birnam", "Bonnievale", "Bute", "Douglasmuir", "Ettrick", "Fife",
+    "Glencairn", "Gowrie", "Highlandpark", "Inveraray", "Kelvinbank", "Lomondside", "Morningside", "Ochilbank",
+    "Pentland", "Speyside", "Stirlingbridge", "Tayside", "Thistledown", "Torridon"
+  ],
+  "suffixes": [
+    "FC", "United", "Rovers", "Athletic", "Thistle", "City", "Rangers", "County", "Wanderers", "Lads"
+  ]
+}

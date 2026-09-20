@@ -3,6 +3,7 @@ package playerpool
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"time"
 
@@ -160,6 +161,8 @@ func DraftSquad(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 		); err != nil {
 			return nil, fmt.Errorf("assign player %s: %w", c.ID, err)
 		}
+		log.Printf("playerpool: draft %s (%s) %s -> club=%s squad=%d",
+			c.DisplayName, c.NationalityCode, c.PrimaryPosition, clubID, num)
 
 		age := ageFor(ref, c.DateOfBirth)
 

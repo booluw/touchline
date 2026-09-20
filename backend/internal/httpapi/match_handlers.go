@@ -29,7 +29,7 @@ func (s *server) handleGetFixture(c *gin.Context) {
 
 	view, err := s.matchSvc.GetFixtureMatch(c.Request.Context(), fixtureID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	if view.Fixture.WorldID != worldID {
@@ -61,7 +61,7 @@ func (s *server) handleGetMatchEvents(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	if m.WorldID != worldID {
@@ -75,7 +75,7 @@ func (s *server) handleGetMatchEvents(c *gin.Context) {
 
 	events, err := s.matchSvc.GetMatchEvents(ctx, matchID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"events": events})

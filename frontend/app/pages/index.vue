@@ -45,13 +45,46 @@
         </div>
       </section>
       <p v-else-if="loading" class="mt-10 text-slate-500 text-sm">Loading your dashboard…</p>
+
+      <section class="mt-10 text-left" v-if="news.length">
+        <div class="space-y-3">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-indigo-400">News</h2>
+          <ul class="space-y-2">
+            <li
+              v-for="story in news"
+              :key="story.id"
+              class="rounded-lg bg-slate-900 border border-slate-700 p-4"
+            >
+              <p class="text-slate-100 font-medium">{{ story.headline }}</p>
+              <p class="text-slate-400 text-sm mt-1">{{ story.body }}</p>
+              <span class="inline-block mt-2 text-xs text-slate-600">{{ new Date(story.published_at).toLocaleString() }}</span>
+            </li>
+          </ul>
+        </div>
+      </section>
     </main>
   </div>
   <NuxtPage />
 </template>
 
 <script setup lang="ts">
+import { useAuth } from '~/composables/useAuth'
+
+const { authedFetch } = useAuth()
 const { data, loading, loaded, fetchDashboard } = useDashboard()
+
+const news = ref<{ id: string; headline: string; body: string; published_at: string }[]>([])
+
+async function loadNews() {
+  try {
+    const res = await authedFetch('/api/news')
+    if (!res.ok) return
+    const body = await res.json()
+    news.value = body.stories ?? []
+  } catch (e) {
+    console.error(e)
+  }
+}
 
 const sections = [
   { key: 'urgent' as const, label: 'Urgent', headingClass: 'text-red-400' },
@@ -59,5 +92,8 @@ const sections = [
   { key: 'interesting' as const, label: 'Interesting', headingClass: 'text-slate-400' },
 ]
 
-onMounted(fetchDashboard)
+onMounted(() => {
+  fetchDashboard()
+  loadNews()
+})
 </script>

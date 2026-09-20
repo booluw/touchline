@@ -25,7 +25,7 @@ func (s *server) handleDashboard(c *gin.Context) {
 	}
 	snap, err := s.dashSvc.GetDashboard(c.Request.Context(), worldID, ident.ManagerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, snap)

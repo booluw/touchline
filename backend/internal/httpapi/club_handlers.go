@@ -22,7 +22,7 @@ func (s *server) handleListClubs(c *gin.Context) {
 	}
 	clubs, err := s.clubSvc.ListClubs(c.Request.Context(), worldID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"clubs": clubs})
@@ -48,7 +48,7 @@ func (s *server) handleGetClub(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	if detail.WorldID != worldID {

@@ -26,7 +26,7 @@ func playerStatus(c *gin.Context, err error) {
 	case errors.Is(err, internalplayer.ErrRequestResolved):
 		c.JSON(http.StatusConflict, gin.H{"error": "request already resolved"})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 

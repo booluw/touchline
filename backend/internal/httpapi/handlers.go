@@ -4,8 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log"
 	"net/http"
 	"net/netip"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,6 +24,17 @@ const (
 	accessCookie  = "access_token"
 	refreshCookie = "refresh_token"
 )
+
+// internalError logs an unexpected handler error with its call site and
+// responds 500 with the actual error message, so failures are never opaque.
+func internalError(c *gin.Context, err error) {
+	if _, file, line, ok := runtime.Caller(1); ok {
+		log.Printf("httpapi %s:%d: %v", filepath.Base(file), line, err)
+	} else {
+		log.Printf("httpapi: %v", err)
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
 
 type loginRequest struct {
 	Email    string     `json:"email"`
@@ -64,7 +78,7 @@ func (s *server) handleLogin(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 
@@ -134,7 +148,7 @@ func (s *server) handleRegister(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 

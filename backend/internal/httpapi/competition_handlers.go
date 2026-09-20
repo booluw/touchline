@@ -47,7 +47,7 @@ func (s *server) handleListCountries(c *gin.Context) {
 	}
 	countries, err := s.compSvc.ListCountries(c.Request.Context(), worldID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"countries": countries})
@@ -77,7 +77,7 @@ func (s *server) handleCreateLeague(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, league)
@@ -91,7 +91,7 @@ func (s *server) handleListLeagues(c *gin.Context) {
 	}
 	leagues, err := s.compSvc.ListLeagues(c.Request.Context(), worldID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"leagues": leagues})
@@ -122,7 +122,7 @@ func (s *server) handleUpdateAdjacency(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -279,7 +279,7 @@ func (s *server) handleMyCountries(c *gin.Context) {
 	}
 	countries, err := s.compSvc.ListCountries(c.Request.Context(), worldID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"countries": countries})
@@ -293,7 +293,7 @@ func (s *server) handleMyCompetitions(c *gin.Context) {
 	}
 	leagues, err := s.compSvc.ListLeagues(c.Request.Context(), worldID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"competitions": leagues})
@@ -342,7 +342,7 @@ func (s *server) handleGetFixtures(c *gin.Context) {
 
 	fixtures, err := s.compSvc.GetFixtures(c.Request.Context(), leagueID, worldID, matchday)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"fixtures": fixtures})
@@ -365,7 +365,7 @@ func (s *server) handleGetStandings(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, standings)

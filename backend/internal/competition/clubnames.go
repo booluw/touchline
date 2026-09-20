@@ -20,7 +20,7 @@ const maxClubNameAttempts = 200
 // from the given pools (stems + suffixes, sourced from ref.club_name_parts).
 // Names already used in this seeding run are skipped; the pools are large
 // enough that retries are bounded. Callers must have already ensured both
-// pools are non-empty via bootstrap.LoadClubNameParts.
+// pools are non-empty via bootstrap.LoadClubNamePools resolution.
 func nextClubName(rng *rand.Rand, stems, suffixes []string, used map[string]bool) string {
 	for attempt := 0; attempt < maxClubNameAttempts; attempt++ {
 		stem := stems[rng.Intn(len(stems))]
@@ -30,7 +30,15 @@ func nextClubName(rng *rand.Rand, stems, suffixes []string, used map[string]bool
 			return name
 		}
 	}
-	return fmt.Sprintf("New Athletic %d", rng.Int63n(100000))
+	// Pool exhausted: fall back to a numeric name that is guaranteed new in
+	// this run rather than potentially duplicating an existing club.
+	for attempt := 0; attempt < maxClubNameAttempts; attempt++ {
+		name := fmt.Sprintf("New Athletic %d", rng.Int63n(100000))
+		if !used[name] {
+			return name
+		}
+	}
+	return fmt.Sprintf("New Athletic %d", len(used)+1)
 }
 
 // short converts a club name to its abbreviated 3-letter display form

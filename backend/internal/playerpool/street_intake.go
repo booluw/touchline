@@ -3,6 +3,7 @@ package playerpool
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,9 +129,12 @@ func finishCountryIntake(ctx context.Context, tx pgx.Tx, worldID, countryID uuid
 	return nil
 }
 
-// countryNationality resolves a valid ISO nationality code for a country,
+// countryNationality resolves a valid nationality code for a country,
 // returning "" when the world country code is absent or unknown to
-// ref.nationalities (callers then fall back to weighted selection).
+// ref.nationalities (callers then fall back to weighted selection). The
+// country code is matched case-insensitively (world.countries codes are
+// admin-entered, e.g. "BR" or "GB", while ref.nationalities codes are
+// lowercase slugs like "br").
 func countryNationality(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.UUID) string {
 	var code string
 	if err := tx.QueryRow(ctx,
@@ -138,6 +142,7 @@ func countryNationality(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.
 		countryID, worldID).Scan(&code); err != nil {
 		return ""
 	}
+	code = strings.ToLower(code)
 	var valid bool
 	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM ref.nationalities WHERE code = $1)`, code).Scan(&valid); err != nil || !valid {

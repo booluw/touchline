@@ -167,25 +167,28 @@ export function useCompetition() {
     return res.json()
   }
 
-  // ---------- Global club-name pools (admin) ----------
+  // ---------- Club-name pools (admin: country-scoped, '' = global) ----------
 
-  async function listClubNameParts(): Promise<ClubNamePools> {
-    const res = await authedFetch('/api/admin/club-name-parts')
+  async function listClubNameParts(countryCode = ''): Promise<ClubNamePools> {
+    const qs = countryCode ? `?country_code=${encodeURIComponent(countryCode)}` : ''
+    const res = await authedFetch(`/api/admin/club-name-parts${qs}`)
     if (!res.ok) return { stems: [], suffixes: [] }
-    return res.json()
+    const body = await res.json()
+    return { stems: body.stems ?? [], suffixes: body.suffixes ?? [] }
   }
 
-  async function addClubNamePart(kind: 'stem' | 'suffix', value: string): Promise<void> {
+  async function addClubNamePart(kind: 'stem' | 'suffix', value: string, countryCode = ''): Promise<void> {
     const res = await authedFetch('/api/admin/club-name-parts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind, value }),
+      body: JSON.stringify({ kind, value, country_code: countryCode }),
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
   }
 
-  async function removeClubNamePart(kind: 'stem' | 'suffix', value: string): Promise<void> {
-    const res = await authedFetch(`/api/admin/club-name-parts/${kind}/${encodeURIComponent(value)}`, {
+  async function removeClubNamePart(kind: 'stem' | 'suffix', value: string, countryCode = ''): Promise<void> {
+    const qs = countryCode ? `?country_code=${encodeURIComponent(countryCode)}` : ''
+    const res = await authedFetch(`/api/admin/club-name-parts/${kind}/${encodeURIComponent(value)}${qs}`, {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')

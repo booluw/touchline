@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -99,13 +100,14 @@ func loadClubContext(ctx context.Context, tx pgx.Tx, clubID uuid.UUID) (clubCont
 }
 
 // validNationality reports whether a country code exists in ref.nationalities,
-// so a forced nationality never breaks generation.
+// so a forced nationality never breaks generation. The code is matched
+// case-insensitively against the lowercase ref codes.
 func validNationality(ctx context.Context, tx pgx.Tx, code string) bool {
 	if code == "" {
 		return false
 	}
 	var ok bool
-	_ = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ref.nationalities WHERE code = $1)`, code).Scan(&ok)
+	_ = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ref.nationalities WHERE code = $1)`, strings.ToLower(code)).Scan(&ok)
 	return ok
 }
 

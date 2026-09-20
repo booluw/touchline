@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional English/British club identity words: familiar running-club conventions without commercial clubs (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Albion", "Barrowford", "Blackwood", "Bradbury", "Brockencote", "Camberley", "Castleford", "Chippenwell",
+    "Clapbury", "Devonshire", "Elderslie", "Finnsworth", "Grangevale", "Harborough", "Kingslea", "Langton",
+    "Marchwood", "Northwick", "Oakfield", "Prycefield", "Rowanlea", "Silchester", "Thornbury", "Uppington",
+    "Westbourne", "Wyndham", "Yellowsands"
+  ],
+  "suffixes": [
+    "FC", "United", "City", "Town", "Rovers", "Wanderers", "Athletic", "County", "Borough",
+    "Albion", "Rangers", "Villa", "Colts", "Royals", "Stars"
+  ]
+}

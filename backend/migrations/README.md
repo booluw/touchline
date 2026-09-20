@@ -125,6 +125,7 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0040 | `player` / `social` | Morale + playing time (S06-03): `player_condition.morale`/`playing_time_pct`/cooldown, `contracts.squad_role` + backfill, `player_appearances`, `player_transfer_requests` (open-request partial unique), player↔manager `relationship_events` + canonical sentiment partial unique |
 | 0041 | `social` | Profile reads (S06-04a): `idx_messages_sender` for messaging rate limiting + trust seeding from the S06-03 relationship journal (`social.trust_events` backfill, `backfilled:` reason prefix) |
 | 0042 | `manager` | Manager delegation policies + absence mode (S06-05): `manager.managers` gains `away_since`/`away_auto`/`consecutive_missed`/`last_activity_at`; `manager.policies` table (world-scoped, per-manager, per-decision-type params JSONB, unique on `(manager_id, policy_type)`) |
+| 0048 | `ref` / `world` | Country-scoped club name parts (`ref.club_name_parts.country_code`, `''` = global fallback, per-code pools from `data/clubs/regional/`) + admin club rename publishing `CLUB_RENAMED` events and `world.news_stories` rows |
 
 ### River migrations (0016–0022)
 

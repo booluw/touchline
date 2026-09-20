@@ -29,7 +29,7 @@ func boardStatus(c *gin.Context, err error) {
 		errors.Is(err, internalboard.ErrMandateValueInvalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 	}
 }
 

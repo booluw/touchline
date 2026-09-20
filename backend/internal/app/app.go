@@ -196,7 +196,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	dashSvc := internaldashboard.NewService(pool, bus)
 	dashSvc.WithRealtime(broker)
 	academySvc := internalacademy.NewService(pool, bus)
-	adminSvc := internaladmin.NewService(pool)
+	adminSvc := internaladmin.NewService(pool, bus)
 	lifecycleSvc := internallifecycle.NewService(pool, bus, academySvc)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)

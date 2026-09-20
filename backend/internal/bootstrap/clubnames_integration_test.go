@@ -18,7 +18,7 @@ func TestClubNamePartsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(pool, nil)
 
-	firstStems, firstSuffixes, err := svc.ListClubNameParts(ctx)
+	firstStems, firstSuffixes, err := svc.ListClubNameParts(ctx, "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -27,13 +27,13 @@ func TestClubNamePartsRoundTrip(t *testing.T) {
 	}
 
 	// Add a new stem + suffix, then confirm they round-trip.
-	if err := svc.AddClubNamePart(ctx, "stem", "Panther"); err != nil {
+	if err := svc.AddClubNamePart(ctx, "stem", "Panther", ""); err != nil {
 		t.Fatalf("add stem: %v", err)
 	}
-	if err := svc.AddClubNamePart(ctx, "suffix", "Wanderers"); err != nil {
+	if err := svc.AddClubNamePart(ctx, "suffix", "Wanderers", ""); err != nil {
 		t.Fatalf("add suffix: %v", err)
 	}
-	stems, suffixes, err := svc.ListClubNameParts(ctx)
+	stems, suffixes, err := svc.ListClubNameParts(ctx, "")
 	if err != nil {
 		t.Fatalf("list after add: %v", err)
 	}
@@ -45,10 +45,10 @@ func TestClubNamePartsRoundTrip(t *testing.T) {
 	}
 
 	// Add is idempotent (upsert).
-	if err := svc.AddClubNamePart(ctx, "stem", "Panther"); err != nil {
+	if err := svc.AddClubNamePart(ctx, "stem", "Panther", ""); err != nil {
 		t.Fatalf("re-add stem: %v", err)
 	}
-	stems, _, err = svc.ListClubNameParts(ctx)
+	stems, _, err = svc.ListClubNameParts(ctx, "")
 	if err != nil {
 		t.Fatalf("list after re-add: %v", err)
 	}
@@ -57,10 +57,10 @@ func TestClubNamePartsRoundTrip(t *testing.T) {
 	}
 
 	// Remove.
-	if err := svc.RemoveClubNamePart(ctx, "stem", "Panther"); err != nil {
+	if err := svc.RemoveClubNamePart(ctx, "stem", "Panther", ""); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	stems, _, err = svc.ListClubNameParts(ctx)
+	stems, _, err = svc.ListClubNameParts(ctx, "")
 	if err != nil {
 		t.Fatalf("list after remove: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestClubNamePartsRoundTrip(t *testing.T) {
 	}
 
 	// Removing an absent entry is a no-op.
-	if err := svc.RemoveClubNamePart(ctx, "suffix", "Panther"); err != nil {
+	if err := svc.RemoveClubNamePart(ctx, "suffix", "Panther", ""); err != nil {
 		t.Fatalf("remove absent: %v", err)
 	}
 }
@@ -79,14 +79,17 @@ func TestClubNamePartValidation(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(pool, nil)
 
-	if err := svc.AddClubNamePart(ctx, "prefix", "X"); err != ErrInvalidClubNamePart {
+	if err := svc.AddClubNamePart(ctx, "prefix", "X", ""); err != ErrInvalidClubNamePart {
 		t.Fatalf("invalid kind = %v, want ErrInvalidClubNamePart", err)
 	}
-	if err := svc.AddClubNamePart(ctx, "stem", "  "); err != ErrClubNamePartRequired {
+	if err := svc.AddClubNamePart(ctx, "stem", "  ", ""); err != ErrClubNamePartRequired {
 		t.Fatalf("blank value = %v, want ErrClubNamePartRequired", err)
 	}
-	if err := svc.RemoveClubNamePart(ctx, "stem", ""); err != ErrClubNamePartRequired {
+	if err := svc.RemoveClubNamePart(ctx, "stem", "", ""); err != ErrClubNamePartRequired {
 		t.Fatalf("blank remove = %v, want ErrClubNamePartRequired", err)
+	}
+	if err := svc.AddClubNamePart(ctx, "stem", "X", "toolongcode"); err != ErrInvalidClubNameCountry {
+		t.Fatalf("invalid country = %v, want ErrInvalidClubNameCountry", err)
 	}
 }
 
@@ -104,7 +107,7 @@ func TestLoadClubNamePartsEmptyError(t *testing.T) {
 	if _, err := tx.Exec(ctx, `DELETE FROM ref.club_name_parts`); err != nil {
 		t.Fatalf("clear pool: %v", err)
 	}
-	if _, _, err := LoadClubNameParts(ctx, tx); err == nil {
+	if _, err := LoadClubNamePools(ctx, tx); err == nil {
 		t.Fatal("expected error on empty pool")
 	}
 }
@@ -116,7 +119,36 @@ func TestLoadClubNamePartsStableOrder(t *testing.T) {
 	firstStems, firstSuffixes := poolRead(t, pool)
 	secondStems, secondSuffixes := poolRead(t, pool)
 	if !reflect.DeepEqual(firstStems, secondStems) || !reflect.DeepEqual(firstSuffixes, secondSuffixes) {
-		t.Fatal("LoadClubNameParts must be stable across calls (deterministic seeding)")
+		t.Fatal("LoadClubNamePools must be stable across calls (deterministic seeding)")
+	}
+}
+
+func TestLoadClubNamePartsRegional(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.SeedClubNameParts(t, pool)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+
+	if err := svc.AddClubNamePart(ctx, "stem", "Glencairn", "sco"); err != nil {
+		t.Fatalf("add regional stem: %v", err)
+	}
+	if err := svc.AddClubNamePart(ctx, "suffix", "Thistle", "sco"); err != nil {
+		t.Fatalf("add regional suffix: %v", err)
+	}
+	stems, suffixes, err := svc.ListClubNameParts(ctx, "sco")
+	if err != nil {
+		t.Fatalf("list regional: %v", err)
+	}
+	if !contains(stems, "Glencairn") || !contains(suffixes, "Thistle") {
+		t.Fatalf("regional pool missing added parts: stems=%v suffixes=%v", stems, suffixes)
+	}
+	// The global pool is unaffected by a regional add.
+	gStems, gSuffixes, err := svc.ListClubNameParts(ctx, "")
+	if err != nil {
+		t.Fatalf("list global: %v", err)
+	}
+	if contains(gStems, "Glencairn") || contains(gSuffixes, "Thistle") {
+		t.Fatal("regional part leaked into the global pool")
 	}
 }
 
@@ -128,11 +160,12 @@ func poolRead(t *testing.T, pool *pgxpool.Pool) (stems, suffixes []string) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer tx.Rollback(ctx)
-	stems, suffixes, err = LoadClubNameParts(ctx, tx)
+	pools, err := LoadClubNamePools(ctx, tx)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	return stems, suffixes
+	global := pools[""]
+	return global.Stems, global.Suffixes
 }
 
 func countValue(xs []string, v string) int {

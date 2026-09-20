@@ -4,7 +4,7 @@ Curated, versioned name-frequency data per nationality. **This is a data enginee
 
 ## Format
 
-One file per nationality: `data/names/<code>.json`, where `<code>` is a lowercase 2–3 letter slug (`br`, `ng`, `en`, …).
+One file per nationality: `data/names/<code>.json`, where `<code>` is a lowercase 2–3 letter slug (`br`, `ng`, `gb`, …).
 
 ```json
 {
@@ -21,7 +21,7 @@ One file per nationality: `data/names/<code>.json`, where `<code>` is a lowercas
 }
 ```
 
-- `nationality.code` must be a unique lowercase 2–3 letter slug. Royal/Home-nation codes (`eng`, `sco`) are not ISO 3166-1 alpha-2 values — they are project-reserved slugs (see `ref.nationalities.code` comment and OPD-13).
+- `nationality.code` must be a unique lowercase 2–3 letter slug. Codes follow ISO 3166-1 alpha-2 where one exists (England shipped under `gb`; previously a project `en` slug). Scotland has no ISO alpha-2 code, so `sco` is a project-reserved slug (see `ref.nationalities.code` comment and OPD-13).
 - `generation_weight` is the relative share of that nationality in the global player pool (positive number; tuning is a data change, not code).
 - `provenance` records where each list came from. `verified: false` marks lists that still need cross-checking against an authoritative open dataset.
 - `first_names` / `last_names` are the given-name and surname pools. Lists are deduplicated on load; empty lists are a load error so generation can never silently return "Unknown".
@@ -34,7 +34,7 @@ One file per nationality: `data/names/<code>.json`, where `<code>` is a lowercas
 | ar   | Argentina     |  8.5   | first + last |
 | fr   | France        |  8.0   | first + last |
 | ng   | Nigeria       |  8.0   | first + last |
-| en   | England       |  7.5   | first + last |
+| gb   | United Kingdom | 7.5   | first + last (English names; ISO 3166-1 alpha-2 GB) |
 | es   | Spain         |  7.0   | first + last |
 | de   | Germany       |  6.5   | first + last |
 | it   | Italy         |  6.0   | first + last |

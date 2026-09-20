@@ -39,7 +39,7 @@ func (s *server) respondAdminCountry(c *gin.Context, data any, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "country not found in world"})
 		return
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+	internalError(c, err)
 }
 
 // intQuery parses an optional int query param with a default and an upper cap.
@@ -123,7 +123,7 @@ func (s *server) handleAdminCountryFreeAgents(c *gin.Context) {
 	}
 	agents, total, err := playerpool.ListFreeAgents(c.Request.Context(), s.pool, worldID, filter, f.Page, f.Limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"country_id": countryID, "items": agents, "total": total})

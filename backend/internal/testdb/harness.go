@@ -193,30 +193,39 @@ func SeedRefData(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-// SeedClubNameParts seeds the global club-name pools (ref.club_name_parts)
-// with a small deterministic set so S04-01 seeding can draw names. It upserts
-// (mirroring cmd/ref-seed's contract) so re-runs and admin additions coexist.
+// SeedClubNameParts seeds the club-name pools (ref.club_name_parts) with a
+// small deterministic set so S04-01 seeding can draw names: a global fallback
+// pool (country_code ”) plus one regional pool (country_code 'gb'). It
+// upserts (mirroring cmd/ref-seed's contract) so re-runs and admin additions
+// coexist.
 func SeedClubNameParts(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 
-	var stems = []string{"Athletic", "Olympique", "Union", "City", "Racing", "Metropolitan"}
-	var suffixes = []string{"FC", "United", "City", "SC", "Rovers", "Wanderers"}
-
-	for _, s := range stems {
-		if _, err := pool.Exec(ctx, `
-			INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
-			VALUES ('stem', $1, 1.0)
-			ON CONFLICT (kind, value) DO NOTHING`, s); err != nil {
-			t.Fatalf("seed club stem %q: %v", s, err)
-		}
+	var pools = map[string]struct {
+		stems    []string
+		suffixes []string
+	}{
+		"":   {stems: []string{"Athletic", "Olympique", "Union", "City", "Racing", "Metropolitan"}, suffixes: []string{"FC", "United", "City", "SC", "Rovers", "Wanderers"}},
+		"gb": {stems: []string{"Silchester", "Marchwood"}, suffixes: []string{"Town", "Villa"}},
 	}
-	for _, s := range suffixes {
-		if _, err := pool.Exec(ctx, `
-			INSERT INTO ref.club_name_parts (kind, value, frequency_weight)
-			VALUES ('suffix', $1, 1.0)
-			ON CONFLICT (kind, value) DO NOTHING`, s); err != nil {
-			t.Fatalf("seed club suffix %q: %v", s, err)
+
+	for code, poolParts := range pools {
+		for _, s := range poolParts.stems {
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO ref.club_name_parts (country_code, kind, value, frequency_weight)
+				VALUES ($1, 'stem', $2, 1.0)
+				ON CONFLICT (country_code, kind, value) DO NOTHING`, code, s); err != nil {
+				t.Fatalf("seed club stem %q (code=%q): %v", s, code, err)
+			}
+		}
+		for _, s := range poolParts.suffixes {
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO ref.club_name_parts (country_code, kind, value, frequency_weight)
+				VALUES ($1, 'suffix', $2, 1.0)
+				ON CONFLICT (country_code, kind, value) DO NOTHING`, code, s); err != nil {
+				t.Fatalf("seed club suffix %q (code=%q): %v", s, code, err)
+			}
 		}
 	}
 }

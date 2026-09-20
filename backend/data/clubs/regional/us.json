@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional American club identity words: MLS-style descriptors without real franchises (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Bay", "Bear", "Cougar", "Coyote", "Desert", "Eagle", "Golden", "Lake",
+    "Liberty", "Monarch", "Mountain", "Pacific", "Rock", "Silver", "Star", "Valley", "Wild"
+  ],
+  "suffixes": [
+    "FC", "SC", "United", "City", "Legends", "Republic", "Thunder", "Futbol", "Union"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Belgian club identity words: river-region naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Ardenne", "Brabant", "Flandre", "Lesse", "Mosane", "Ourthe", "Sambre", "Senne"
+  ],
+  "suffixes": [
+    "RFC", "Union", "FC", "SC"
+  ]
+}

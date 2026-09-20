@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "Curated fictional Portuguese club identity words: Iberian-Luso naming conventions (see data/clubs/README.md)",
+    "license": "Factual club-name conventions; see README.md",
+    "curated_by": "Touchline data engineering (OPD-13)",
+    "date": "2026-09-21",
+    "verified": false
+  },
+  "stems": [
+    "Académica", "Aguia", "Atlético", "Beira", "Clube", "Desportiva", "Lusitano", "Marítimo",
+    "Nacional", "Oriental", "Sport", "Sporting", "União", "Vitória"
+  ],
+  "suffixes": [
+    "FC", "SC", "Sport", "Clube", "União", "Desportivo", "Atlético"
+  ]
+}
