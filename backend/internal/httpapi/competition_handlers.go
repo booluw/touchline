@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -52,6 +53,7 @@ func (s *server) handleListCountries(c *gin.Context) {
 func (s *server) handleCreateLeague(c *gin.Context) {
 	var req internalcompetition.LeagueParams
 	if err := c.ShouldBindJSON(&req); err != nil {
+		fmt.Printf("%v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed league payload"})
 		return
 	}

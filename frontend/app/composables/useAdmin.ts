@@ -78,11 +78,26 @@ export function useAdmin() {
     }
   }
 
+  async function createLeague(payload: League) {
+    try {
+      const resp = await $api.post<League>(`${apiBase}/api/admin/leagues`, payload)
+      store.addLeague(resp)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
+
   return {
     createWorld,
     fetchWorlds,
     fetchCountry,
     createCountry,
-    fetchWorldLeagues
+    fetchWorldLeagues,
+    createLeague
   }
 }
