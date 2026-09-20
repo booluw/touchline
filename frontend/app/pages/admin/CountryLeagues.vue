@@ -35,6 +35,8 @@ onMounted(() => fetchWorldLeagues(worldId.value))
       </nuxt-link>
     </div>
   </section>
+
+  <div class=""></div>
   <NuxtPage />
   {{ leagues }}
 </template>
