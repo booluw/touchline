@@ -28,6 +28,14 @@ type RiverBusConfig struct {
 	// RetryPolicy customizes retry scheduling for failed jobs. When nil the
 	// river DefaultClientRetryPolicy applies.
 	RetryPolicy river.ClientRetryPolicy
+	// RegisterJobWorkers, when non-nil, is invoked before the river client is
+	// built so the caller can register additional (non-event) job workers — e.g.
+	// the async world-seed worker, which depends on services that are only
+	// constructed after the bus.
+	RegisterJobWorkers func(workers *river.Workers) error
+	// ExtraQueues augments the configured queue with additional river queues
+	// (e.g. a dedicated, single-worker "seed" queue). Keys are queue names.
+	ExtraQueues map[string]river.QueueConfig
 }
 
 // RiverBus is the Phase-0 EventBus implemented with river on top of Postgres.
@@ -65,11 +73,21 @@ func NewRiverBus(db *pgxpool.Pool, cfg RiverBusConfig) (*RiverBus, error) {
 
 	workers := river.NewWorkers()
 	river.AddWorker(workers, bus.worker)
+	if cfg.RegisterJobWorkers != nil {
+		if err := cfg.RegisterJobWorkers(workers); err != nil {
+			return nil, fmt.Errorf("eventbus: register job workers: %w", err)
+		}
+	}
+
+	queues := map[string]river.QueueConfig{
+		cfg.Queue: {MaxWorkers: cfg.MaxWorkers},
+	}
+	for name, qc := range cfg.ExtraQueues {
+		queues[name] = qc
+	}
 
 	client, err := river.NewClient(riverpgxv5.New(db), &river.Config{
-		Queues: map[string]river.QueueConfig{
-			cfg.Queue: {MaxWorkers: cfg.MaxWorkers},
-		},
+		Queues:      queues,
 		RetryPolicy: cfg.RetryPolicy,
 		Schema:      cfg.Schema,
 		Workers:     workers,
@@ -138,6 +156,21 @@ func (b *RiverBus) PublishTx(ctx context.Context, tx pgx.Tx, event *Event) error
 		return fmt.Errorf("eventbus: enqueue event job: %w", err)
 	}
 	return nil
+}
+
+// InsertJob enqueues an arbitrary river job outside of a transaction. It is the
+// enqueue seam for out-of-band work (e.g. the async world seed). The args' own
+// InsertOpts (queue/priority/uniqueness) apply unless opts overrides them.
+// Returns the inserted job's id.
+func (b *RiverBus) InsertJob(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (int64, error) {
+	if err := validateBus(b); err != nil {
+		return 0, err
+	}
+	res, err := b.client.Insert(ctx, args, opts)
+	if err != nil {
+		return 0, fmt.Errorf("eventbus: insert job: %w", err)
+	}
+	return res.Job.ID, nil
 }
 
 // EnqueueRepair re-enqueues a touchline_event job for an event that is already

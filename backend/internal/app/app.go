@@ -17,9 +17,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 
 	"github.com/google/uuid"
 	internalacademy "github.com/touchline/backend/internal/academy"
+	internaladmin "github.com/touchline/backend/internal/admin"
 	internalauth "github.com/touchline/backend/internal/auth"
 	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
@@ -118,6 +120,7 @@ type App struct {
 	Policy    *policybot.Service
 	Dashboard *internaldashboard.Service
 	Academy   *internalacademy.Service
+	Admin     *internaladmin.Service
 	Lifecycle *internallifecycle.Service
 	Runner    *matchday.Runner
 	http      *httpapi.Server
@@ -127,13 +130,24 @@ type App struct {
 // game service once, wiring the HTTP surface from them. Close must be called on
 // shutdown.
 func Build(ctx context.Context, cfg Config) (*App, error) {
+	var seedWorker *internalcompetition.SeedWorldWorker
+
 	pool, err := connectDB(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("connected to PostgreSQL")
 
-	bus, err := eventbus.NewRiverBus(pool, eventbus.RiverBusConfig{})
+	bus, err := eventbus.NewRiverBus(pool, eventbus.RiverBusConfig{
+		RegisterJobWorkers: func(workers *river.Workers) error {
+			seedWorker = internalcompetition.NewSeedWorldWorker()
+			river.AddWorker(workers, seedWorker)
+			return nil
+		},
+		ExtraQueues: map[string]river.QueueConfig{
+			internalcompetition.SeedQueue: {MaxWorkers: 1},
+		},
+	})
 	if err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("init event bus: %w", err)
@@ -160,6 +174,10 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 
 	matches := match.NewService(pool, bus, squadStore, formStore)
 	compSvc := internalcompetition.NewService(pool, bus)
+	seedWorker.SetRun(func(ctx context.Context, worldID uuid.UUID) error {
+		_, err := compSvc.SeedWorld(ctx, worldID)
+		return err
+	})
 	trainingSvc := training.NewService(pool, bus)
 	financeSvc := finance.NewService(pool, bus)
 	transfersSvc := internaltransfer.NewService(pool, bus)
@@ -178,29 +196,34 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	dashSvc := internaldashboard.NewService(pool, bus)
 	dashSvc.WithRealtime(broker)
 	academySvc := internalacademy.NewService(pool, bus)
+	adminSvc := internaladmin.NewService(pool)
 	lifecycleSvc := internallifecycle.NewService(pool, bus, academySvc)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
 	httpSrv := httpapi.New(httpapi.Options{
-		Auth:          internalauth.NewService(pool, jwt),
-		World:         internalworld.NewService(pool, bus),
-		Manager:       managerSvc,
-		Club:          internalclub.NewService(pool),
-		Bootstrap:     internalbootstrap.NewService(pool, bus),
-		Competition:   compSvc,
-		Match:         matches,
-		Tactics:       tacticsSvc,
-		Training:      trainingSvc,
-		Finance:       financeSvc,
-		Transfers:     transfersSvc,
-		Board:         boardSvc,
-		Player:        playerSvc,
-		Social:        socialSvc,
-		Policy:        policySvc,
-		Dashboard:     dashSvc,
-		Academy:       academySvc,
-		Faction:       factionSvc,
+		Auth:        internalauth.NewService(pool, jwt),
+		World:       internalworld.NewService(pool, bus),
+		Manager:     managerSvc,
+		Club:        internalclub.NewService(pool),
+		Bootstrap:   internalbootstrap.NewService(pool, bus),
+		Competition: compSvc,
+		Match:       matches,
+		Tactics:     tacticsSvc,
+		Training:    trainingSvc,
+		Finance:     financeSvc,
+		Transfers:   transfersSvc,
+		Board:       boardSvc,
+		Player:      playerSvc,
+		Social:      socialSvc,
+		Policy:      policySvc,
+		Dashboard:   dashSvc,
+		Academy:     academySvc,
+		Faction:     factionSvc,
+		Admin:       adminSvc,
+		SeedJobs: func(ctx context.Context, worldID uuid.UUID) (int64, error) {
+			return bus.InsertJob(ctx, &internalcompetition.SeedWorldJobArgs{WorldID: worldID}, nil)
+		},
 		JWT:           jwt,
 		Pool:          pool,
 		CookiesSecure: cfg.Env != "development",
@@ -230,6 +253,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Policy:     policySvc,
 		Dashboard:  dashSvc,
 		Academy:    academySvc,
+		Admin:      adminSvc,
 		Lifecycle:  lifecycleSvc,
 		Runner:     runner,
 		http:       httpSrv,

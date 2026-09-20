@@ -3,11 +3,14 @@ package httpapi
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	internalcompetition "github.com/touchline/backend/internal/competition"
 )
@@ -131,20 +134,137 @@ func (s *server) handleSeedWorld(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
 		return
 	}
-	res, err := s.compSvc.SeedWorld(c.Request.Context(), worldID)
-	switch {
-	case errors.Is(err, internalcompetition.ErrWorldNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	case errors.Is(err, internalcompetition.ErrWorldArchived),
-		errors.Is(err, internalcompetition.ErrWorldHasNoLeagues):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
-		return
-	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+	// Validate synchronously so a bad world 4xxs immediately instead of through
+	// a queued job that would just fail after the heavy work.
+	if err := s.compSvc.ValidateSeedWorld(c.Request.Context(), worldID); err != nil {
+		switch {
+		case errors.Is(err, internalcompetition.ErrWorldNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.Is(err, internalcompetition.ErrWorldArchived),
+			errors.Is(err, internalcompetition.ErrWorldHasNoLeagues):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		}
 		return
 	}
-	c.JSON(http.StatusOK, res)
+	if s.seedJobs == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "seed job enqueuer not wired"})
+		return
+	}
+	jobID, err := s.seedJobs(c.Request.Context(), worldID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+	log.Printf("admin: seed queued for world %s (job=%d)", worldID, jobID)
+	c.JSON(http.StatusAccepted, gin.H{"status": "queued", "world_id": worldID, "job_id": jobID})
+}
+
+// seedJobStatus is the normalized view of the world's most recent seed job.
+type seedJobStatus struct {
+	ID          int64      `json:"id"`
+	State       string     `json:"state"`
+	Attempt     int        `json:"attempt"`
+	MaxAttempts int        `json:"max_attempts"`
+	AttemptedAt *time.Time `json:"attempted_at"`
+	FinishedAt  *time.Time `json:"finished_at"`
+	LastError   *string    `json:"last_error"`
+}
+
+func (s *server) handleSeedWorldStatus(c *gin.Context) {
+	worldID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		return
+	}
+	ctx := c.Request.Context()
+
+	var (
+		worldExists bool
+		worldSeed   bool
+	)
+	err = s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM world.worlds WHERE id = $1), 
+		        COALESCE((SELECT world_seed IS NOT NULL FROM world.worlds WHERE id = $1), FALSE)`,
+		worldID, worldID,
+	).Scan(&worldExists, &worldSeed)
+	if err != nil {
+		log.Printf("seed-status world %s: check world: %v", worldID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+	if !worldExists {
+		c.JSON(http.StatusNotFound, gin.H{"error": internalcompetition.ErrWorldNotFound.Error()})
+		return
+	}
+
+	var leaguesTotal, leaguesSeeded, clubs, poolSize int
+	err = s.pool.QueryRow(ctx, `
+		SELECT 
+		  (SELECT COUNT(*) FROM competition.competitions c
+		     JOIN world.countries wc ON wc.id = c.country_id WHERE wc.world_id = $1),
+		  (SELECT COUNT(*) FROM competition.competitions c
+		     JOIN world.countries wc ON wc.id = c.country_id
+		     WHERE wc.world_id = $1
+		       AND c.team_count = (SELECT COUNT(*) FROM competition.club_competitions cc
+		                           WHERE cc.competition_id = c.id AND cc.role = 'league')),
+		  (SELECT COUNT(*) FROM club.clubs WHERE world_id = $1),
+		  (SELECT COUNT(*) FROM player.players WHERE world_id = $1 AND club_id IS NULL AND status = 'free_agent')`,
+		worldID, worldID, worldID, worldID,
+	).Scan(&leaguesTotal, &leaguesSeeded, &clubs, &poolSize)
+	if err != nil {
+		log.Printf("seed-status world %s: read progress: %v", worldID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+
+	var job *seedJobStatus
+	var (
+		jobID       int64
+		state       string
+		attempt     int
+		maxAttempts int
+		attemptedAt *time.Time
+		finishedAt  *time.Time
+		lastError   *string
+	)
+	err = s.pool.QueryRow(ctx, `
+		SELECT id, state::text, attempt, max_attempts, attempted_at, finalized_at,
+		       errors[CARDINALITY(errors)]->>'error'
+		FROM river.river_job
+		WHERE kind = 'seed_world' AND args->>'world_id' = $1
+		ORDER BY id DESC LIMIT 1`,
+		worldID.String(),
+	).Scan(&jobID, &state, &attempt, &maxAttempts, &attemptedAt, &finishedAt, &lastError)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Printf("seed-status world %s: read seed job: %v", worldID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+	if err == nil {
+		job = &seedJobStatus{
+			ID:          jobID,
+			State:       state,
+			Attempt:     attempt,
+			MaxAttempts: maxAttempts,
+			AttemptedAt: attemptedAt,
+			FinishedAt:  finishedAt,
+			LastError:   lastError,
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"world_id":     worldID,
+		"world_seeded": worldSeed,
+		"leagues": gin.H{
+			"total":  leaguesTotal,
+			"seeded": leaguesSeeded,
+		},
+		"clubs":     clubs,
+		"pool_size": poolSize,
+		"job":       job,
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -267,32 +267,56 @@ curl -c /tmp/jar -b /tmp/jar -X PATCH localhost:8080/api/admin/leagues/$LEAGUE_I
 One admin call materializes the entire world into playable shape (`OPD-18`):
 for **every** league it guarantees `team_count` entries — it reuses the world's
 existing clubs first, and generates the rest as AI clubs with squads, managers,
-and `club_competitions` memberships. No seasons or fixtures yet.
+and `club_competitions` memberships. No seasons or fixtures yet. The seed runs
+as an **async job** (the `seed` queue): the POST returns **202 queued** and the
+worker materializes the world in the background.
 
 ```bash
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/seed
-# 200: {world_id, random_seed, countries:[{country_id, country_name,
-#        leagues:[{league_id, name, tier, team_count, new_clubs, clubs:[{id,name}]}]}],
-#        new_clubs, league_count}
+# 202: {"status":"queued","world_id":"…","job_id":…}
+
+# Poll until the world is fully seeded (or the job ends in a terminal state):
+curl -c /tmp/jar -b /tmp/jar localhost:8080/api/admin/worlds/$WORLD_ID/seed-status
+# {"world_id":"…","world_seeded":false,"leagues":{"total":1,"seeded":1},"clubs":6,
+#  "pool_size":100,"job":{"id":…,"state":"completed","attempt":1,"max_attempts":5,
+#   "attempted_at":"…","finished_at":"…","last_error":null}}
 ```
 
 Notes:
 
+- **Async by design.** `POST /seed` validates synchronously (`404 ErrWorldNotFound`,
+  `422 ErrWorldArchived`/`ErrWorldHasNoLeagues`) and then queues a
+  `seed_world` river job, returning `202`. The job **must be consumed by a
+  worker** — the all-in-one `go run ./cmd/touchline serve` runs one, as does the
+  isolated `worker` role. `GET /api/admin/worlds/$WORLD_ID/seed-status` reports
+  the job's state plus real progress (`world_seeded`, `leagues.total/seeded`,
+  `clubs`, `pool_size`). Duplicate POSTs for the same world coalesce while a
+  job is pending/running (unique by args); after it finishes a follow-up is a
+  cheap no-op.
 - **All AI.** Every seeded club is `is_ai_controlled = true` (policy-bot
   manager, generated 24-player squad, short name drawn from the club-name
   corpus). There is no human starter club.
 - **Incremental + idempotent.** The call fills every league up to `team_count`,
-  creating only the clubs that are missing. Re-running it is a `200` no-op
-  (`new_clubs: 0`). Leagues added later are picked up by the next run.
+  creating only the clubs that are missing. Re-running it is a `202` whose job
+  completes with `new_clubs: 0` (`seed-status` keeps reporting the same counts).
+  Leagues added later are picked up by the next run.
 - **Seeding has no season side effects.** Clubs are placed in as many leagues as
   declared (league memberships); season/fixture creation is the `StartSeason`
   seam (Step 7).
-- **First run mints `world_seed`.** The world's replay seed (`random_seed`, a
-  crypto-random int64) is generated on first successful run and stored on
-  `world.worlds`; per-league name scrambling is derived from
-  `seed ⊕ leagueID`. A failed first run rolls back and leaves it unset.
-- Errors: `400` invalid id, `404 ErrWorldNotFound`, `422 ErrWorldArchived` /
-  `ErrWorldHasNoLeagues` (create ≥1 league first, Step 5), `500` otherwise.
+- **First successful job mints `world_seed`.** The world's replay seed
+  (`random_seed`, a crypto-random int64) is generated on first successful run
+  and stored on `world.worlds`; per-league name scrambling is derived from
+  `seed ⊕ leagueID`. A failed run rolls back atomically and leaves it unset —
+  the error surfaces on `seed-status` under `job.last_error`.
+- **Country free-agent pool is minted before the first draft.** Seeding tops
+  each country's pool up to 100 free agents (`playerpool.PoolTargetSize`)
+  *before* the first AI club of that country drafts from it, then tops it back
+  up after every club — so a whole multi-league seed never runs the pool dry.
+  A missing mint fails the first club with `ErrPoolTooSmall` (see Step 10).
+- Progress is logged per phase on the backend (`seed world=<id> …`), e.g.
+  `seed world=… country=England league=Premier: creating AI club "…" (2/6)`.
+- Errors: the synchronous POST only 4xxes validation problems; runtime failures
+  show up in the logged job error and on `seed-status`.
 
 Verify the seeded clubs (needs a **manager-scoped** session — this world's
 `$ADMIN_MANAGER`; see Step 4):
@@ -456,6 +480,10 @@ see `docs/design/finance-numerics.md`).
 |---|---|---|
 | `ErrRefDataMissing` on seed | `ref-seed` never ran | Run `go run ./cmd/ref-seed -data data/names -clubdata data/clubs` (Step 2) |
 | `ErrWorldHasNoLeagues` on seed | world has no declared leagues | Create ≥1 country+league first (Step 5) |
+| `POST /seed` returns `202` but nothing is created | no worker is consuming the `seed` queue | Run the all-in-one `go run ./cmd/touchline serve` (or the `worker` role); poll `GET /api/admin/worlds/$WORLD_ID/seed-status` |
+| Seed job fails `load world: timeout: context deadline exceeded` | job outlived river's default 1-minute `JobTimeout` (river applies it when the client sets none), so the seed's context is cancelled mid-run; the retry then blocks on the previous attempt's world-row lock until its own deadline expires | Re-queue `POST /api/admin/worlds/$WORLD_ID/seed` with the current build — `SeedWorldWorker` overrides `Timeout` to 30 minutes (event jobs keep the default). Discarded jobs aren't retried; a fresh POST makes a new one |
+| `free-agent pool has too few players to draft a squad` on seed | first AI club of a country drafted against an empty/pool-drained free-agent pool (old builds seeded squads before minting the country pool) | Re-queue `POST /api/admin/worlds/$WORLD_ID/seed` — seeding now mints the country pool to 100 before the first draft; the failure shows under `job.last_error` on `seed-status` |
+| Seed failed / where's the result? | runtime seed error (see Step 6) | Poll `GET /api/admin/worlds/$WORLD_ID/seed-status` — `job.state` (e.g. `retryable`/`discarded`) and `job.last_error` carry the chained error (e.g. `generate AI club for …`) |
 | Seed created `0` clubs | re-seed of an already-full world | Expected; idempotent. Add leagues/raise `team_count`, re-seed |
 | `ErrLeagueAlreadySeeded` on StartSeason | league already has a season | One season per league; a completed season rolls to the next automatically |
 | `ErrCountryWorldMismatch` | country belongs to another world | Reuse the `country_id` returned for *this* world |
@@ -495,6 +523,9 @@ LEAGUE_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/league
   -H 'Content-Type: application/json' \
   -d '{"country_id":"'"$COUNTRY_ID"'","name":"Premier Division","tier":1,"team_count":6}' | jq -r .id)
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/seed
+# poll until world_seeded:true (the seed runs as an async job)
+until curl -s -c /tmp/jar -b /tmp/jar localhost:8080/api/admin/worlds/$WORLD_ID/seed-status \
+  | grep -q '"world_seeded":true'; do sleep 1; done
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/status \
   -H 'Content-Type: application/json' -d '{"status":"active"}'
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \

@@ -90,18 +90,13 @@ func TestPhase0VerticalSlice(t *testing.T) {
 		t.Fatalf("create league = %d, want 201 (%s)", resp.StatusCode, body)
 	}
 	resp = post(t, ts, client, "/api/admin/worlds/"+world.String()+"/seed", "", adminCookies)
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("seed = %d, want 200 (%s)", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("seed = %d, want 202 (%s)", resp.StatusCode, string(raw))
 	}
-	var seed struct {
-		NewClubs int `json:"new_clubs"`
-	}
-	if err := decodeJSON(t, resp, &seed); err != nil {
-		t.Fatalf("decode seed: %v", err)
-	}
-	if seed.NewClubs != 4 {
-		t.Fatalf("seeded clubs = %d, want 4", seed.NewClubs)
+	status := waitForSeed(t, ts, client, adminCookies, world.String())
+	if status["clubs"].(float64) != 4 {
+		t.Fatalf("seeded clubs = %v, want 4", status["clubs"])
 	}
 
 	// The candidate can read the generated clubs and their squads in their world.

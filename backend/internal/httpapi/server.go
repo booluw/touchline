@@ -1,12 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalacademy "github.com/touchline/backend/internal/academy"
+	internaladmin "github.com/touchline/backend/internal/admin"
 	internalauth "github.com/touchline/backend/internal/auth"
 	internalboard "github.com/touchline/backend/internal/board"
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
@@ -51,6 +54,8 @@ type server struct {
 	dashSvc       *internaldashboard.Service
 	academySvc    *internalacademy.Service
 	factionSvc    *internalfaction.Service
+	adminSvc      *internaladmin.Service
+	seedJobs      func(ctx context.Context, worldID uuid.UUID) (int64, error)
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
 	cookiesSecure bool
@@ -63,24 +68,29 @@ type server struct {
 // its event bus by the caller (see internal/app); the server only wires them to
 // HTTP routes.
 type Options struct {
-	Auth          *internalauth.Service
-	World         *internalworld.Service
-	Manager       *internalmanager.Service
-	Club          *internalclub.Service
-	Bootstrap     *internalbootstrap.Service
-	Competition   *internalcompetition.Service
-	Match         *internalmatch.Service
-	Tactics       *internaltactics.Service
-	Training      *internaltraining.Service
-	Finance       *internalfinance.Service
-	Transfers     *internaltransfer.Service
-	Board         *internalboard.Service
-	Player        *internalplayer.Service
-	Social        *internalsocial.Service
-	Policy        *policybot.Service
-	Dashboard     *internaldashboard.Service
-	Academy       *internalacademy.Service
-	Faction       *internalfaction.Service
+	Auth        *internalauth.Service
+	World       *internalworld.Service
+	Manager     *internalmanager.Service
+	Club        *internalclub.Service
+	Bootstrap   *internalbootstrap.Service
+	Competition *internalcompetition.Service
+	Match       *internalmatch.Service
+	Tactics     *internaltactics.Service
+	Training    *internaltraining.Service
+	Finance     *internalfinance.Service
+	Transfers   *internaltransfer.Service
+	Board       *internalboard.Service
+	Player      *internalplayer.Service
+	Social      *internalsocial.Service
+	Policy      *policybot.Service
+	Dashboard   *internaldashboard.Service
+	Academy     *internalacademy.Service
+	Faction     *internalfaction.Service
+	Admin       *internaladmin.Service
+	// SeedJobs enqueues an async world-seed job and returns the river job id.
+	// The caller supplies it (wired over eventbus.InsertJob) so the HTTP layer
+	// never depends on the river client directly.
+	SeedJobs      func(ctx context.Context, worldID uuid.UUID) (int64, error)
 	JWT           pkgjwt.JWTConfig
 	Pool          *pgxpool.Pool
 	CookiesSecure bool
@@ -110,12 +120,14 @@ func New(opts Options) *Server {
 		dashSvc:       opts.Dashboard,
 		academySvc:    opts.Academy,
 		factionSvc:    opts.Faction,
+		adminSvc:      opts.Admin,
 		jwtCfg:        opts.JWT,
 		pool:          opts.Pool,
 		cookiesSecure: opts.CookiesSecure,
 		appOrigin:     opts.AppOrigin,
 		hub:           opts.Hub,
 		bus:           opts.Bus,
+		seedJobs:      opts.SeedJobs,
 	}}
 }
 

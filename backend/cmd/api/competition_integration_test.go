@@ -85,41 +85,20 @@ func TestHTTPCompetitionAdminAndReads(t *testing.T) {
 	}
 
 	// Seed the whole world: clubs + players + memberships only, no seasons.
-	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed", "", adminCookies)
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		t.Fatalf("seed = %d, want 200 (%s)", resp.StatusCode, string(raw))
+	status := waitForSeed(t, ts, client, adminCookies, worldID)
+	if status["clubs"].(float64) != 8 {
+		t.Fatalf("seed clubs = %v, want 8", status["clubs"])
 	}
-	seed := decodeMap(t, resp)
-	if int(seed["new_clubs"].(float64)) != 8 {
-		t.Fatalf("seed new_clubs = %v, want 8", seed["new_clubs"])
-	}
-	if int(seed["league_count"].(float64)) != 2 {
-		t.Fatalf("seed league_count = %v, want 2", seed["league_count"])
-	}
-	countries := seed["countries"].([]any)
-	if len(countries) != 1 {
-		t.Fatalf("seeded countries = %d, want 1", len(countries))
-	}
-	leagues := countries[0].(map[string]any)["leagues"].([]any)
-	if len(leagues) != 2 {
-		t.Fatalf("seeded leagues = %d, want 2", len(leagues))
-	}
-	for _, l := range leagues {
-		l := l.(map[string]any)
-		if int(l["team_count"].(float64)) != 4 || int(l["new_clubs"].(float64)) != 4 {
-			t.Fatalf("league seed = %v, want 4 team_count / 4 new_clubs", l)
-		}
+	leagues := status["leagues"].(map[string]any)
+	if leagues["total"].(float64) != 2 || leagues["seeded"].(float64) != 2 {
+		t.Fatalf("seed leagues = %v, want 2 total / 2 seeded", leagues)
 	}
 
-	// A second seed is an idempotent no-op (200, zero new clubs) — the launch
-	// model lets admins re-run after adding leagues.
-	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed", "", adminCookies)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("re-seed = %d, want 200", resp.StatusCode)
-	}
-	if n := int(decodeMap(t, resp)["new_clubs"].(float64)); n != 0 {
-		t.Fatalf("re-seed new_clubs = %d, want 0", n)
+	// A second seed is an idempotent no-op (world stays fully seeded) — the
+	// launch model lets admins re-run after adding leagues.
+	status = waitForSeed(t, ts, client, adminCookies, worldID)
+	if status["clubs"].(float64) != 8 {
+		t.Fatalf("re-seed clubs = %v, want still 8", status["clubs"])
 	}
 
 	// Manager reads: the plain manager is still a valid manager row, but the

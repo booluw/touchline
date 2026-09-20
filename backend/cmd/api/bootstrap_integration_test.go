@@ -60,16 +60,15 @@ func TestHTTPClubReads(t *testing.T) {
 		t.Fatalf("create league = %d, want 201", resp.StatusCode)
 	}
 	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed", "", adminCookies)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("seed = %d, want 200", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("seed = %d, want 202", resp.StatusCode)
 	}
-	raw, _ := io.ReadAll(resp.Body)
-	var seed map[string]any
-	if err := json.Unmarshal(raw, &seed); err != nil {
-		t.Fatalf("decode seed: %v", err)
+	status := waitForSeed(t, ts, client, adminCookies, worldID)
+	if status["clubs"].(float64) != 4 {
+		t.Fatalf("seed clubs = %v, want 4", status["clubs"])
 	}
-	if clubs := seed["new_clubs"]; int(clubs.(float64)) != 4 {
-		t.Fatalf("seed new_clubs = %v, want 4", clubs)
+	if s := status["leagues"].(map[string]any)["seeded"].(float64); s != 1 {
+		t.Fatalf("seed leagues seeded = %v, want 1", s)
 	}
 
 	// The manager's world lists exactly the seeded clubs.
@@ -77,7 +76,7 @@ func TestHTTPClubReads(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list clubs = %d, want 200", resp.StatusCode)
 	}
-	raw, _ = io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(resp.Body)
 	var list map[string]any
 	if err := json.Unmarshal(raw, &list); err != nil {
 		t.Fatalf("decode clubs: %v", err)

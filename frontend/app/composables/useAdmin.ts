@@ -92,12 +92,82 @@ export function useAdmin() {
     }
   }
 
+  async function leaguePyramid({ world_id, country_id } : { world_id: string, country_id: string }) {
+    try {
+      return await $api.get(`${apiBase}/api/admin/worlds/${world_id}/countries/${country_id}/pyramid`)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
+
+  async function countryClubs({ world_id, country_id }: { world_id: string, country_id: string }) {
+    try {
+      return await $api.get(`${apiBase}/api/admin/worlds/${world_id}/countries/${country_id}/clubs`)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
+
+  async function countryPlayers({ world_id, country_id }: { world_id: string, country_id: string }) {
+    try {
+      return await $api.get(`${apiBase}/api/admin/worlds/${world_id}/countries/${country_id}/players`)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
+
+  async function countryFreeAgents({ world_id, country_id }: { world_id: string, country_id: string }) {
+    try {
+      return await $api.get(`${apiBase}/api/admin/worlds/${world_id}/countries/${country_id}/free-agents`)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
+
+  async function countryEconomics({ world_id, country_id }: { world_id: string, country_id: string }) {
+    try {
+      return await $api.get(`${apiBase}/api/admin/worlds/${world_id}/countries/${country_id}/finance`)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
+
   return {
     createWorld,
     fetchWorlds,
     fetchCountry,
     createCountry,
     fetchWorldLeagues,
-    createLeague
+    createLeague,
+    leaguePyramid,
+    countryClubs,
+    countryPlayers,
+    countryFreeAgents,
+    countryEconomics
   }
 }

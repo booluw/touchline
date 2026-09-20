@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"math/rand"
 	"time"
 
@@ -88,6 +89,7 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 	}
 	seed := *worldSeed
 	ref := daysTruncate(worldRef)
+	log.Printf("seed world=%s: starting (world_seed=%d)", worldID, seed)
 
 	// Global club-name pools come from the reference data (data-driven, OPD-13
 	// analogue): admins extend ref.club_name_parts via the dashboard or JSON.
@@ -156,6 +158,14 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 			continue // country declared but not yet structured — a later seed fills it
 		}
 
+		// Mint the country's free-agent pool before the first club drafts from
+		// it — DraftSquad fails with ErrPoolTooSmall otherwise. ReplenishPool is
+		// idempotent, so re-seeds just top the pool back up.
+		if err := playerpool.ReplenishPool(ctx, tx, s.bus, worldID, &country.id, playerpool.PoolTargetSize, poolFactory, ref); err != nil {
+			return nil, fmt.Errorf("seed country pool: %w", err)
+		}
+		log.Printf("seed world=%s country=%s: %d league(s); free-agent pool at %d", worldID, country.name, len(leagues), playerpool.PoolTargetSize)
+
 		seeded := make([]LeagueSeed, 0, len(leagues))
 		for _, l := range leagues {
 			result.LeagueCount++
@@ -166,6 +176,7 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 
 			need := l.TeamCount - len(members)
 			if need <= 0 {
+				log.Printf("seed world=%s country=%s league=%s (tier %d): already full (%d/%d), skipping", worldID, country.name, l.Name, l.Tier, len(members), l.TeamCount)
 				seeded = append(seeded, LeagueSeed{
 					LeagueID:  l.ID,
 					Name:      l.Name,
@@ -182,12 +193,14 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 			lrng := rand.New(rand.NewSource(hashMix(seed, l.ID)))
 			created := make([]uuid.UUID, 0, need)
 			names := map[string]bool{}
+			log.Printf("seed world=%s country=%s league=%s (tier %d): %d/%d teams present, creating %d club(s)", worldID, country.name, l.Name, l.Tier, len(members), l.TeamCount, need)
 			for i := 0; i < need; i++ {
 				name := nextClubName(lrng, stems, suffixes, used)
 				generated, err := bootstrap.GenerateAIClub(ctx, s.bus, tx, worldID, name, short(name), country.name, &country.id)
 				if err != nil {
 					return nil, fmt.Errorf("generate AI club for %s: %w", l.Name, err)
 				}
+				log.Printf("seed world=%s country=%s league=%s: creating AI club %q (%d/%d)", worldID, country.name, l.Name, generated.ClubName, i+1, need)
 				created = append(created, generated.ClubID)
 				used[name] = true
 				names[generated.ClubName] = true
@@ -218,6 +231,13 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 			result.NewClubs += need
 		}
 
+		countryClubs := 0
+		for _, ls := range seeded {
+			countryClubs += ls.NewClubs
+		}
+		poolCount, _ := playerpool.PoolCount(ctx, tx, worldID, &country.id)
+		log.Printf("seed world=%s country=%s: done — %d club(s) seeded, pool=%d free agents", worldID, country.name, countryClubs, poolCount)
+
 		result.Countries = append(result.Countries, CountrySeed{
 			CountryID:   country.id,
 			CountryName: country.name,
@@ -245,7 +265,39 @@ func (s *Service) SeedWorld(ctx context.Context, worldID uuid.UUID) (*SeedResult
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit seed: %w", err)
 	}
+	log.Printf("seed world=%s: committed — %d new club(s) across %d league(s)", worldID, result.NewClubs, result.LeagueCount)
 	return result, nil
+}
+
+// ValidateSeedWorld checks the pre-conditions for an async world seed without
+// doing the heavy materialization. It mirrors the synchronous SeedWorld guards
+// (world exists, is not archived, has at least one declared league) so the HTTP
+// layer can 4xx a bad request immediately instead of after a queued job fails.
+func (s *Service) ValidateSeedWorld(ctx context.Context, worldID uuid.UUID) error {
+	var worldStatus string
+	err := s.pool.QueryRow(ctx, `SELECT status FROM world.worlds WHERE id = $1`, worldID).Scan(&worldStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWorldNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("load world: %w", err)
+	}
+	if worldStatus == "archived" {
+		return ErrWorldArchived
+	}
+	var n int
+	err = s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM competition.competitions c
+		JOIN world.countries wc ON wc.id = c.country_id
+		WHERE wc.world_id = $1`, worldID).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("count leagues: %w", err)
+	}
+	if n == 0 {
+		return ErrWorldHasNoLeagues
+	}
+	return nil
 }
 
 // StartSeason materializes the next season for a competition from its current

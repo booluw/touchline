@@ -1051,6 +1051,312 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/overview:
+    get:
+      tags: [admin]
+      summary: Country overview pane
+      operationId: adminCountryOverview
+      description: |
+        Read-only home pane for an admin-declared world country: population
+        counters (origin pool via player.players.country_id), unassigned
+        buckets, club/league/market/economy snapshots and top headlines. Clubs
+        are joined to the country by matching club.clubs.country to
+        world.countries.name (best-effort — orphan clubs surface on the
+        unassigned counter, not silently).
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+      responses:
+        "200":
+          description: The country overview pane.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountryOverview" }
+        "400":
+          description: Malformed world/country id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/pyramid:
+    get:
+      tags: [admin]
+      summary: Country league pyramid
+      operationId: adminCountryPyramid
+      description: |
+        The country's leagues ordered by tier, each with its promotion/
+        relegation quota, registered club count, and latest season (when one
+        exists).
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+      responses:
+        "200":
+          description: The country pyramid.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountryPyramid" }
+        "400":
+          description: Malformed world/country id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/clubs:
+    get:
+      tags: [admin]
+      summary: Country clubs panel
+      operationId: adminCountryClubs
+      description: |
+        The country's clubs (by name match) with their league, squad size,
+        wage bill, budget envelopes, cash and any active crisis stage.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+      responses:
+        "200":
+          description: The country clubs panel.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountryClubsPanel" }
+        "400":
+          description: Malformed world/country id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/players:
+    get:
+      tags: [admin]
+      summary: Country player population summary
+      operationId: adminCountryPlayers
+      description: |
+        Aggregate view of the country's origin-pool population: totals by
+        status and origin, per-position count with position-weighted overall
+        and average potential, nationality mix, and seasonal youth intake rows.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+      responses:
+        "200":
+          description: The country population summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountryPlayerSummary" }
+        "400":
+          description: Malformed world/country id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/free-agents:
+    get:
+      tags: [admin]
+      summary: Country free-agent pool
+      operationId: adminCountryFreeAgents
+      description: |
+        The country's free-agent pool with optional position, age, and
+        nationality filters, paged. Same read model managers see, without the
+        caller-world scoping (admins are world-less).
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+        - name: position
+          in: query
+          required: false
+          schema: { type: string, example: GK }
+        - name: age_min
+          in: query
+          required: false
+          schema: { type: integer, example: 20 }
+        - name: age_max
+          in: query
+          required: false
+          schema: { type: integer, example: 30 }
+        - name: nationality
+          in: query
+          required: false
+          schema: { type: string, example: NG }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 25 }
+      responses:
+        "200":
+          description: The paged free-agent pool.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminFreeAgentList" }
+        "400":
+          description: Malformed world/country id or filter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/market:
+    get:
+      tags: [admin]
+      summary: Country transfer market panel
+      operationId: adminCountryMarket
+      description: |
+        The country's transfer market: open listings, bids received and made
+        (both attribution directions), and the completed-transfer ledger split
+        into paid arrivals, departures and free-agent signings, each annotated
+        with the player's current market value (fee-vs-value read).
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+        - name: days
+          in: query
+          required: false
+          description: Completed-transfer ledger window, capped at 365.
+          schema: { type: integer, default: 90 }
+      responses:
+        "200":
+          description: The country transfer market panel.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountryMarketPanel" }
+        "400":
+          description: Malformed world/country id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/finance:
+    get:
+      tags: [admin]
+      summary: Country economy panel
+      operationId: adminCountryFinance
+      description: |
+        The country economy: clubs in an active financial crisis, the aggregate
+        weekly wage bill, top wage bills, budget capacity (latest season per
+        club+type) and the country's summed cash position.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+      responses:
+        "200":
+          description: The country economy panel.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountryFinancePanel" }
+        "400":
+          description: Malformed world/country id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/timeline:
+    get:
+      tags: [admin]
+      summary: Country event timeline
+      operationId: adminCountryTimeline
+      description: |
+        Recent world events referencing the country: a transfer, bid or
+        signing is in-scope when its club is a country club or its player's
+        origin pool is this country; intakes are scoped by country directly.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+        - name: days
+          in: query
+          required: false
+          description: Look-back window, capped at 365.
+          schema: { type: integer, default: 14 }
+        - name: limit
+          in: query
+          required: false
+          description: Maximum items returned, capped at 500.
+          schema: { type: integer, default: 200 }
+      responses:
+        "200":
+          description: The country-scoped event stream.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountryTimeline" }
+        "400":
+          description: Malformed world/country id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/transfers/listings:
     get:
       tags: [transfer]
@@ -1956,6 +2262,19 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
   /api/admin/worlds:
+    get:
+      tags: [admin]
+      summary: List worlds
+      operationId: listWorlds
+      description: Lists every world row (lifecycle metadata only).
+      responses:
+        "200":
+          description: The worlds.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/World" }
     post:
       tags: [admin]
       summary: Create a world
@@ -2075,46 +2394,85 @@ paths:
   /api/admin/worlds/{id}/seed:
     post:
       tags: [admin]
-      summary: Seed the whole world (clubs, players, memberships)
+      summary: Queue a whole-world seed
       operationId: seedWorld
       description: |
-        Idempotent, incremental whole-world seeding: every league is filled to
-        its team_count with new clubs, players are generated, and club manager
-        rows (admin) are migrated to real club ownership. The first successful
-        run mints the world's replay random seed. Requires countries+leagues to
-        be declared first.
+        Queues the whole-world seed as an async job on the "seed" queue and
+        returns immediately. Every league is filled to its team_count with AI
+        clubs, squads are drafted from each country's free-agent pool, and pool
+        memberships are recorded. Idempotent and incremental: leagues already at
+        team_count are skipped, so re-running only fills what's missing. The
+        first successful run mints the world's replay random seed. Requires
+        countries+leagues to be declared first. Duplicate submissions for the
+        same world coalesce while one is pending or running (jobs are unique by
+        args).
+        Poll `GET /api/admin/worlds/{id}/seed-status` for progress and the
+        result.
       parameters:
         - $ref: "#/components/parameters/WorldID"
       responses:
-        "200":
-          description: Seeding summary.
+        "202":
+          description: Seed job queued.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/SeedResult" }
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: queued }
+                  world_id: { type: string, format: uuid }
+                  job_id: { type: integer, format: int64 }
               examples:
                 sample:
                   value:
+                    status: queued
                     world_id: 00000000-0000-4000-8000-000000000001
-                    random_seed: 48765432
-                    countries:
-                      - country_id: 00000000-0000-4000-8000-000000000002
-                        country_name: England
-                        leagues:
-                          - league_id: 00000000-0000-4000-8000-000000000003
-                            name: Premier League
-                            tier: 1
-                            team_count: 8
-                            new_clubs: 8
-                            clubs:
-                              - { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers }
-                    new_clubs: 8
-                    league_count: 2
+                    job_id: 42
         "422":
-          description: World has no leagues to seed.
+          description: World is archived or has no leagues to seed.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               example: { error: "world has no leagues" }
+        "404":
+          description: World not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/seed-status:
+    get:
+      tags: [admin]
+      summary: World seed status
+      operationId: seedWorldStatus
+      description: |
+        Reports the async seed job's state (from the river job queue) together
+        with the world's actual seeding progress: whether the replay seed has
+        been minted, how many leagues are full, club count, and the country
+        free-agent pool size. `job` is null until a seed has been requested;
+        failed job attempts surface in `job.last_error`.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+      responses:
+        "200":
+          description: Seed progress and latest job state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminSeedStatus" }
+              examples:
+                sample:
+                  value:
+                    world_id: 00000000-0000-4000-8000-000000000001
+                    world_seeded: false
+                    leagues: { total: 2, seeded: 0 }
+                    clubs: 0
+                    pool_size: 0
+                    job:
+                      id: 42
+                      state: running
+                      attempt: 1
+                      max_attempts: 5
+                      attempted_at: 2026-01-01T12:00:00Z
+                      finished_at: null
+                      last_error: null
         "404":
           description: World not found.
           content:
@@ -2591,6 +2949,12 @@ components:
       required: true
       description: Job offer id.
       schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000009" }
+    AdminCountryID:
+      name: countryID
+      in: path
+      required: true
+      description: Country id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000a" }
   schemas:
     Error:
       type: object
@@ -3425,6 +3789,32 @@ components:
             properties:
               id: { type: string, format: uuid }
               name: { type: string }
+    AdminSeedStatus:
+      type: object
+      properties:
+        world_id: { type: string, format: uuid }
+        world_seeded: { type: boolean }
+        leagues:
+          type: object
+          properties:
+            total: { type: integer }
+            seeded: { type: integer }
+        clubs: { type: integer }
+        pool_size: { type: integer }
+        job:
+          anyOf:
+            - $ref: "#/components/schemas/AdminSeedJobStatus"
+            - type: "null"
+    AdminSeedJobStatus:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        state: { type: string }
+        attempt: { type: integer }
+        max_attempts: { type: integer }
+        attempted_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        last_error: { type: string, nullable: true }
     CompetitionSummary:
       type: object
       properties:
@@ -3554,5 +3944,303 @@ components:
           items: { type: string }
         next_fixture_at: { type: string, format: date-time, nullable: true }
         delegatable: { type: boolean }
+    CountryRef:
+      type: object
+      required: [id, world_id, code, name]
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+    PopulationSummary:
+      type: object
+      properties:
+        total: { type: integer }
+        active: { type: integer }
+        free_agents: { type: integer }
+        retired: { type: integer }
+        by_status:
+          type: object
+          additionalProperties: { type: integer }
+    UnassignedSummary:
+      type: object
+      properties:
+        world_pool_players: { type: integer }
+        orphan_clubs: { type: integer }
+    ClubSummary:
+      type: object
+      properties:
+        total: { type: integer }
+        in_crisis: { type: integer }
+        orphan_clubs: { type: integer }
+        unassigned_clubs: { type: integer }
+    LeagueSummary:
+      type: object
+      properties:
+        total: { type: integer }
+        by_tier:
+          type: object
+          additionalProperties: { type: integer }
+    MarketSummary:
+      type: object
+      properties:
+        open_listings: { type: integer }
+        bids_received: { type: integer }
+        bids_made: { type: integer }
+        transfers_in: { type: integer }
+        transfers_out: { type: integer }
+        free_agent_signings: { type: integer }
+    EconomySummary:
+      type: object
+      properties:
+        crisis_clubs: { type: integer }
+        wage_bill: { type: integer, format: int64 }
+        wage_allocated: { type: integer, format: int64 }
+        wage_committed: { type: integer, format: int64 }
+        transfer_allocated: { type: integer, format: int64 }
+        transfer_committed: { type: integer, format: int64 }
+        cash: { type: integer, format: int64 }
+    Headline:
+      type: object
+      properties:
+        kind: { type: string, enum: [transfer_in, transfer_out, signing, crisis, intake] }
+        title: { type: string }
+        detail: { type: string }
+        occurred_at: { type: string, format: date-time }
+    CountryOverview:
+      type: object
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        as_of: { type: string, format: date-time }
+        population: { $ref: "#/components/schemas/PopulationSummary" }
+        clubs: { $ref: "#/components/schemas/ClubSummary" }
+        leagues: { $ref: "#/components/schemas/LeagueSummary" }
+        market: { $ref: "#/components/schemas/MarketSummary" }
+        economy: { $ref: "#/components/schemas/EconomySummary" }
+        unassigned: { $ref: "#/components/schemas/UnassignedSummary" }
+        headlines:
+          type: array
+          items: { $ref: "#/components/schemas/Headline" }
+    SeasonRef:
+      type: object
+      properties:
+        season_id: { type: string, format: uuid }
+        season_label: { type: string }
+        season_number: { type: integer }
+        status: { type: string, enum: [upcoming, in_progress, completed] }
+    LeagueRow:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        tier: { type: integer }
+        team_count: { type: integer }
+        status: { type: string, enum: [proposed, active, archived] }
+        promotions: { type: integer }
+        relegations: { type: integer }
+        club_count: { type: integer }
+        season:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SeasonRef" }]
+    CountryPyramid:
+      type: object
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        leagues:
+          type: array
+          items: { $ref: "#/components/schemas/LeagueRow" }
+    ClubRow:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        short_name: { type: string }
+        is_ai_controlled: { type: boolean }
+        tier: { type: integer }
+        league_id: { type: string, format: uuid, nullable: true }
+        league_name: { type: string }
+        league_tier: { type: integer }
+        squad_size: { type: integer }
+        top_player_name: { type: string }
+        top_player_market_value: { type: integer, format: int64 }
+        wage_bill: { type: integer, format: int64 }
+        wage_allocated: { type: integer, format: int64 }
+        wage_committed: { type: integer, format: int64 }
+        transfer_allocated: { type: integer, format: int64 }
+        transfer_committed: { type: integer, format: int64 }
+        crisis_stage: { type: string, nullable: true }
+        cash: { type: integer, format: int64 }
+    CountryClubsPanel:
+      type: object
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        clubs:
+          type: array
+          items: { $ref: "#/components/schemas/ClubRow" }
+    PositionBreakdown:
+      type: object
+      properties:
+        position: { type: string, example: ST }
+        count: { type: integer }
+        avg_overall: { type: integer }
+        avg_potential: { type: integer }
+    NationalityMix:
+      type: object
+      properties:
+        code: { type: string }
+        name: { type: string }
+        count: { type: integer }
+    IntakeRow:
+      type: object
+      properties:
+        season_number: { type: integer }
+        player_count: { type: integer }
+    CountryPlayerSummary:
+      type: object
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        total: { type: integer }
+        by_status:
+          type: object
+          additionalProperties: { type: integer }
+        by_origin:
+          type: object
+          additionalProperties: { type: integer }
+        by_position:
+          type: array
+          items: { $ref: "#/components/schemas/PositionBreakdown" }
+        nationalities:
+          type: array
+          items: { $ref: "#/components/schemas/NationalityMix" }
+        intakes:
+          type: array
+          items: { $ref: "#/components/schemas/IntakeRow" }
+        avg_age: { type: number, format: float }
+    AdminFreeAgentList:
+      type: object
+      properties:
+        country_id: { type: string, format: uuid }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FreeAgent" }
+        total: { type: integer }
+    ListingRow:
+      type: object
+      properties:
+        listing_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        player_name: { type: string }
+        position: { type: string }
+        club_name: { type: string }
+        asking_price: { type: integer, format: int64, nullable: true }
+        market_value: { type: integer, format: int64 }
+        listing_type: { type: string, enum: [open_to_offers, actively_shopped, loan_available] }
+        listed_at: { type: string, format: date-time }
+    BidRow:
+      type: object
+      properties:
+        bid_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        player_name: { type: string }
+        bidding_club_id: { type: string, format: uuid }
+        bidding_club_name: { type: string }
+        selling_club_id: { type: string, format: uuid }
+        selling_club_name: { type: string }
+        fee: { type: integer, format: int64 }
+        status: { type: string, enum: [pending, countered] }
+        created_at: { type: string, format: date-time }
+    TransferRow:
+      type: object
+      properties:
+        transfer_id: { type: string, format: uuid }
+        player_id: { type: string, format: uuid }
+        player_name: { type: string }
+        from_club_id: { type: string, format: uuid, nullable: true }
+        from_club_name: { type: string }
+        to_club_name: { type: string }
+        fee: { type: integer, format: int64 }
+        market_value: { type: integer, format: int64 }
+        overpay: { type: boolean }
+        overpay_pct: { type: integer, nullable: true }
+        completed_at: { type: string, format: date-time }
+    CountryMarketPanel:
+      type: object
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        window_days: { type: integer }
+        open_listings:
+          type: array
+          items: { $ref: "#/components/schemas/ListingRow" }
+        bids_received:
+          type: array
+          items: { $ref: "#/components/schemas/BidRow" }
+        bids_made:
+          type: array
+          items: { $ref: "#/components/schemas/BidRow" }
+        transfers_in:
+          type: array
+          items: { $ref: "#/components/schemas/TransferRow" }
+        transfers_out:
+          type: array
+          items: { $ref: "#/components/schemas/TransferRow" }
+        signings:
+          type: array
+          items: { $ref: "#/components/schemas/TransferRow" }
+    CrisisClubRow:
+      type: object
+      properties:
+        club_id: { type: string, format: uuid }
+        club_name: { type: string }
+        stage:
+          type: string
+          enum: [warning, restriction, emergency, administration_risk, ownership_intervention, bankruptcy]
+        started_at: { type: string, format: date-time }
+    WageRow:
+      type: object
+      properties:
+        club_id: { type: string, format: uuid }
+        club_name: { type: string }
+        weekly_wage_bill: { type: integer, format: int64 }
+        active_commitments: { type: integer }
+    BudgetSide:
+      type: object
+      properties:
+        allocated: { type: integer, format: int64 }
+        committed: { type: integer, format: int64 }
+        available: { type: integer, format: int64 }
+        utilized_pct: { type: integer }
+    CountryFinancePanel:
+      type: object
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        crisis_clubs:
+          type: array
+          items: { $ref: "#/components/schemas/CrisisClubRow" }
+        wage_bill: { type: integer, format: int64 }
+        top_wage_bills:
+          type: array
+          items: { $ref: "#/components/schemas/WageRow" }
+        wage_budget: { $ref: "#/components/schemas/BudgetSide" }
+        transfer_budget: { $ref: "#/components/schemas/BudgetSide" }
+        cash: { type: integer, format: int64 }
+    TimelineItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        event_type: { type: string }
+        occurred_at: { type: string, format: date-time }
+        actor_type: { type: string, nullable: true }
+        title: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+    CountryTimeline:
+      type: object
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        since: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/TimelineItem" }
 security:
   - sessionCookie: []

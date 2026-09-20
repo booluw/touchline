@@ -152,6 +152,7 @@ func (s *server) router() *gin.Engine {
 			admin.POST("/worlds/:id/status", s.handleWorldStatus)
 			admin.POST("/worlds/:id/config", s.handleWorldConfig)
 			admin.POST("/worlds/:id/seed", s.handleSeedWorld)
+			admin.GET("/worlds/:id/seed-status", s.handleSeedWorldStatus)
 			admin.POST("/offers", s.handleCreateOffer)
 			admin.POST("/countries", s.handleCreateCountry)
 			admin.GET("/countries", s.handleListCountries)
@@ -162,6 +163,14 @@ func (s *server) router() *gin.Engine {
 			admin.POST("/club-name-parts", s.handleAddClubNamePart)
 			admin.DELETE("/club-name-parts/:kind/:value", s.handleRemoveClubNamePart)
 			admin.POST("/worlds/:id/countries/:countryID/players/bulk", s.handleAdminBulkCreatePlayers)
+			admin.GET("/worlds/:id/countries/:countryID/overview", s.handleAdminCountryOverview)
+			admin.GET("/worlds/:id/countries/:countryID/pyramid", s.handleAdminCountryPyramid)
+			admin.GET("/worlds/:id/countries/:countryID/clubs", s.handleAdminCountryClubs)
+			admin.GET("/worlds/:id/countries/:countryID/players", s.handleAdminCountryPlayers)
+			admin.GET("/worlds/:id/countries/:countryID/free-agents", s.handleAdminCountryFreeAgents)
+			admin.GET("/worlds/:id/countries/:countryID/market", s.handleAdminCountryMarket)
+			admin.GET("/worlds/:id/countries/:countryID/finance", s.handleAdminCountryFinance)
+			admin.GET("/worlds/:id/countries/:countryID/timeline", s.handleAdminCountryTimeline)
 		}
 
 		// Competition reads (S04-01): always scoped to the caller's world.

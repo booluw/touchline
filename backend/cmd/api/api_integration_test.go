@@ -412,6 +412,51 @@ func get(t *testing.T, ts *httptest.Server, client *http.Client, path, cookieHea
 	return resp
 }
 
+// waitForSeed queues a whole-world seed (202) and polls /seed-status until the
+// seed job reaches a terminal state (or the world is seeded), returning the
+// status payload for content assertions (clubs, leagues.seeded, world_seeded).
+func waitForSeed(t *testing.T, ts *httptest.Server, client *http.Client, cookieHeader, worldID string) map[string]any {
+	t.Helper()
+
+	resp := post(t, ts, client, "/api/admin/worlds/"+worldID+"/seed", "", cookieHeader)
+	if resp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("seed = %d, want 202 (%s)", resp.StatusCode, string(raw))
+	}
+
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("world seed did not finish within 60s")
+		}
+		resp = get(t, ts, client, "/api/admin/worlds/"+worldID+"/seed-status", cookieHeader)
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("seed-status = %d, want 200 (%s)", resp.StatusCode, string(raw))
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		var status map[string]any
+		if err := json.Unmarshal(raw, &status); err != nil {
+			t.Fatalf("decode seed-status: %v", err)
+		}
+		if job, ok := status["job"].(map[string]any); ok && job["state"] != nil {
+			switch job["state"] {
+			case "completed", "cancelled":
+				return status
+			case "discarded":
+				t.Fatalf("seed job discarded: %v", status)
+			case "running", "available", "retryable", "scheduled":
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+		}
+		if status["world_seeded"] == true {
+			return status // already seeded before any job row; job may be nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func put(t *testing.T, ts *httptest.Server, client *http.Client, path, body, cookieHeader string) *http.Response {
 	t.Helper()
 	resp := do(t, ts, client, http.MethodPut, path, body, cookieHeader)
