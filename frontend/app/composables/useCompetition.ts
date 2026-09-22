@@ -5,18 +5,47 @@ export interface Country {
   name: string
 }
 
+export interface ClubRef {
+  id: string
+  name?: string
+  short?: string
+}
+
+export interface CompetitionRef {
+  id: string
+  name?: string
+}
+
+export interface CountryRef {
+  id: string
+  name?: string
+  code?: string
+}
+
+export interface LeagueRef {
+  id: string
+  name?: string
+}
+
+export interface SeasonRef {
+  id: string
+  label?: string
+  number?: number
+  status?: string
+}
+
 export interface League {
   id: string
   world_id: string
-  country_id: string
+  country: CountryRef
   name: string
   tier: number
   team_count: number
   status: string
   promotions: number
   relegations: number
-  promotes_to: string | null
-  relegates_to: string | null
+  promotes_to: LeagueRef | null
+  relegates_to: LeagueRef | null
 }
 
 export interface LeagueSeed {
@@ -38,10 +67,10 @@ export interface SeedResult {
 
 export interface Fixture {
   id: string
-  home_club_id: string
-  home_club_name?: string
-  away_club_id: string
-  away_club_name?: string
+  world_id?: string
+  competition: CompetitionRef
+  home_club: ClubRef
+  away_club: ClubRef
   matchday: number
   scheduled_at: string
   status: string
@@ -50,8 +79,7 @@ export interface Fixture {
 }
 
 export interface StandingRow {
-  club_name: string
-  club_short: string
+  club: ClubRef
   played: number
   won: number
   drawn: number
@@ -62,10 +90,7 @@ export interface StandingRow {
 }
 
 export interface Standings {
-  season_id: string
-  season_label: string
-  season_number: number
-  status: string
+  season: SeasonRef
   rows: StandingRow[]
 }
 

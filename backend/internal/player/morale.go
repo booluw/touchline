@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/explanation"
 )
 
@@ -62,12 +63,15 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 	if err != nil {
 		return nil, err
 	}
-	byPlayer := make(map[uuid.UUID]string, len(open))
-	for _, r := range open {
-		byPlayer[r.PlayerID] = r.Status
+	var byPlayer map[uuid.UUID]string
+	if len(open) > 0 {
+		byPlayer = make(map[uuid.UUID]string, len(open))
+		for _, r := range open {
+			byPlayer[r.PlayerID] = r.Status
+		}
 	}
 	for i := range rows {
-		if st, ok := byPlayer[rows[i].PlayerID]; ok {
+		if st, ok := byPlayer[rows[i].Player.ID]; ok {
 			rows[i].TransferRequest = st
 		}
 	}
@@ -101,10 +105,9 @@ func (s *Service) GetPlayerMoraleDetail(ctx context.Context, worldID, managerID,
 	status := statusFor(vars.Share, expected)
 
 	d := &PlayerMoraleDetail{
-		PlayerID:       prof.ID,
+		Player:         &apiref.PlayerRef{ID: prof.ID, Name: prof.DisplayName},
 		FirstName:      prof.FirstName,
 		LastName:       prof.LastName,
-		DisplayName:    prof.DisplayName,
 		Position:       prof.PrimaryPosition,
 		SquadRole:      vars.Role,
 		Morale:         vars.Current,
@@ -129,6 +132,9 @@ func (s *Service) GetPlayerMoraleDetail(ctx context.Context, worldID, managerID,
 		return nil, err
 	}
 	if req != nil && req.Status != TransferRequestWithdrawn {
+		if err := decorateRequestRefs(ctx, s.pool, req); err != nil {
+			return nil, err
+		}
 		d.TransferRequest = req
 	}
 	hist, err := relationshipEvents(ctx, s.pool, playerID)

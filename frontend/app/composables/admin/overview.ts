@@ -19,6 +19,19 @@ export function useAdminOverview({ worldId, countryId }: { worldId: string, coun
     }
   }
 
+  async function countryOverview() {
+    try {
+      return await $api.get(`${apiBase}/api/admin/worlds/${worldId}/countries/${countryId}/overview`)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
+
   async function countryClubs() {
     try {
       return await $api.get(`${apiBase}/api/admin/worlds/${worldId}/countries/${countryId}/clubs`)
@@ -70,6 +83,19 @@ export function useAdminOverview({ worldId, countryId }: { worldId: string, coun
       })
     }
   }
+
+  async function countryTransferMarket() {
+    try {
+      return await $api.get(`${apiBase}/api/admin/worlds/${worldId}/countries/${countryId}/market`)
+    } catch (error: any | unknown) {
+      console.error(error)
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+    }
+  }
   
   async function seedWorld() {
     try {
@@ -100,6 +126,8 @@ export function useAdminOverview({ worldId, countryId }: { worldId: string, coun
     countryFreeAgents,
     countryEconomics,
     seedWorld,
-    seedWorldStatus
+    seedWorldStatus,
+    countryOverview,
+    countryTransferMarket
   }
 }

@@ -99,8 +99,12 @@ func TestHTTPMessagesLifecycle(t *testing.T) {
 		t.Fatalf("inbox items = %d, want 1", len(items))
 	}
 	first, _ := items[0].(map[string]any)
-	if first["id"] != messageID || first["sender_id"] != viewerMgr.String() {
+	if first["id"] != messageID {
 		t.Errorf("inbox first = %v", first)
+	}
+	sender, _ := first["sender"].(map[string]any)
+	if sender == nil || sender["id"] != viewerMgr.String() || sender["type"] != "manager" {
+		t.Errorf("inbox sender ref = %v", first["sender"])
 	}
 
 	// The sender cannot mark the recipient's message read (404), then the

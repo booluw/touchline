@@ -337,7 +337,7 @@ func (s *store) emitUnrest(ctx context.Context, q querier, pub eventbus.Publishe
 func sortedTiers(tiers map[string]Tier, names map[string]string) []TierView {
 	out := make([]TierView, 0, len(tiers))
 	for id, tier := range tiers {
-		out = append(out, TierView{PlayerID: id, Name: names[id], Tier: tier})
+		out = append(out, TierView{PlayerID: id, Name: names[id], Tier: tier, Player: playerRef(id, names)})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if tierRank(out[i].Tier) != tierRank(out[j].Tier) {

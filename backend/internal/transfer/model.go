@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // Event kinds emitted by the transfer module (world.events.event_type).
@@ -84,29 +85,32 @@ type Terms struct {
 // Clause mirrors one row of transfer.clauses, derived from an agreed Terms
 // on completion.
 type Clause struct {
-	ClauseType        string     `json:"clause_type"` // sell_on | buy_back
-	Percentage        *int       `json:"percentage,omitempty"`
-	Amount            *int64     `json:"amount,omitempty"`
-	BeneficiaryClubID *uuid.UUID `json:"beneficiary_club_id,omitempty"`
+	ClauseType        string          `json:"clause_type"` // sell_on | buy_back
+	Percentage        *int            `json:"percentage,omitempty"`
+	Amount            *int64          `json:"amount,omitempty"`
+	BeneficiaryClubID *uuid.UUID      `json:"-"`
+	BeneficiaryClub   *apiref.ClubRef `json:"beneficiary_club,omitempty"`
 }
 
 // Listing is a listing row with the player context a market screen needs.
 type Listing struct {
-	ID              uuid.UUID `json:"id"`
-	WorldID         uuid.UUID `json:"world_id"`
-	PlayerID        uuid.UUID `json:"player_id"`
-	PlayerName      string    `json:"player_name"`
-	Position        string    `json:"position"`
-	Age             int       `json:"age"`
-	MarketValue     int64     `json:"market_value"`
-	ListingClubID   uuid.UUID `json:"listing_club_id"`
-	ListingClubName string    `json:"listing_club_name"`
-	AskingPrice     *int64    `json:"asking_price,omitempty"`
-	ListingType     string    `json:"listing_type"`
-	Status          string    `json:"status"`
-	BidCount        int       `json:"bid_count"`
-	LatestBid       *Bid      `json:"latest_bid,omitempty"`
-	ListedAt        time.Time `json:"listed_at"`
+	ID              uuid.UUID         `json:"id"`
+	WorldID         uuid.UUID         `json:"world_id"`
+	PlayerID        uuid.UUID         `json:"-"`
+	PlayerName      string            `json:"-"`
+	Player          *apiref.PlayerRef `json:"player"`
+	Position        string            `json:"position"`
+	Age             int               `json:"age"`
+	MarketValue     int64             `json:"market_value"`
+	ListingClubID   uuid.UUID         `json:"-"`
+	ListingClubName string            `json:"-"`
+	ListingClub     *apiref.ClubRef   `json:"listing_club"`
+	AskingPrice     *int64            `json:"asking_price,omitempty"`
+	ListingType     string            `json:"listing_type"`
+	Status          string            `json:"status"`
+	BidCount        int               `json:"bid_count"`
+	LatestBid       *Bid              `json:"latest_bid,omitempty"`
+	ListedAt        time.Time         `json:"listed_at"`
 }
 
 // ListingType values (transfer.listings.listing_type CHECK).
@@ -126,25 +130,28 @@ var ReasonableListingTypes = map[string]bool{
 // Bid is the read model of one negotiation thread: the current offer (latest
 // round) plus the lifecycle status.
 type Bid struct {
-	ID                   uuid.UUID  `json:"id"`
-	WorldID              uuid.UUID  `json:"world_id"`
-	ListingID            *uuid.UUID `json:"listing_id,omitempty"`
-	PlayerID             uuid.UUID  `json:"player_id"`
-	PlayerName           string     `json:"player_name"`
-	BiddingClubID        uuid.UUID  `json:"bidding_club_id"`
-	BiddingClubName      string     `json:"bidding_club_name"`
-	SellingClubID        uuid.UUID  `json:"selling_club_id"`
-	SellingClubName      string     `json:"selling_club_name"`
-	Fee                  int64      `json:"fee"`
-	WeeklyWage           int64      `json:"weekly_wage"`
-	ContractLengthMonths int        `json:"contract_length_months"`
-	SigningBonus         int64      `json:"signing_bonus,omitempty"`
-	ReleaseClause        *int64     `json:"release_clause,omitempty"`
-	Round                int        `json:"round"`
-	ProposedBy           string     `json:"proposed_by"` // buying_club | selling_club
-	Status               string     `json:"status"`
-	CreatedAt            time.Time  `json:"created_at"`
-	RespondedAt          *time.Time `json:"responded_at,omitempty"`
+	ID                   uuid.UUID         `json:"id"`
+	WorldID              uuid.UUID         `json:"world_id"`
+	ListingID            *uuid.UUID        `json:"listing_id,omitempty"`
+	PlayerID             uuid.UUID         `json:"-"`
+	PlayerName           string            `json:"-"`
+	Player               *apiref.PlayerRef `json:"player"`
+	BiddingClubID        uuid.UUID         `json:"-"`
+	BiddingClubName      string            `json:"-"`
+	BiddingClub          *apiref.ClubRef   `json:"bidding_club"`
+	SellingClubID        uuid.UUID         `json:"-"`
+	SellingClubName      string            `json:"-"`
+	SellingClub          *apiref.ClubRef   `json:"selling_club"`
+	Fee                  int64             `json:"fee"`
+	WeeklyWage           int64             `json:"weekly_wage"`
+	ContractLengthMonths int               `json:"contract_length_months"`
+	SigningBonus         int64             `json:"signing_bonus,omitempty"`
+	ReleaseClause        *int64            `json:"release_clause,omitempty"`
+	Round                int               `json:"round"`
+	ProposedBy           string            `json:"proposed_by"` // buying_club | selling_club
+	Status               string            `json:"status"`
+	CreatedAt            time.Time         `json:"created_at"`
+	RespondedAt          *time.Time        `json:"responded_at,omitempty"`
 }
 
 // Bid status values (transfer.bids.status CHECK).
@@ -171,19 +178,22 @@ const (
 
 // CompletedTransfer is one executed permanent transfer.
 type CompletedTransfer struct {
-	ID             uuid.UUID `json:"id"`
-	WorldID        uuid.UUID `json:"world_id"`
-	BidID          uuid.UUID `json:"bid_id"`
-	PlayerID       uuid.UUID `json:"player_id"`
-	PlayerName     string    `json:"player_name"`
-	FromClubID     uuid.UUID `json:"from_club_id"`
-	FromClubName   string    `json:"from_club_name"`
-	ToClubID       uuid.UUID `json:"to_club_id"`
-	ToClubName     string    `json:"to_club_name"`
-	Fee            int64     `json:"fee"`
-	Clauses        []Clause  `json:"clauses,omitempty"`
-	RelatedEventID uuid.UUID `json:"related_event_id"`
-	CompletedAt    time.Time `json:"completed_at"`
+	ID             uuid.UUID         `json:"id"`
+	WorldID        uuid.UUID         `json:"world_id"`
+	BidID          uuid.UUID         `json:"bid_id"`
+	PlayerID       uuid.UUID         `json:"-"`
+	PlayerName     string            `json:"-"`
+	Player         *apiref.PlayerRef `json:"player"`
+	FromClubID     uuid.UUID         `json:"-"`
+	FromClubName   string            `json:"-"`
+	FromClub       *apiref.ClubRef   `json:"from_club"`
+	ToClubID       uuid.UUID         `json:"-"`
+	ToClubName     string            `json:"-"`
+	ToClub         *apiref.ClubRef   `json:"to_club"`
+	Fee            int64             `json:"fee"`
+	Clauses        []Clause          `json:"clauses,omitempty"`
+	RelatedEventID uuid.UUID         `json:"related_event_id"`
+	CompletedAt    time.Time         `json:"completed_at"`
 }
 
 // BidInput is the payload of POST /api/transfers/bids. A bid targets either a

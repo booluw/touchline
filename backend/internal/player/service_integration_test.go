@@ -143,13 +143,16 @@ func TestRecordMatchAppearancesInsideTx(t *testing.T) {
 	}
 	var found bool
 	for _, r := range rows {
-		if r.PlayerID == pid {
+		if r.Player != nil && r.Player.ID == pid {
 			found = true
 			if r.SquadRole != player.SquadRoleKeyPlayer {
 				t.Errorf("row role = %q, want key_player", r.SquadRole)
 			}
 			if r.Morale != morale {
 				t.Errorf("row morale = %v, want %v", r.Morale, morale)
+			}
+			if r.Player.Name == "" {
+				t.Errorf("row player ref name empty")
 			}
 		}
 	}

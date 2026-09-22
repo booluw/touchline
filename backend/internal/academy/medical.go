@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/touchline/backend/internal/finance"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/explanation"
 )
 
@@ -33,10 +34,12 @@ const (
 )
 
 // MedicalFacility is the read shape for GET /api/clubs/:id/medical-facility.
+// The club id stays internal; the wire carries a nested club ref.
 type MedicalFacility struct {
-	ClubID     uuid.UUID  `json:"club_id"`
-	Level      int        `json:"level"`
-	UpgradedAt *time.Time `json:"upgraded_at,omitempty"`
+	ClubID     uuid.UUID       `json:"-"`
+	Club       *apiref.ClubRef `json:"club"`
+	Level      int             `json:"level"`
+	UpgradedAt *time.Time      `json:"upgraded_at,omitempty"`
 }
 
 var ErrMedicalMaxLevel = errors.New("academy: medical facility already at maximum level")
@@ -75,13 +78,24 @@ func (s *Service) GetMedicalFacility(ctx context.Context, clubID uuid.UUID) (Med
 		SELECT level, upgraded_at FROM club.facilities
 		WHERE club_id = $1 AND facility_type = 'medical'`, clubID).Scan(&level, &upgradedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return MedicalFacility{ClubID: clubID, Level: MedicalNeutralLevel}, nil
+		return s.medicalView(ctx, clubID, MedicalNeutralLevel, nil)
 	}
 	if err != nil {
 		return MedicalFacility{}, fmt.Errorf("get medical facility: %w", err)
 	}
 	t := upgradedAt
-	return MedicalFacility{ClubID: clubID, Level: level, UpgradedAt: &t}, nil
+	return s.medicalView(ctx, clubID, level, &t)
+}
+
+// medicalView builds a MedicalFacility with its nested club ref resolved.
+func (s *Service) medicalView(ctx context.Context, clubID uuid.UUID, level int, upgradedAt *time.Time) (MedicalFacility, error) {
+	m := MedicalFacility{ClubID: clubID, Level: level, UpgradedAt: upgradedAt}
+	var name string
+	if err := s.pool.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1`, clubID).Scan(&name); err != nil {
+		return MedicalFacility{}, fmt.Errorf("medical facility: club name: %w", err)
+	}
+	m.Club = &apiref.ClubRef{ID: clubID, Name: name}
+	return m, nil
 }
 
 // UpgradeMedical raises a club's medical facility one level on behalf of its
@@ -123,7 +137,12 @@ func (s *Service) UpgradeMedical(ctx context.Context, managerID, clubID uuid.UUI
 		return MedicalFacility{}, fmt.Errorf("upgrade medical: lock: %w", err)
 	}
 	if from >= MedicalMaxLevel {
-		return MedicalFacility{ClubID: clubID, Level: from, UpgradedAt: cur.UpgradedAt}, tx.Commit(ctx)
+		v, err := s.medicalView(ctx, clubID, from, cur.UpgradedAt)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return MedicalFacility{}, err
+		}
+		return v, tx.Commit(ctx)
 	}
 	to := from + 1
 
@@ -163,5 +182,5 @@ func (s *Service) UpgradeMedical(ctx context.Context, managerID, clubID uuid.UUI
 		return MedicalFacility{}, fmt.Errorf("upgrade medical: commit: %w", err)
 	}
 	now := time.Now().UTC()
-	return MedicalFacility{ClubID: clubID, Level: to, UpgradedAt: &now}, nil
+	return s.medicalView(ctx, clubID, to, &now)
 }

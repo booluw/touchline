@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // dbtx is satisfied by both *pgxpool.Pool and pgx.Tx so store queries can run
@@ -159,7 +161,8 @@ func squadRows(ctx context.Context, q dbtx, clubID uuid.UUID) ([]PlayerMoraleRow
 	var out []PlayerMoraleRow
 	for rows.Next() {
 		var r PlayerMoraleRow
-		if err := rows.Scan(&r.PlayerID, &r.FirstName, &r.LastName, &r.DisplayName,
+		r.Player = &apiref.PlayerRef{}
+		if err := rows.Scan(&r.Player.ID, &r.FirstName, &r.LastName, &r.Player.Name,
 			&r.Position, &r.SquadNumber, &r.SquadRole, &r.Morale, &r.PlayingTimePct); err != nil {
 			return nil, err
 		}
@@ -189,6 +192,117 @@ func relationshipEvents(ctx context.Context, q dbtx, playerID uuid.UUID) ([]Rela
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// decorateRequestRefs resolves the nested player + club + manager refs of one
+// or more transfer requests for the wire (names come from person, club and
+// manager rows). The flat PlayerID/ClubID/ManagerID fields stay authoritative
+// for engine logic; the refs are the display form. Batches the name lookups
+// across all requests.
+func decorateRequestRefs(ctx context.Context, q dbtx, reqs ...*TransferRequest) error {
+	playerIDs := make([]uuid.UUID, 0, len(reqs))
+	clubIDs := make([]uuid.UUID, 0, len(reqs))
+	managerIDs := make([]uuid.UUID, 0, len(reqs))
+	for _, r := range reqs {
+		if r == nil {
+			continue
+		}
+		if r.PlayerID != uuid.Nil {
+			playerIDs = append(playerIDs, r.PlayerID)
+		}
+		if r.ClubID != uuid.Nil {
+			clubIDs = append(clubIDs, r.ClubID)
+		}
+		if r.ManagerID != uuid.Nil {
+			managerIDs = append(managerIDs, r.ManagerID)
+		}
+	}
+	if len(playerIDs) > 0 {
+		rows, err := q.Query(ctx, `
+			SELECT p.id, pe.display_name
+			FROM player.players p JOIN person.people pe ON pe.id = p.person_id
+			WHERE p.id = ANY($1::uuid[])`, playerIDs)
+		if err != nil {
+			return err
+		}
+		names := make(map[uuid.UUID]string, len(playerIDs))
+		for rows.Next() {
+			var id uuid.UUID
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return err
+			}
+			names[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, r := range reqs {
+			if r != nil && r.PlayerID != uuid.Nil {
+				r.Player = &apiref.PlayerRef{ID: r.PlayerID, Name: names[r.PlayerID]}
+			}
+		}
+	}
+	if len(clubIDs) > 0 {
+		rows, err := q.Query(ctx,
+			`SELECT id, name FROM club.clubs WHERE id = ANY($1::uuid[])`, clubIDs)
+		if err != nil {
+			return err
+		}
+		names := make(map[uuid.UUID]string, len(clubIDs))
+		for rows.Next() {
+			var id uuid.UUID
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return err
+			}
+			names[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, r := range reqs {
+			if r != nil && r.ClubID != uuid.Nil {
+				r.Club = &apiref.ClubRef{ID: r.ClubID, Name: names[r.ClubID]}
+			}
+		}
+	}
+	if len(managerIDs) > 0 {
+		rows, err := q.Query(ctx, `
+			SELECT m.id, COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), '')
+			FROM manager.managers m LEFT JOIN person.people p ON p.id = m.person_id
+			WHERE m.id = ANY($1::uuid[])`, managerIDs)
+		if err != nil {
+			return err
+		}
+		names := make(map[uuid.UUID]string, len(managerIDs))
+		for rows.Next() {
+			var id uuid.UUID
+			var name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return err
+			}
+			names[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, r := range reqs {
+			if r != nil && r.ManagerID != uuid.Nil {
+				r.Manager = &apiref.ManagerRef{ID: r.ManagerID, Name: names[r.ManagerID]}
+			}
+		}
+	}
+	return nil
 }
 
 // latestTransferRequest returns the most recent request for a player.
@@ -535,15 +649,24 @@ func openRequestsByClub(ctx context.Context, q dbtx, clubID uuid.UUID) ([]Transf
 
 // playerProfile returns a player's identity fields for the detail read.
 func playerProfile(ctx context.Context, q dbtx, playerID uuid.UUID) (p Player, err error) {
+	var clubName string
 	err = q.QueryRow(ctx, `
 		SELECT p.id, p.world_id, p.club_id, p.person_id, p.primary_position, p.squad_number,
-		       pe.first_name, pe.last_name, pe.display_name, pe.date_of_birth::text, pe.nationality_code
+		       pe.first_name, pe.last_name, pe.display_name, pe.date_of_birth::text, pe.nationality_code,
+		       cc.name
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
+		LEFT JOIN club.clubs cc ON cc.id = p.club_id
 		WHERE p.id = $1`, playerID,
 	).Scan(&p.ID, &p.WorldID, &p.ClubID, &p.PersonID, &p.PrimaryPosition, &p.SquadNumber,
-		&p.FirstName, &p.LastName, &p.DisplayName, &p.DateOfBirth, &p.Nationality)
-	return p, err
+		&p.FirstName, &p.LastName, &p.DisplayName, &p.DateOfBirth, &p.Nationality, &clubName)
+	if err != nil {
+		return p, err
+	}
+	if p.ClubID != nil && clubName != "" {
+		p.Club = &apiref.ClubRef{ID: *p.ClubID, Name: clubName}
+	}
+	return p, nil
 }
 
 func worldClubs(ctx context.Context, q dbtx, worldID uuid.UUID) ([]uuid.UUID, error) {

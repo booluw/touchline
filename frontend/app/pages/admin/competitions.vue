@@ -78,7 +78,7 @@ const leagueForm = ref({
   relegations: 1,
 })
 
-const countriesFor = (countryId: string) => leagues.value.filter((l) => l.country_id === countryId)
+const countriesFor = (countryId: string) => leagues.value.filter((l) => l.country.id === countryId)
 const leaguesOfCountry = computed(() => leagueForm.value.country_id ? countriesFor(leagueForm.value.country_id) : [])
 
 async function loadAll() {
@@ -123,8 +123,8 @@ async function doCreateLeague() {
 }
 async function doAdjacency(l: League, key: 'promotes_to' | 'relegates_to', value: string) {
   const patch = key === 'promotes_to'
-    ? { promotes_to: value || null, relegates_to: l.relegates_to }
-    : { promotes_to: l.promotes_to, relegates_to: value || null }
+    ? { promotes_to: value || null, relegates_to: l.relegates_to?.id ?? null }
+    : { promotes_to: l.promotes_to?.id ?? null, relegates_to: value || null }
   await call(async () => {
     await comp.updateAdjacency(l.id, patch)
     notice.value = `Adjacency updated for "${l.name}".`
@@ -266,14 +266,14 @@ async function doSeed(starterLeagueId: string) {
                   <td class="py-2 pr-3 font-medium text-white">{{ l.name }}</td>
                   <td class="py-2 pr-3">{{ l.team_count }}</td>
                   <td class="py-2 pr-3">
-                    <select :value="l.promotes_to ?? ''" @change="doAdjacency(l, 'promotes_to', (($event.target as HTMLSelectElement).value))"
+                    <select :value="l.promotes_to?.id ?? ''" @change="doAdjacency(l, 'promotes_to', (($event.target as HTMLSelectElement).value))"
                             class="bg-slate-900 border border-slate-600 rounded px-2 py-1 w-44">
                       <option value="">— none —</option>
                       <option v-for="t in leaguesOfCountry" :key="t.id" :value="t.id" :disabled="t.id === l.id">{{ t.name }}</option>
                     </select>
                   </td>
                   <td class="py-2 pr-3">
-                    <select :value="l.relegates_to ?? ''" @change="doAdjacency(l, 'relegates_to', (($event.target as HTMLSelectElement).value))"
+                    <select :value="l.relegates_to?.id ?? ''" @change="doAdjacency(l, 'relegates_to', (($event.target as HTMLSelectElement).value))"
                             class="bg-slate-900 border border-slate-600 rounded px-2 py-1 w-44">
                       <option value="">— none —</option>
                       <option v-for="t in leaguesOfCountry" :key="t.id" :value="t.id" :disabled="t.id === l.id">{{ t.name }}</option>

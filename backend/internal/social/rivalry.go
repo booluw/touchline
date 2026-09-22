@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/realtime"
 )
@@ -59,35 +60,41 @@ const (
 
 // ChangedEdge is one relationship-graph edge created or updated by a completed
 // fixture. It is the unit pushed on realtime.EventRelationshipChange and
-// recorded in the RELATIONSHIP_CHANGED outbox event. Trust/sentiment are
-// deliberately zero for rivalry edges: trust lives on social.trust_events and
-// sentiment belongs to the player↔manager axis.
+// recorded in the RELATIONSHIP_CHANGED outbox event. Flat ids stay internal;
+// the wire carries nested entity refs. Trust/sentiment are deliberately zero
+// for rivalry edges: trust lives on social.trust_events and sentiment belongs
+// to the player↔manager axis.
 type ChangedEdge struct {
-	EntityAType      string    `json:"entity_a_type"`
-	EntityAID        uuid.UUID `json:"entity_a_id"`
-	EntityBType      string    `json:"entity_b_type"`
-	EntityBID        uuid.UUID `json:"entity_b_id"`
-	RelationshipType string    `json:"relationship_type"`
-	Strength         int       `json:"strength"`
-	Trust            int       `json:"trust"`
-	Sentiment        int       `json:"sentiment"`
+	EntityAType      string            `json:"-"`
+	EntityAID        uuid.UUID         `json:"-"`
+	EntityBType      string            `json:"-"`
+	EntityBID        uuid.UUID         `json:"-"`
+	EntityA          *apiref.EntityRef `json:"entity_a"`
+	EntityB          *apiref.EntityRef `json:"entity_b"`
+	RelationshipType string            `json:"relationship_type"`
+	Strength         int               `json:"strength"`
+	Trust            int               `json:"trust"`
+	Sentiment        int               `json:"sentiment"`
 }
 
 // RelationshipPush is the payload shared by the RELATIONSHIP_CHANGED outbox
 // event and the realtime envelope: the fixture pair plus every edge it moved.
 type RelationshipPush struct {
-	WorldID    uuid.UUID     `json:"world_id"`
-	FixtureID  uuid.UUID     `json:"fixture_id"`
-	HomeClubID uuid.UUID     `json:"home_club_id"`
-	AwayClubID uuid.UUID     `json:"away_club_id"`
-	Edges      []ChangedEdge `json:"edges"`
+	WorldID   uuid.UUID       `json:"world_id"`
+	FixtureID uuid.UUID       `json:"fixture_id"`
+	HomeClub  *apiref.ClubRef `json:"home_club"`
+	AwayClub  *apiref.ClubRef `json:"away_club"`
+	Edges     []ChangedEdge   `json:"edges"`
 }
 
 // clubMatchContext is the fixture-side resolution needed to grow edges: the
-// club's country (big-match predicate) and its current manager's bot flag.
+// club's country (big-match predicate) and name, plus its current manager's
+// identity and bot flag.
 type clubMatchContext struct {
 	country      string
+	clubName     string
 	managerID    *uuid.UUID
+	managerName  string
 	managerIsBot bool
 }
 
@@ -128,6 +135,7 @@ func (s *Service) recordCompletedMatch(ctx context.Context, tx pgx.Tx, worldID, 
 	if err != nil {
 		return nil, fmt.Errorf("recorded match: club edge: %w", err)
 	}
+	clubEdge.EntityA, clubEdge.EntityB = edgeRefPair(homeClubID, awayClubID, home.clubName, away.clubName, "club")
 	edges := []ChangedEdge{clubEdge}
 
 	if home.managerID != nil && away.managerID != nil && !home.managerIsBot && !away.managerIsBot {
@@ -135,15 +143,16 @@ func (s *Service) recordCompletedMatch(ctx context.Context, tx pgx.Tx, worldID, 
 		if err != nil {
 			return nil, fmt.Errorf("recorded match: manager edge: %w", err)
 		}
+		managerEdge.EntityA, managerEdge.EntityB = edgeRefPair(*home.managerID, *away.managerID, home.managerName, away.managerName, "manager")
 		edges = append(edges, managerEdge)
 	}
 
 	push := &RelationshipPush{
-		WorldID:    worldID,
-		FixtureID:  fixtureID,
-		HomeClubID: homeClubID,
-		AwayClubID: awayClubID,
-		Edges:      edges,
+		WorldID:   worldID,
+		FixtureID: fixtureID,
+		HomeClub:  &apiref.ClubRef{ID: homeClubID, Name: home.clubName},
+		AwayClub:  &apiref.ClubRef{ID: awayClubID, Name: away.clubName},
+		Edges:     edges,
 	}
 	payload, err := json.Marshal(push)
 	if err != nil {
@@ -166,20 +175,32 @@ func (s *Service) recordCompletedMatch(ctx context.Context, tx pgx.Tx, worldID, 
 	return push, nil
 }
 
-// clubMatchContext resolves one fixture club's country and current manager
-// human/bot flag. A club with no current manager never gets a personal edge.
+// clubMatchContext resolves one fixture club's country, name and current
+// manager identity/human flag. A club with no current manager never gets a
+// personal edge.
 func (s *Service) clubMatchContext(ctx context.Context, tx pgx.Tx, clubID uuid.UUID) (clubMatchContext, error) {
 	var c clubMatchContext
 	err := tx.QueryRow(ctx, `
-		SELECT c.country, c.current_manager_id, COALESCE(m.is_policy_bot, TRUE)
+		SELECT c.country, c.name, c.current_manager_id, COALESCE(m.is_policy_bot, TRUE),
+		       COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), '')
 		FROM club.clubs c
 		LEFT JOIN manager.managers m ON m.id = c.current_manager_id
+		LEFT JOIN person.people p ON p.id = m.person_id
 		WHERE c.id = $1`, clubID,
-	).Scan(&c.country, &c.managerID, &c.managerIsBot)
+	).Scan(&c.country, &c.clubName, &c.managerID, &c.managerIsBot, &c.managerName)
 	if err != nil {
 		return c, err
 	}
 	return c, nil
+}
+
+// edgeRefPair renders the canonical (>entity A) side identities of an edge in
+// ref form, matching upsertRivalryEdge's canonical orientation.
+func edgeRefPair(a, b uuid.UUID, aName, bName, typ string) (*apiref.EntityRef, *apiref.EntityRef) {
+	if bytes.Compare(a[:], b[:]) <= 0 {
+		return &apiref.EntityRef{ID: a, Name: aName, Type: typ}, &apiref.EntityRef{ID: b, Name: bName, Type: typ}
+	}
+	return &apiref.EntityRef{ID: b, Name: bName, Type: typ}, &apiref.EntityRef{ID: a, Name: aName, Type: typ}
 }
 
 // isLeagueFixture reports whether the fixture belongs to a league competition.

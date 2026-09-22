@@ -15,21 +15,22 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/touchline/backend/internal/injury"
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // PlayerInjury is the read shape for one open injury with the recovery
 // progress derived at read time (elapsed / planned window), never stored.
 type PlayerInjury struct {
-	InjuryID         uuid.UUID  `json:"injury_id"`
-	PlayerID         uuid.UUID  `json:"player_id"`
-	InjuryType       string     `json:"injury_type"`
-	Severity         int        `json:"severity"`
-	OccurredAt       time.Time  `json:"occurred_at"`
-	ExpectedRecovery time.Time  `json:"expected_recovery_date"`
-	RecurrenceRisk   float64    `json:"recurrence_risk"`
-	RecoveryProgress float64    `json:"recovery_progress"`
-	DaysRemaining    int        `json:"days_remaining"`
-	ActualRecovery   *time.Time `json:"actual_recovery_date,omitempty"`
+	InjuryID         uuid.UUID         `json:"injury_id"`
+	Player           *apiref.PlayerRef `json:"player"`
+	InjuryType       string            `json:"injury_type"`
+	Severity         int               `json:"severity"`
+	OccurredAt       time.Time         `json:"occurred_at"`
+	ExpectedRecovery time.Time         `json:"expected_recovery_date"`
+	RecurrenceRisk   float64           `json:"recurrence_risk"`
+	RecoveryProgress float64           `json:"recovery_progress"`
+	DaysRemaining    int               `json:"days_remaining"`
+	ActualRecovery   *time.Time        `json:"actual_recovery_date,omitempty"`
 }
 
 // ErrNoOpenInjury surfaces when a player has no injury to rush back from.
@@ -109,10 +110,13 @@ func (s *Service) RushReturn(ctx context.Context, worldID, managerID, playerID u
 	var v PlayerInjury
 	var actual time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT id, player_id, injury_type, severity, occurred_at, expected_recovery_date,
-		       recurrence_risk::float8, actual_recovery_date
-		FROM player.injuries WHERE id = $1`, injuryID).
-		Scan(&v.InjuryID, &v.PlayerID, &v.InjuryType, &v.Severity, &v.OccurredAt,
+		SELECT i.id, i.player_id, pe.display_name, i.injury_type, i.severity, i.occurred_at,
+		       i.expected_recovery_date, i.recurrence_risk::float8, i.actual_recovery_date
+		FROM player.injuries i
+		JOIN player.players p ON p.id = i.player_id
+		JOIN person.people pe ON pe.id = p.person_id
+		WHERE i.id = $1`, injuryID).
+		Scan(&v.InjuryID, &v.Player.ID, &v.Player.Name, &v.InjuryType, &v.Severity, &v.OccurredAt,
 			&v.ExpectedRecovery, &v.RecurrenceRisk, &actual)
 	if err != nil {
 		return nil, fmt.Errorf("rush return: reload: %w", err)
@@ -130,12 +134,14 @@ func (s *Service) RushReturn(ctx context.Context, worldID, managerID, playerID u
 func (s *Service) loadInjury(ctx context.Context, playerID uuid.UUID) (*PlayerInjury, error) {
 	var v PlayerInjury
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, player_id, injury_type, severity, occurred_at, expected_recovery_date,
-		       recurrence_risk::float8
-		FROM player.injuries
-		WHERE player_id = $1 AND actual_recovery_date IS NULL
-		ORDER BY occurred_at DESC LIMIT 1`, playerID).
-		Scan(&v.InjuryID, &v.PlayerID, &v.InjuryType, &v.Severity, &v.OccurredAt,
+		SELECT i.id, i.player_id, pe.display_name, i.injury_type, i.severity, i.occurred_at, i.expected_recovery_date,
+		       i.recurrence_risk::float8
+		FROM player.injuries i
+		JOIN player.players p ON p.id = i.player_id
+		JOIN person.people pe ON pe.id = p.person_id
+		WHERE i.player_id = $1 AND i.actual_recovery_date IS NULL
+		ORDER BY i.occurred_at DESC LIMIT 1`, playerID).
+		Scan(&v.InjuryID, &v.Player.ID, &v.Player.Name, &v.InjuryType, &v.Severity, &v.OccurredAt,
 			&v.ExpectedRecovery, &v.RecurrenceRisk)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

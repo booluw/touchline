@@ -495,7 +495,10 @@ paths:
                   value:
                     slots:
                       - slot: 0
-                        player_id: 00000000-0000-4000-8000-00000000000b
+                        position: GK
+                        player:
+                          id: 00000000-0000-4000-8000-00000000000b
+                          name: Jordan Ashworth
     put:
       tags: [clubs]
       summary: Set the club's lineup
@@ -2844,7 +2847,7 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/CompetitionSummary" }
+                items: { $ref: "#/components/schemas/League" }
   /api/competitions/{id}:
     get:
       tags: [competition]
@@ -2858,7 +2861,7 @@ paths:
           description: Competition with season state.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/CompetitionDetail" }
+              schema: { $ref: "#/components/schemas/League" }
         "404":
           description: Not found in the caller's world.
           content:
@@ -2885,11 +2888,9 @@ paths:
                   value:
                     - id: 00000000-0000-4000-8000-000000000007
                       world_id: 00000000-0000-4000-8000-000000000001
-                      competition_id: 00000000-0000-4000-8000-00000000000a
-                      home_club_id: 00000000-0000-4000-8000-000000000005
-                      home_club_name: Northgate Rovers
-                      away_club_id: 00000000-0000-4000-8000-000000000014
-                      away_club_name: Highfield United
+                      competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                      home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                      away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
                       matchday: 1
                       scheduled_at: "2026-06-07T19:00:00Z"
                       status: scheduled
@@ -2909,13 +2910,10 @@ paths:
               examples:
                 sample:
                   value:
-                    season_id: 00000000-0000-4000-8000-00000000000a
-                    season_label: 2026-27
-                    season_number: 1
-                    status: active
+                    season: { id: 00000000-0000-4000-8000-00000000000a, label: "2026-27", number: 1, status: active }
                     rows:
-                      - { club_name: Northgate Rovers, club_short: NGR, played: 12, won: 8, drawn: 3, lost: 1, goals_for: 27, goals_against: 9, points: 27 }
-                      - { club_name: Highfield United, club_short: HFU, played: 12, won: 7, drawn: 4, lost: 1, goals_for: 24, goals_against: 11, points: 25 }
+                      - { club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }, played: 12, won: 8, drawn: 3, lost: 1, goals_for: 27, goals_against: 9, points: 27 }
+                      - { club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }, played: 12, won: 7, drawn: 4, lost: 1, goals_for: 24, goals_against: 11, points: 25 }
   /api/fixtures/{id}:
     get:
       tags: [match]
@@ -2936,11 +2934,9 @@ paths:
                     fixture:
                       id: 00000000-0000-4000-8000-000000000007
                       world_id: 00000000-0000-4000-8000-000000000001
-                      competition_id: 00000000-0000-4000-8000-00000000000a
-                      home_club_id: 00000000-0000-4000-8000-000000000005
-                      home_club_name: Northgate Rovers
-                      away_club_id: 00000000-0000-4000-8000-000000000014
-                      away_club_name: Highfield United
+                      competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                      home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                      away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
                       matchday: 1
                       scheduled_at: "2026-06-07T19:00:00Z"
                       status: scheduled
@@ -2973,11 +2969,11 @@ paths:
                   value:
                     events:
                       - id: 00000000-0000-4000-8000-000000000015
-                        match_id: 00000000-0000-4000-8000-000000000008
+                        match: { id: 00000000-0000-4000-8000-000000000008 }
                         sequence: 1
                         minute: 1
                         type: MATCH_START
-                        data:
+                        detail:
                           home_score: 0
                           away_score: 0
         "404":
@@ -3135,10 +3131,10 @@ components:
         status: { type: string, example: ok }
     Mandate:
       type: object
-      description: One structured board target for a (club, manager, season).
+      description: One structured board target for a (club, manager, season). The club nests as a ref; manager_id stays flat (subject identity).
       properties:
         id: { type: string, format: uuid }
-        club_id: { type: string, format: uuid }
+        club: { $ref: "#/components/schemas/ClubRef" }
         manager_id: { type: string, format: uuid }
         season: { type: integer }
         category: { type: string, enum: [primary, secondary, strategic, financial] }
@@ -3150,10 +3146,10 @@ components:
         resolved_at: { type: string, format: date-time, nullable: true }
     BoardSnapshot:
       type: object
-      description: The latest job-security factor snapshot (0-100 each).
+      description: The latest job-security factor snapshot (0-100 each). The club nests as a ref; manager_id stays flat.
       properties:
         manager_id: { type: string, format: uuid }
-        club_id: { type: string, format: uuid }
+        club: { $ref: "#/components/schemas/ClubRef" }
         world_tick: { type: integer }
         scores:
           type: object
@@ -3190,10 +3186,9 @@ components:
       type: object
       description: One roster player's morale/role/playing-time read model (S06-03).
       properties:
-        player_id: { type: string, format: uuid }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         first_name: { type: string }
         last_name: { type: string }
-        display_name: { type: string }
         position: { type: string }
         squad_role: { type: string, enum: [key_player, rotation, squad_player, development] }
         morale: { type: number, format: float }
@@ -3204,10 +3199,9 @@ components:
       type: object
       description: One player's full morale picture with the "why" (S06-03).
       properties:
-        player_id: { type: string, format: uuid }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         first_name: { type: string }
         last_name: { type: string }
-        display_name: { type: string }
         position: { type: string }
         squad_role: { type: string, enum: [key_player, rotation, squad_player, development] }
         morale: { type: number, format: float }
@@ -3242,10 +3236,9 @@ components:
       type: object
       description: "One player's observable S08-02 development read model. Trajectory and stored drivers only; the hidden potential ceiling / expansion budget / lock state are never surfaced."
       properties:
-        player_id: { type: string, format: uuid }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         first_name: { type: string }
         last_name: { type: string }
-        display_name: { type: string }
         position: { type: string }
         last_eval_week: { type: integer, format: int64, description: Most recent weekly tick the development pass evaluated this player (0 = never). }
         cum_dev_weeks: { type: integer, description: Cumulative weeks evaluated. }
@@ -3272,7 +3265,7 @@ components:
       nullable: true
       properties:
         injury_id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         injury_type: { type: string, enum: [muscle, ligament, bone, concussion, illness, recurring] }
         severity: { type: integer, minimum: 1, maximum: 10 }
         occurred_at: { type: string, format: date-time }
@@ -3317,7 +3310,7 @@ components:
         world_id: { type: string, format: uuid }
         name: { type: string }
         short_name: { type: string }
-        country: { type: string }
+        country: { $ref: "#/components/schemas/NestedCountry" }
         is_ai_controlled: { type: boolean }
         manager:
           type: object
@@ -3336,8 +3329,7 @@ components:
         first_name: { type: string }
         last_name: { type: string }
         display_name: { type: string }
-        nationality_code: { type: string }
-        nationality_name: { type: string }
+        nationality: { $ref: "#/components/schemas/NestedCountry" }
         date_of_birth: { type: string, format: date-time }
         age: { type: integer }
         primary_position: { type: string }
@@ -3345,20 +3337,7 @@ components:
     Lineup:
       type: object
       properties:
-        slots:
-          type: array
-          items:
-            type: object
-            properties:
-              slot: { type: integer }
-              player_id: { type: string, format: uuid, nullable: true }
-    Tactics:
-      type: object
-      properties:
-        club_id: { type: string, format: uuid }
-        style: { type: string }
-        formation: { type: string }
-        allowed_formations: { type: array, items: { type: string } }
+        club: { $ref: "#/components/schemas/ClubRef" }
         slots:
           type: array
           items:
@@ -3366,18 +3345,30 @@ components:
             properties:
               slot: { type: integer }
               position: { type: string }
-              player_id: { type: string, format: uuid }
+              player:
+                allOf: [{ $ref: "#/components/schemas/NestedPlayer" }]
+                nullable: true
+                description: Null when the slot is empty.
+    Tactics:
+      type: object
+      properties:
+        club: { $ref: "#/components/schemas/ClubRef" }
+        style: { type: string }
+        formation: { type: string }
+        allowed_formations: { type: array, items: { type: string } }
+        updated_at: { type: string, format: date-time, nullable: true }
     TrainingPlan:
       type: object
       properties:
-        club_id: { type: string, format: uuid }
+        club: { $ref: "#/components/schemas/ClubRef" }
         archetype: { type: string }
         effective_from_tick: { type: integer }
         last_applied_week: { type: integer, nullable: true }
+        updated_at: { type: string, format: date-time, nullable: true }
     Academy:
       type: object
       properties:
-        club_id: { type: string, format: uuid }
+        club: { $ref: "#/components/schemas/ClubRef" }
         world_id: { type: string, format: uuid }
         is_active: { type: boolean }
         investment_tier: { type: integer, minimum: 1, maximum: 5 }
@@ -3386,20 +3377,24 @@ components:
         staff_quality: { type: integer }
         annual_cost: { type: integer, format: int64 }
         reputation: { type: integer }
+        regional_reach:
+          type: array
+          items: { type: string }
         last_intake_season: { type: integer, nullable: true }
-        updated_at: { type: string, format: date-time }
+        shutdown_at: { type: string, format: date-time, nullable: true }
+        reopened_at: { type: string, format: date-time, nullable: true }
     MedicalFacility:
       type: object
       description: "A club's medical-staff level 1..10 (S08-03). Clubs without a medical row read as the neutral level 5."
       properties:
-        club_id: { type: string, format: uuid }
+        club: { $ref: "#/components/schemas/ClubRef" }
         level: { type: integer, minimum: 1, maximum: 10 }
         upgraded_at: { type: string, format: date-time, nullable: true, description: Null before the club ever upgrades. }
     SquadDynamics:
       type: object
       description: "Computed dressing-room dynamics (S09-02), derived from the player↔player social graph at read time."
       properties:
-        club_id: { type: string, format: uuid }
+        club: { $ref: "#/components/schemas/ClubRef" }
         action:
           type: string
           enum: [inspect, missed_promise, dropped_from_starting_xi, benched_long_term, wage_cut_offered, contract_approved, transfer_bid_query, transfer_bid_blocked, released_from_squad, training_load_increased, team_talk_motivational, team_talk_critical]
@@ -3424,27 +3419,26 @@ components:
     SquadTier:
       type: object
       properties:
-        player_id: { type: string, format: uuid }
-        name: { type: string }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         tier: { type: string, enum: [team_leader, highly_influential, influential, other] }
     Faction:
       type: object
       properties:
         label: { type: string, enum: [veteran_core, foreign_cohort, youth_alliance, neutral_room] }
-        leader_id: { type: string, format: uuid }
+        leader: { $ref: "#/components/schemas/NestedPlayer" }
         members:
           type: array
-          items: { type: string, format: uuid }
+          items: { $ref: "#/components/schemas/NestedPlayer" }
         cohesion: { type: integer, minimum: 10, maximum: 95 }
         explanation: { $ref: "#/components/schemas/Explanation" }
     Contagion:
       type: object
       properties:
-        source: { type: string, format: uuid }
+        source: { $ref: "#/components/schemas/NestedPlayer" }
         confidence: { type: integer, minimum: 0, maximum: 84 }
         affected:
           type: array
-          items: { type: string, format: uuid }
+          items: { $ref: "#/components/schemas/NestedPlayer" }
         explanation: { $ref: "#/components/schemas/Explanation" }
     SquadUnrest:
       type: object
@@ -3453,7 +3447,7 @@ components:
         demand: { type: string, enum: [board_meeting, en_masse_transfer_requests] }
         affected:
           type: array
-          items: { type: string, format: uuid }
+          items: { $ref: "#/components/schemas/NestedPlayer" }
         explanation: { $ref: "#/components/schemas/Explanation" }
     AcademyUpdateRequest:
       type: object
@@ -3508,8 +3502,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
-        player_name: { type: string }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         weekly_wage: { type: integer, format: int64 }
         signing_bonus: { type: integer, format: int64 }
         start_date: { type: string, format: date }
@@ -3580,13 +3573,11 @@ components:
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
-        player_name: { type: string }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         position: { type: string }
         age: { type: integer }
         market_value: { type: integer, format: int64 }
-        listing_club_id: { type: string, format: uuid }
-        listing_club_name: { type: string }
+        listing_club: { $ref: "#/components/schemas/NestedClub" }
         asking_price: { type: integer, format: int64, nullable: true }
         listing_type: { type: string, enum: [open_to_offers, actively_shopped, loan_available] }
         status: { type: string, enum: [active, withdrawn, completed, expired] }
@@ -3625,12 +3616,9 @@ components:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
         listing_id: { type: string, format: uuid, nullable: true }
-        player_id: { type: string, format: uuid }
-        player_name: { type: string }
-        bidding_club_id: { type: string, format: uuid }
-        bidding_club_name: { type: string }
-        selling_club_id: { type: string, format: uuid }
-        selling_club_name: { type: string }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        bidding_club: { $ref: "#/components/schemas/NestedClub" }
+        selling_club: { $ref: "#/components/schemas/NestedClub" }
         fee: { type: integer, format: int64 }
         weekly_wage: { type: integer, format: int64 }
         contract_length_months: { type: integer }
@@ -3669,16 +3657,16 @@ components:
         clause_type: { type: string, enum: [sell_on, buy_back] }
         percentage: { type: integer, nullable: true }
         amount: { type: integer, format: int64, nullable: true }
-        beneficiary_club_id: { type: string, format: uuid, nullable: true }
+        beneficiary_club: { $ref: "#/components/schemas/NestedClub" }
     CompletedTransfer:
       type: object
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
         bid_id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
-        from_club_id: { type: string, format: uuid }
-        to_club_id: { type: string, format: uuid }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        from_club: { $ref: "#/components/schemas/NestedClub" }
+        to_club: { $ref: "#/components/schemas/NestedClub" }
         fee: { type: integer, format: int64 }
         clauses:
           type: array
@@ -3709,12 +3697,12 @@ components:
           allOf: [{ $ref: "#/components/schemas/Explanation" }]
     TransferRequest:
       type: object
-      description: A player's open (or resolved) request to leave the club.
+      description: A player's open (or resolved) request to leave the club. The manager id stays flat as the subject identity.
       properties:
         id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
-        club_id: { type: string, format: uuid }
-        manager_id: { type: string, format: uuid }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        club: { $ref: "#/components/schemas/NestedClub" }
+        manager: { $ref: "#/components/schemas/NestedManager" }
         reason: { type: string, example: playing_time }
         status: { type: string, enum: [pending, approved, denied, withdrawn, auto_listed, reassured] }
         created_at: { type: string, format: date-time }
@@ -3726,9 +3714,8 @@ components:
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        club_id: { type: string, format: uuid }
-        club_name: { type: string }
-        manager_id: { type: string, format: uuid }
+        club: { $ref: "#/components/schemas/NestedClub" }
+        manager: { $ref: "#/components/schemas/NestedManager" }
         status: { type: string, enum: [pending, accepted, declined, withdrawn] }
         created_at: { type: string, format: date-time }
     ManagerProfile:
@@ -3758,9 +3745,6 @@ components:
     InboxMessage:
       allOf:
         - $ref: "#/components/schemas/Message"
-        - type: object
-          properties:
-            sender_name: { type: string, description: Sender display name, empty for AI actors }
     SendMessageRequest:
       type: object
       required: [recipient_id, body]
@@ -3771,14 +3755,12 @@ components:
           description: Free text, sanitized server-side; max 2000 characters after stripping.
     Message:
       type: object
-      description: One direct message on social.messages.
+      description: One direct message on social.messages. Sender/recipient nest as entity refs (a system actor has no id or name).
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        sender_id: { type: string, format: uuid }
-        sender_type: { type: string, enum: [manager, system] }
-        recipient_id: { type: string, format: uuid }
-        recipient_type: { type: string, enum: [manager, system] }
+        sender: { $ref: "#/components/schemas/EntityRef" }
+        recipient: { $ref: "#/components/schemas/EntityRef" }
         subject: { type: string, nullable: true }
         body: { type: string }
         sent_at: { type: string, format: date-time }
@@ -3788,7 +3770,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        country: { type: string }
+        short: { type: string }
     CareerSummary:
       type: object
       properties:
@@ -3819,9 +3801,7 @@ components:
       type: object
       properties:
         relationship_type: { type: string, example: rivalry }
-        entity_type: { type: string, enum: [manager, club] }
-        entity_id: { type: string, format: uuid }
-        entity_name: { type: string }
+        entity: { $ref: "#/components/schemas/EntityRef" }
         strength: { type: integer }
         trust: { type: integer }
         sentiment: { type: integer }
@@ -3832,16 +3812,7 @@ components:
         relationship_type:
           type: string
           example: rivalry
-        entity_type:
-          type: string
-          enum: [manager, club]
-          description: The peer attached to the caller's side
-        entity_id:
-          type: string
-          format: uuid
-        entity_name:
-          type: string
-          description: Peer display name (empty for personless AI actors)
+        entity: { $ref: "#/components/schemas/EntityRef" }
         strength:
           type: integer
           description: Accumulated rivalry strength (clamped to -100..100)
@@ -3858,20 +3829,78 @@ components:
         edges:
           type: array
           items: { $ref: "#/components/schemas/RelationshipEdge" }
+    NestedClub:
+      type: object
+      description: Nested club reference on competition/match payloads that join club.clubs.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        short: { type: string }
+    NestedCountry:
+      type: object
+      description: Nested country reference on payloads that join world.countries.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        code: { type: string }
+    NestedCompetition:
+      type: object
+      description: Nested competition reference on payloads that join competition.competitions.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    NestedLeague:
+      type: object
+      description: Nested league (competition) reference for adjacency links.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    NestedPlayer:
+      type: object
+      description: Nested player reference on payloads that join player.players/person.people.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    NestedManager:
+      type: object
+      description: Nested manager reference on payloads that join manager.managers.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    EntityRef:
+      type: object
+      description: "Polymorphic graph identity (manager | club | player | system) nested in social payloads. type carries the discriminator; a system actor has neither an id nor a name."
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type: { type: string, enum: [manager, club, player, system] }
+    NestedMatch:
+      type: object
+      description: Nested match reference on match payloads.
+      properties:
+        id: { type: string, format: uuid }
+    NestedSeason:
+      type: object
+      description: Nested season reference on standings payloads.
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        number: { type: integer }
+        status: { type: string }
     League:
       type: object
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        country_id: { type: string, format: uuid }
+        country: { $ref: "#/components/schemas/NestedCountry" }
         name: { type: string }
         tier: { type: integer }
         team_count: { type: integer }
         status: { type: string }
         promotions: { type: integer }
         relegations: { type: integer }
-        promotes_to: { type: string, format: uuid, nullable: true }
-        relegates_to: { type: string, format: uuid, nullable: true }
+        promotes_to: { $ref: "#/components/schemas/NestedLeague" }
+        relegates_to: { $ref: "#/components/schemas/NestedLeague" }
     SeedResult:
       type: object
       properties:
@@ -3965,11 +3994,9 @@ components:
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        competition_id: { type: string, format: uuid }
-        home_club_id: { type: string, format: uuid }
-        home_club_name: { type: string }
-        away_club_id: { type: string, format: uuid }
-        away_club_name: { type: string }
+        competition: { $ref: "#/components/schemas/NestedCompetition" }
+        home_club: { $ref: "#/components/schemas/NestedClub" }
+        away_club: { $ref: "#/components/schemas/NestedClub" }
         matchday: { type: integer }
         scheduled_at: { type: string, format: date-time }
         status: { type: string, enum: [scheduled, running, finished] }
@@ -3978,18 +4005,14 @@ components:
     Standings:
       type: object
       properties:
-        season_id: { type: string, format: uuid }
-        season_label: { type: string }
-        season_number: { type: integer }
-        status: { type: string }
+        season: { $ref: "#/components/schemas/NestedSeason" }
         rows:
           type: array
           items: { $ref: "#/components/schemas/StandingRow" }
     StandingRow:
       type: object
       properties:
-        club_name: { type: string }
-        club_short: { type: string }
+        club: { $ref: "#/components/schemas/NestedClub" }
         played: { type: integer }
         won: { type: integer }
         drawn: { type: integer }
@@ -4014,11 +4037,14 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        match_id: { type: string, format: uuid }
+        match: { $ref: "#/components/schemas/NestedMatch" }
         sequence: { type: integer }
         minute: { type: integer }
         type: { type: string, example: MATCH_START }
-        data:
+        club: { $ref: "#/components/schemas/NestedClub" }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        related_player: { $ref: "#/components/schemas/NestedPlayer" }
+        detail:
           type: object
           additionalProperties: true
     Policy:
@@ -4036,9 +4062,9 @@ components:
         manager_id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
         absence_state: { $ref: "#/components/schemas/AbsenceState" }
-        club_ids:
+        clubs:
           type: array
-          items: { type: string, format: uuid }
+          items: { $ref: "#/components/schemas/ClubRef" }
         next_fixture_at: { type: string, format: date-time, nullable: true }
         delegation_active: { type: boolean }
     AbsenceState:
@@ -4173,8 +4199,9 @@ components:
         short_name: { type: string }
         is_ai_controlled: { type: boolean }
         tier: { type: integer }
-        league_id: { type: string, format: uuid, nullable: true }
-        league_name: { type: string }
+        league:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/NestedLeague" }]
         league_tier: { type: integer }
         squad_size: { type: integer }
         top_player_name: { type: string }
@@ -4244,10 +4271,9 @@ components:
       type: object
       properties:
         listing_id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
-        player_name: { type: string }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
         position: { type: string }
-        club_name: { type: string }
+        listing_club: { $ref: "#/components/schemas/NestedClub" }
         asking_price: { type: integer, format: int64, nullable: true }
         market_value: { type: integer, format: int64 }
         listing_type: { type: string, enum: [open_to_offers, actively_shopped, loan_available] }
@@ -4256,12 +4282,9 @@ components:
       type: object
       properties:
         bid_id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
-        player_name: { type: string }
-        bidding_club_id: { type: string, format: uuid }
-        bidding_club_name: { type: string }
-        selling_club_id: { type: string, format: uuid }
-        selling_club_name: { type: string }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        bidding_club: { $ref: "#/components/schemas/NestedClub" }
+        selling_club: { $ref: "#/components/schemas/NestedClub" }
         fee: { type: integer, format: int64 }
         status: { type: string, enum: [pending, countered] }
         created_at: { type: string, format: date-time }
@@ -4269,11 +4292,9 @@ components:
       type: object
       properties:
         transfer_id: { type: string, format: uuid }
-        player_id: { type: string, format: uuid }
-        player_name: { type: string }
-        from_club_id: { type: string, format: uuid, nullable: true }
-        from_club_name: { type: string }
-        to_club_name: { type: string }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        from_club: { $ref: "#/components/schemas/NestedClub" }
+        to_club: { $ref: "#/components/schemas/NestedClub" }
         fee: { type: integer, format: int64 }
         market_value: { type: integer, format: int64 }
         overpay: { type: boolean }

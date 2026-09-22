@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/squad"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
@@ -372,6 +373,9 @@ func (s *Service) Clubs(ctx context.Context, worldID, countryID uuid.UUID) (*Clu
 		if r.CrisisStage != nil && *r.CrisisStage == "" {
 			r.CrisisStage = nil
 		}
+		if r.LeagueID != nil {
+			r.League = &apiref.LeagueRef{ID: *r.LeagueID, Name: r.LeagueName}
+		}
 		panel.Clubs = append(panel.Clubs, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -638,7 +642,7 @@ func (s *Service) Market(ctx context.Context, worldID, countryID uuid.UUID, wind
 func (s *Service) openListings(ctx context.Context, worldID uuid.UUID, clubIDs []uuid.UUID) []ListingRow {
 	rows, err := s.pool.Query(ctx, `
 		SELECT l.id, l.player_id, pe.display_name, p.primary_position,
-		       c.short_name, l.asking_price::bigint, p.market_value::bigint,
+		       l.listing_club_id, c.short_name, l.asking_price::bigint, p.market_value::bigint,
 		       l.listing_type, l.listed_at
 		FROM transfer.listings l
 		JOIN player.players p ON p.id = l.player_id
@@ -654,10 +658,14 @@ func (s *Service) openListings(ctx context.Context, worldID uuid.UUID, clubIDs [
 	out := []ListingRow{}
 	for rows.Next() {
 		var r ListingRow
-		if err := rows.Scan(&r.ListingID, &r.PlayerID, &r.PlayerName, &r.Position,
-			&r.ClubName, &r.AskingPrice, &r.MarketValue, &r.ListingType, &r.ListedAt); err != nil {
+		var playerID, clubID uuid.UUID
+		var playerName, clubName string
+		if err := rows.Scan(&r.ListingID, &playerID, &playerName, &r.Position,
+			&clubID, &clubName, &r.AskingPrice, &r.MarketValue, &r.ListingType, &r.ListedAt); err != nil {
 			return out
 		}
+		r.Player = &apiref.PlayerRef{ID: playerID, Name: playerName}
+		r.ListingClub = &apiref.ClubRef{ID: clubID, Name: clubName}
 		out = append(out, r)
 	}
 	return out
@@ -689,11 +697,16 @@ func (s *Service) bids(ctx context.Context, worldID uuid.UUID, clubIDs []uuid.UU
 	out := []BidRow{}
 	for rows.Next() {
 		var r BidRow
-		if err := rows.Scan(&r.BidID, &r.PlayerID, &r.PlayerName,
-			&r.BiddingClubID, &r.BiddingClubName, &r.SellingClubID, &r.SellingClubName,
+		var playerID, buyID, sellID uuid.UUID
+		var playerName, buyName, sellName string
+		if err := rows.Scan(&r.BidID, &playerID, &playerName,
+			&buyID, &buyName, &sellID, &sellName,
 			&r.Fee, &r.Status, &r.CreatedAt); err != nil {
 			return out
 		}
+		r.Player = &apiref.PlayerRef{ID: playerID, Name: playerName}
+		r.BiddingClub = &apiref.ClubRef{ID: buyID, Name: buyName}
+		r.SellingClub = &apiref.ClubRef{ID: sellID, Name: sellName}
 		out = append(out, r)
 	}
 	return out
@@ -712,7 +725,7 @@ func (s *Service) completedTransfers(ctx context.Context, worldID uuid.UUID, clu
 	}
 	q := fmt.Sprintf(`
 		SELECT t.id, t.player_id, pe.display_name,
-		       t.from_club_id, COALESCE(fc.short_name, ''), tc.short_name,
+		       t.from_club_id, COALESCE(fc.short_name, ''), t.to_club_id, tc.short_name,
 		       t.fee::bigint, p.market_value::bigint, t.completed_at
 		FROM transfer.completed_transfers t
 		JOIN player.players p ON p.id = t.player_id
@@ -732,11 +745,19 @@ func (s *Service) completedTransfers(ctx context.Context, worldID uuid.UUID, clu
 	out := []TransferRow{}
 	for rows.Next() {
 		var r TransferRow
-		if err := rows.Scan(&r.TransferID, &r.PlayerID, &r.PlayerName,
-			&r.FromClubID, &r.FromClubName, &r.ToClubName,
+		var playerID, toClubID uuid.UUID
+		var playerName, toClubName, fromClubName string
+		var fromClubID *uuid.UUID
+		if err := rows.Scan(&r.TransferID, &playerID, &playerName,
+			&fromClubID, &fromClubName, &toClubID, &toClubName,
 			&r.Fee, &r.MarketValue, &r.CompletedAt); err != nil {
 			return out
 		}
+		r.Player = &apiref.PlayerRef{ID: playerID, Name: playerName}
+		if fromClubID != nil {
+			r.FromClub = &apiref.ClubRef{ID: *fromClubID, Name: fromClubName}
+		}
+		r.ToClub = &apiref.ClubRef{ID: toClubID, Name: toClubName}
 		if r.MarketValue > 0 && r.Fee > r.MarketValue {
 			r.Overpay = true
 			pct := int((float64(r.Fee) / float64(r.MarketValue) * 100) - 100)

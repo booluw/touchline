@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/playergen"
 )
 
@@ -137,21 +138,23 @@ type AcademyConfig struct {
 	RegionalReach  []string
 }
 
-// Academy is the read model for GET /api/clubs/:id/academy.
+// Academy is the read model for GET /api/clubs/:id/academy. The club id stays
+// internal; the wire carries a nested club ref.
 type Academy struct {
-	ClubID           uuid.UUID  `json:"club_id"`
-	WorldID          uuid.UUID  `json:"world_id"`
-	IsActive         bool       `json:"is_active"`
-	InvestmentTier   int        `json:"investment_tier"`
-	FacilityLevel    int        `json:"facility_level"`
-	ScoutingLevel    int        `json:"scouting_level"`
-	StaffQuality     int        `json:"staff_quality"`
-	AnnualCost       int64      `json:"annual_cost"`
-	Reputation       int        `json:"reputation"`
-	RegionalReach    []string   `json:"regional_reach"`
-	LastIntakeSeason int        `json:"last_intake_season"`
-	ShutdownAt       *time.Time `json:"shutdown_at,omitempty"`
-	ReopenedAt       *time.Time `json:"reopened_at,omitempty"`
+	ClubID           uuid.UUID       `json:"-"`
+	Club             *apiref.ClubRef `json:"club"`
+	WorldID          uuid.UUID       `json:"world_id"`
+	IsActive         bool            `json:"is_active"`
+	InvestmentTier   int             `json:"investment_tier"`
+	FacilityLevel    int             `json:"facility_level"`
+	ScoutingLevel    int             `json:"scouting_level"`
+	StaffQuality     int             `json:"staff_quality"`
+	AnnualCost       int64           `json:"annual_cost"`
+	Reputation       int             `json:"reputation"`
+	RegionalReach    []string        `json:"regional_reach"`
+	LastIntakeSeason int             `json:"last_intake_season"`
+	ShutdownAt       *time.Time      `json:"shutdown_at,omitempty"`
+	ReopenedAt       *time.Time      `json:"reopened_at,omitempty"`
 }
 
 // SeasonForDay derives the canonical season number from an absolute world day

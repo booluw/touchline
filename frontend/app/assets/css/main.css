@@ -394,4 +394,17 @@ body { @apply bg-void-950 text-void-300 antialiased font-sans; }
     &.pill--warning {--variant: var(--color-warn-500)}
     &.pill--loss {--variant: var(--color-loss-500)}
   }
+
+  .heading {
+      @apply font-mono font-semibold text-white;
+      
+      &.heading--small {
+        color: var(--color-void-500);
+        @apply text-xs uppercase;
+      }
+
+      &.heading--big {
+        @apply text-5xl uppercase font-bold;
+      }
+    }
 }

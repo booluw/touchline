@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
@@ -78,12 +79,12 @@ func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, count
 
 		for _, clubID := range promoted {
 			if l.PromotesTo != nil {
-				nextEntries[*l.PromotesTo] = append(nextEntries[*l.PromotesTo], clubID)
+				nextEntries[l.PromotesTo.ID] = append(nextEntries[l.PromotesTo.ID], clubID)
 			}
 		}
 		for _, clubID := range relegated {
 			if l.RelegatesTo != nil {
-				nextEntries[*l.RelegatesTo] = append(nextEntries[*l.RelegatesTo], clubID)
+				nextEntries[l.RelegatesTo.ID] = append(nextEntries[l.RelegatesTo.ID], clubID)
 			}
 		}
 		s.emitSeasonCompleted(ctx, tx, worldID, a.season, a.order)
@@ -191,7 +192,7 @@ func (s *Service) emitSeasonCompleted(ctx context.Context, tx pgx.Tx, worldID uu
 	var countryID *uuid.UUID
 	if err := tx.QueryRow(ctx,
 		`SELECT country_id FROM competition.competitions WHERE id = $1`,
-		season.CompetitionID).Scan(&countryID); err != nil {
+		season.Competition.ID).Scan(&countryID); err != nil {
 		return fmt.Errorf("season completed: load country: %w", err)
 	}
 	return s.recordSeedEvent(ctx, tx, &eventbus.Event{
@@ -199,7 +200,7 @@ func (s *Service) emitSeasonCompleted(ctx context.Context, tx pgx.Tx, worldID uu
 		EventType: "SEASON_COMPLETED",
 		Payload: mustJSON(map[string]any{
 			"season_id":        season.ID,
-			"competition_id":   season.CompetitionID,
+			"competition_id":   season.Competition.ID,
 			"country_id":       countryID,
 			"champion_club_id": champion,
 		}),
@@ -207,14 +208,14 @@ func (s *Service) emitSeasonCompleted(ctx context.Context, tx pgx.Tx, worldID uu
 }
 
 func (s *Service) emitClubMoved(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, season *Season,
-	eventType string, clubID uuid.UUID, dest *uuid.UUID) error {
+	eventType string, clubID uuid.UUID, dest *apiref.LeagueRef) error {
 	payload := map[string]any{
 		"club_id":        clubID,
 		"season_id":      season.ID,
-		"competition_id": season.CompetitionID,
+		"competition_id": season.Competition.ID,
 	}
 	if dest != nil {
-		payload["destination_id"] = *dest
+		payload["destination_id"] = dest.ID
 	}
 	return s.recordSeedEvent(ctx, tx, &eventbus.Event{
 		WorldID:   worldID,

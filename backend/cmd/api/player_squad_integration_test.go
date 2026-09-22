@@ -30,7 +30,11 @@ func TestHTTPPlayerSquadRoundTrip(t *testing.T) {
 		t.Fatalf("players array = %v, want ≥ 1 element", listBody["players"])
 	}
 	first := players[0].(map[string]any)
-	playerID := first["player_id"].(string)
+	playerEnt, _ := first["player"].(map[string]any)
+	playerID, _ := playerEnt["id"].(string)
+	if playerID == "" {
+		t.Fatalf("player ref missing in %v", first)
+	}
 	if _, ok := first["morale"].(float64); !ok {
 		t.Fatalf("player morale missing in %v", first)
 	}

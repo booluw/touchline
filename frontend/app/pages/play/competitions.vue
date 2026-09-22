@@ -79,7 +79,7 @@ onMounted(() => { load().catch(() => { error.value = 'Could not load your compet
 
       <template v-if="selected">
         <section v-if="standings" class="bg-slate-800 border border-slate-700 rounded-lg p-4">
-          <h2 class="text-lg font-semibold text-white mb-3">Table — {{ standings.season_label }}</h2>
+          <h2 class="text-lg font-semibold text-white mb-3">Table — {{ standings.season?.label }}</h2>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead class="text-slate-500 text-left">
@@ -92,9 +92,9 @@ onMounted(() => { load().catch(() => { error.value = 'Could not load your compet
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(r, i) in standings.rows" :key="r.club_name" class="border-t border-slate-700">
+                <tr v-for="(r, i) in standings.rows" :key="r.club.id" class="border-t border-slate-700">
                   <td class="py-2 pr-3">{{ i + 1 }}</td>
-                  <td class="py-2 pr-3 font-medium text-white">{{ r.club_name }}</td>
+                  <td class="py-2 pr-3 font-medium text-white">{{ r.club.name }}</td>
                   <td class="py-2 pr-3 text-center">{{ r.played }}</td>
                   <td class="py-2 pr-3 text-center">{{ r.won }}</td>
                   <td class="py-2 pr-3 text-center">{{ r.drawn }}</td>
@@ -124,9 +124,9 @@ onMounted(() => { load().catch(() => { error.value = 'Could not load your compet
           <ul v-if="fixtures.length" class="divide-y divide-slate-700">
             <li v-for="f in fixtures" :key="f.id" class="py-2 flex items-center gap-3 text-sm">
               <NuxtLink :to="`/matches/${f.id}`" class="flex-1 flex items-center gap-3 group">
-                <span class="text-right flex-1">{{ f.home_club_name ?? f.home_club_id.slice(0, 8) }}</span>
+                <span class="text-right flex-1">{{ f.home_club.name ?? f.home_club.id.slice(0, 8) }}</span>
                 <span class="bg-slate-900 border border-slate-600 rounded px-3 py-1 font-bold text-center w-20 group-hover:border-indigo-500">{{ score(f) }}</span>
-                <span class="flex-1">{{ f.away_club_name ?? f.away_club_id.slice(0, 8) }}</span>
+                <span class="flex-1">{{ f.away_club.name ?? f.away_club.id.slice(0, 8) }}</span>
               </NuxtLink>
               <span class="w-24 text-right" :class="f.status === 'completed' ? 'text-emerald-400' : 'text-slate-500'">
                 {{ f.status }}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/world"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/matchsim"
 )
@@ -85,27 +86,30 @@ type LineupInput struct {
 
 // SlotView is a serialisable slot with its formation position resolved.
 type SlotView struct {
-	Slot     int       `json:"slot"`
-	Position string    `json:"position"`
-	PlayerID uuid.UUID `json:"player_id"`
+	Slot     int               `json:"slot"`
+	Position string            `json:"position"`
+	Player   *apiref.PlayerRef `json:"player,omitempty"`
 }
 
-// TacticsView is the read shape for GET /api/clubs/:id/tactics.
+// TacticsView is the read shape for GET /api/clubs/:id/tactics. The club id
+// stays internal; the wire carries a nested club ref.
 type TacticsView struct {
-	ClubID    uuid.UUID  `json:"club_id"`
-	Style     string     `json:"style"`
-	Formation string     `json:"formation"`
-	Allowed   []string   `json:"allowed_formations"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	ClubID    uuid.UUID       `json:"-"`
+	Club      *apiref.ClubRef `json:"club"`
+	Style     string          `json:"style"`
+	Formation string          `json:"formation"`
+	Allowed   []string        `json:"allowed_formations"`
+	UpdatedAt *time.Time      `json:"updated_at,omitempty"`
 }
 
 // LineupView is the read shape returned by GetLineup. Formation/positions are
 // resolved via the club's current tactics (a lineup is formation-relative).
 type LineupView struct {
-	ClubID    uuid.UUID  `json:"club_id"`
-	Style     string     `json:"style"`
-	Formation string     `json:"formation"`
-	Slots     []SlotView `json:"slots"`
+	ClubID    uuid.UUID       `json:"-"`
+	Club      *apiref.ClubRef `json:"club"`
+	Style     string          `json:"style"`
+	Formation string          `json:"formation"`
+	Slots     []SlotView      `json:"slots"`
 }
 
 // worldRef is the world-scoped context of a club write.
@@ -256,13 +260,75 @@ func (s *Service) GetLineup(ctx context.Context, clubID uuid.UUID) (LineupView, 
 		if !ok {
 			pid = uuid.Nil
 		}
+		var player *apiref.PlayerRef
+		if pid != uuid.Nil {
+			player = &apiref.PlayerRef{ID: pid}
+		}
 		view.Slots = append(view.Slots, SlotView{
 			Slot:     slot,
 			Position: pos,
-			PlayerID: pid,
+			Player:   player,
 		})
 	}
+	if err := s.decorateLineupPlayers(ctx, view.Slots); err != nil {
+		return empty, err
+	}
+	club, err := s.clubRef(ctx, clubID)
+	if err != nil {
+		return empty, err
+	}
+	view.Club = club
 	return view, nil
+}
+
+// clubRef resolves a nested club ref for a club-scoped echo.
+func (s *Service) clubRef(ctx context.Context, clubID uuid.UUID) (*apiref.ClubRef, error) {
+	var name string
+	if err := s.pool.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1`, clubID).Scan(&name); err != nil {
+		return nil, fmt.Errorf("tactics: club name: %w", err)
+	}
+	return &apiref.ClubRef{ID: clubID, Name: name}, nil
+}
+
+// decorateLineupPlayers resolves the display names for a lineup's player refs
+// (a batched person join; empty/missing slots stay nil).
+func (s *Service) decorateLineupPlayers(ctx context.Context, slots []SlotView) error {
+	ids := make([]uuid.UUID, 0, len(slots))
+	for _, sv := range slots {
+		if sv.Player != nil {
+			ids = append(ids, sv.Player.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.id, pe.display_name
+		FROM player.players p JOIN person.people pe ON pe.id = p.person_id
+		WHERE p.id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	names := make(map[uuid.UUID]string, len(ids))
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return err
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range slots {
+		if slots[i].Player == nil {
+			continue
+		}
+		slots[i].Player.Name = names[slots[i].Player.ID]
+	}
+	return nil
 }
 
 // SetTactics stores a club's Simple-Mode style and optional formation
@@ -366,6 +432,11 @@ func (s *Service) GetTactics(ctx context.Context, clubID uuid.UUID) (TacticsView
 	if t.UpdatedAt != nil {
 		view.UpdatedAt = t.UpdatedAt
 	}
+	club, err := s.clubRef(ctx, clubID)
+	if err != nil {
+		return empty, err
+	}
+	view.Club = club
 	return view, nil
 }
 

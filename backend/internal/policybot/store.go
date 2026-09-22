@@ -349,6 +349,26 @@ func (s *Store) ClubsForManager(ctx context.Context, managerID uuid.UUID) ([]uui
 	return out, nil
 }
 
+// ClubNames resolves the names for a batch of club ids.
+func (s *Store) ClubNames(ctx context.Context, clubIDs []uuid.UUID) (map[uuid.UUID]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, name FROM club.clubs WHERE id = ANY($1::uuid[])`, clubIDs)
+	if err != nil {
+		return nil, fmt.Errorf("club names: %w", err)
+	}
+	defer rows.Close()
+	names := make(map[uuid.UUID]string, len(clubIDs))
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("scan club name: %w", err)
+		}
+		names[id] = name
+	}
+	return names, rows.Err()
+}
+
 // ClubsWithAwayManagers lists the club IDs of human managers currently in away
 // mode within a world (both explicit and auto).
 func (s *Store) ClubsWithAwayManagers(ctx context.Context, worldID uuid.UUID) ([]uuid.UUID, error) {

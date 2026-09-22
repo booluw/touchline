@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // store owns academy persistence. Writers accept the caller's pgx.Tx so intake
@@ -49,16 +51,20 @@ func lockAcademyTx(ctx context.Context, tx pgx.Tx, clubID uuid.UUID) (Academy, e
 }
 
 const academySelect = `
-	SELECT club_id, world_id, is_active, investment_tier, facility_level,
-	       scouting_level, staff_quality, COALESCE(annual_cost, 0)::bigint,
-	       reputation, regional_reach, last_intake_season, shutdown_at, reopened_at
-	FROM club.academies`
+	SELECT a.club_id, a.world_id, a.is_active, a.investment_tier, a.facility_level,
+	       a.scouting_level, a.staff_quality, COALESCE(a.annual_cost, 0)::bigint,
+	       a.reputation, a.regional_reach, a.last_intake_season, a.shutdown_at, a.reopened_at,
+	       c.name
+	FROM club.academies a
+	JOIN club.clubs c ON c.id = a.club_id`
 
 func scanAcademy(row pgx.Row) (Academy, error) {
 	var a Academy
+	var clubName string
 	err := row.Scan(&a.ClubID, &a.WorldID, &a.IsActive, &a.InvestmentTier,
 		&a.FacilityLevel, &a.ScoutingLevel, &a.StaffQuality, &a.AnnualCost,
-		&a.Reputation, &a.RegionalReach, &a.LastIntakeSeason, &a.ShutdownAt, &a.ReopenedAt)
+		&a.Reputation, &a.RegionalReach, &a.LastIntakeSeason, &a.ShutdownAt, &a.ReopenedAt,
+		&clubName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Academy{}, errAcademyMissing
 	}
@@ -68,6 +74,7 @@ func scanAcademy(row pgx.Row) (Academy, error) {
 	if a.RegionalReach == nil {
 		a.RegionalReach = []string{}
 	}
+	a.Club = &apiref.ClubRef{ID: a.ClubID, Name: clubName}
 	return a, nil
 }
 

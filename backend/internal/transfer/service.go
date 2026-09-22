@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -1029,15 +1030,24 @@ func (s *Service) acceptBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, w
 		return nil, nil, fmt.Errorf("accept bid: %w", err)
 	}
 
+	clauses := termsToClauses(terms, sellerClub)
+	for i := range clauses {
+		if clauses[i].BeneficiaryClubID != nil {
+			clauses[i].BeneficiaryClub = &apiref.ClubRef{ID: *clauses[i].BeneficiaryClubID, Name: clubNameTx(ctx, tx, *clauses[i].BeneficiaryClubID)}
+		}
+	}
 	return &CompletedTransfer{
 		ID:             ctID,
 		WorldID:        worldID,
 		BidID:          bidID,
 		PlayerID:       playerID,
+		Player:         &apiref.PlayerRef{ID: playerID, Name: playerNameTx(ctx, tx, playerID)},
 		FromClubID:     sellerClub,
+		FromClub:       &apiref.ClubRef{ID: sellerClub, Name: clubNameTx(ctx, tx, sellerClub)},
 		ToClubID:       buyerClub,
+		ToClub:         &apiref.ClubRef{ID: buyerClub, Name: clubNameTx(ctx, tx, buyerClub)},
 		Fee:            terms.Fee,
-		Clauses:        termsToClauses(terms, sellerClub),
+		Clauses:        clauses,
 		RelatedEventID: eventID,
 		CompletedAt:    time.Now().UTC(),
 	}, exp, nil
@@ -1610,6 +1620,17 @@ func clubNameTx(ctx context.Context, tx pgx.Tx, clubID uuid.UUID) string {
 	var name string
 	if err := tx.QueryRow(ctx,
 		`SELECT COALESCE(name, short_name) FROM club.clubs WHERE id = $1`, clubID).Scan(&name); err != nil {
+		return "Unknown"
+	}
+	return name
+}
+
+func playerNameTx(ctx context.Context, tx pgx.Tx, playerID uuid.UUID) string {
+	var name string
+	if err := tx.QueryRow(ctx,
+		`SELECT pe.display_name
+		 FROM player.players p JOIN person.people pe ON pe.id = p.person_id
+		 WHERE p.id = $1`, playerID).Scan(&name); err != nil {
 		return "Unknown"
 	}
 	return name

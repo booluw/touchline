@@ -119,7 +119,8 @@ func decodedSlots(t *testing.T, resp *http.Response, key string) []string {
 	out := make([]string, 0, len(arr))
 	for _, item := range arr {
 		m, _ := item.(map[string]any)
-		if id, ok := m["player_id"].(string); ok {
+		player, _ := m["player"].(map[string]any)
+		if id, ok := player["id"].(string); ok {
 			out = append(out, id)
 		}
 	}

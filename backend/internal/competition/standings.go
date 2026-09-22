@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // GetFixtures lists a competition's fixtures, optionally filtered to one
@@ -15,10 +17,12 @@ import (
 func (s *Service) GetFixtures(ctx context.Context, leagueID uuid.UUID, worldID uuid.UUID, matchday *int) ([]Fixture, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.world_id, f.competition_id, f.home_club_id, f.away_club_id, f.matchday,
-		       f.scheduled_at, f.status, f.ht_score, f.at_score, h.name, a.name
+		       f.scheduled_at, f.status, f.ht_score, f.at_score,
+		       h.name, COALESCE(h.short_name, ''), a.name, COALESCE(a.short_name, ''), c.name
 		FROM match.fixtures f
 		JOIN club.clubs h ON h.id = f.home_club_id
 		JOIN club.clubs a ON a.id = f.away_club_id
+		JOIN competition.competitions c ON c.id = f.competition_id
 		WHERE f.competition_id = $1 AND f.world_id = $2 AND f.status <> 'cancelled'
 		  AND ($3::int IS NULL OR f.matchday = $3)
 		ORDER BY f.matchday, f.scheduled_at, f.home_club_id`, leagueID, worldID, matchday)
@@ -30,11 +34,17 @@ func (s *Service) GetFixtures(ctx context.Context, leagueID uuid.UUID, worldID u
 	out := []Fixture{}
 	for rows.Next() {
 		var f Fixture
-		if err := rows.Scan(&f.ID, &f.WorldID, &f.CompetitionID, &f.HomeClubID, &f.AwayClubID,
+		var hName, hShort, aName, aShort, compName string
+		if err := rows.Scan(&f.ID, &f.WorldID, &f.Competition.ID, &f.HomeClub.ID, &f.AwayClub.ID,
 			&f.Matchday, &f.ScheduledAt, &f.Status, &f.HomeScore, &f.AwayScore,
-			&f.HomeClubName, &f.AwayClubName); err != nil {
+			&hName, &hShort, &aName, &aShort, &compName); err != nil {
 			return nil, fmt.Errorf("scan fixture: %w", err)
 		}
+		f.Competition.Name = compName
+		f.HomeClub.Name = hName
+		f.HomeClub.Short = hShort
+		f.AwayClub.Name = aName
+		f.AwayClub.Short = aShort
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -43,17 +53,14 @@ func (s *Service) GetFixtures(ctx context.Context, leagueID uuid.UUID, worldID u
 // GetStandings returns the current table for a competition's active season.
 // Tie-breakers are points, goal difference, goals scored, then club name.
 func (s *Service) GetStandings(ctx context.Context, leagueID uuid.UUID, worldID uuid.UUID) (*StandingRowSet, error) {
-	var seasonID uuid.UUID
-	var label string
-	var number int
-	var status string
+	var sr apiref.SeasonRef
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, season_label, season_number, status
 		FROM competition.seasons
 		WHERE competition_id = $1 AND world_id = $2 AND status <> 'completed'
 		ORDER BY season_number DESC
 		LIMIT 1`, leagueID, worldID).
-		Scan(&seasonID, &label, &number, &status)
+		Scan(&sr.ID, &sr.Label, &sr.Number, &sr.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNoSeason
 	}
@@ -62,27 +69,24 @@ func (s *Service) GetStandings(ctx context.Context, leagueID uuid.UUID, worldID 
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.name, COALESCE(c.short_name, ''),
+		SELECT c.id, c.name, COALESCE(c.short_name, ''),
 		       st.played, st.won, st.drawn, st.lost, st.goals_for, st.goals_against, st.points
 		FROM competition.standings st
 		JOIN club.clubs c ON c.id = st.club_id
 		WHERE st.season_id = $1
-		ORDER BY st.points DESC, (st.goals_for - st.goals_against) DESC, st.goals_for DESC, c.name`, seasonID)
+		ORDER BY st.points DESC, (st.goals_for - st.goals_against) DESC, st.goals_for DESC, c.name`, sr.ID)
 	if err != nil {
 		return nil, fmt.Errorf("standings: %w", err)
 	}
 	defer rows.Close()
 
 	out := &StandingRowSet{
-		SeasonID:     seasonID,
-		SeasonLabel:  label,
-		SeasonNumber: number,
-		Status:       status,
-		Rows:         []StandingRow{},
+		Season: sr,
+		Rows:   []StandingRow{},
 	}
 	for rows.Next() {
 		var r StandingRow
-		if err := rows.Scan(&r.ClubName, &r.ClubShort, &r.Played, &r.Won, &r.Drawn, &r.Lost,
+		if err := rows.Scan(&r.Club.ID, &r.Club.Name, &r.Club.Short, &r.Played, &r.Won, &r.Drawn, &r.Lost,
 			&r.GoalsFor, &r.GoalsAgainst, &r.Points); err != nil {
 			return nil, fmt.Errorf("scan standing: %w", err)
 		}
@@ -213,7 +217,7 @@ func (s *Service) activeSeason(ctx context.Context, tx pgx.Tx, leagueID, worldID
 		FROM competition.seasons
 		WHERE competition_id = $1 AND world_id = $2 AND status <> 'completed'
 		ORDER BY season_number DESC LIMIT 1`, leagueID, worldID).
-		Scan(&se.ID, &se.CompetitionID, &se.SeasonLabel, &se.SeasonNumber, &se.Status)
+		Scan(&se.ID, &se.Competition.ID, &se.SeasonLabel, &se.SeasonNumber, &se.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNoSeason
 	}

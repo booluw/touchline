@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/manager"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -191,6 +192,15 @@ func (s *Service) BoardView(ctx context.Context, worldID, managerID uuid.UUID) (
 	}
 	v := &View{Confidence: snap.Scores.Total, Snapshot: snap, Mandates: mandates}
 	_ = json.Unmarshal(snap.Explanation, &v.Explanation)
+
+	var clubName string
+	if err := s.pool.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1`, snap.ClubID).Scan(&clubName); err != nil {
+		return nil, fmt.Errorf("board view: club name: %w", err)
+	}
+	snap.Club = &apiref.ClubRef{ID: snap.ClubID, Name: clubName}
+	for i := range mandates {
+		mandates[i].Club = &apiref.ClubRef{ID: mandates[i].ClubID, Name: clubName}
+	}
 	return v, nil
 }
 
@@ -256,6 +266,11 @@ func (s *Service) NegotiateMandate(ctx context.Context, worldID, managerID uuid.
 
 	mandate.TargetValue = in.TargetValue
 	mandate.Status = MandateAgreed
+	var clubName string
+	if err := tx.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1`, mandate.ClubID).Scan(&clubName); err != nil {
+		return nil, nil, fmt.Errorf("negotiate: club name: %w", err)
+	}
+	mandate.Club = &apiref.ClubRef{ID: mandate.ClubID, Name: clubName}
 	exp := explanation.New("board_mandate_negotiation", 0).
 		Add(fmt.Sprintf("%s target changed to %s", mandate.TargetType, in.TargetValue), 0)
 	if err := s.emitNegotiation(ctx, tx, worldOf, &mandate, exp); err != nil {

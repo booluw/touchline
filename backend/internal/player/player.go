@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // Squad role agreed on the active contract (player.contracts.squad_role).
@@ -42,17 +44,18 @@ const (
 )
 
 type Player struct {
-	ID              uuid.UUID  `json:"id"`
-	WorldID         uuid.UUID  `json:"world_id"`
-	ClubID          *uuid.UUID `json:"club_id"`
-	PersonID        uuid.UUID  `json:"person_id"`
-	FirstName       string     `json:"first_name"`
-	LastName        string     `json:"last_name"`
-	DisplayName     string     `json:"display_name"`
-	Nationality     string     `json:"nationality"`
-	DateOfBirth     string     `json:"date_of_birth"`
-	PrimaryPosition string     `json:"primary_position"`
-	SquadNumber     *int       `json:"squad_number"`
+	ID              uuid.UUID       `json:"id"`
+	WorldID         uuid.UUID       `json:"world_id"`
+	ClubID          *uuid.UUID      `json:"-"`
+	Club            *apiref.ClubRef `json:"club,omitempty"`
+	PersonID        uuid.UUID       `json:"person_id"`
+	FirstName       string          `json:"first_name"`
+	LastName        string          `json:"last_name"`
+	DisplayName     string          `json:"display_name"`
+	Nationality     string          `json:"nationality"`
+	DateOfBirth     string          `json:"date_of_birth"`
+	PrimaryPosition string          `json:"primary_position"`
+	SquadNumber     *int            `json:"squad_number"`
 }
 
 type PlayerAttributes struct {
@@ -112,29 +115,33 @@ type Appearance struct {
 // PlayerMoraleRow is one roster player's morale/role/request read model
 // (GET /api/clubs/:id/players).
 type PlayerMoraleRow struct {
-	PlayerID        uuid.UUID `json:"player_id"`
-	FirstName       string    `json:"first_name"`
-	LastName        string    `json:"last_name"`
-	DisplayName     string    `json:"display_name"`
-	Position        string    `json:"position"`
-	SquadRole       string    `json:"squad_role"`
-	Morale          float64   `json:"morale"`
-	PlayingTimePct  float64   `json:"playing_time_pct"`
-	TransferRequest string    `json:"transfer_request_status,omitempty"`
-	SquadNumber     *int      `json:"squad_number,omitempty"`
+	Player          *apiref.PlayerRef `json:"player"`
+	FirstName       string            `json:"first_name"`
+	LastName        string            `json:"last_name"`
+	Position        string            `json:"position"`
+	SquadRole       string            `json:"squad_role"`
+	Morale          float64           `json:"morale"`
+	PlayingTimePct  float64           `json:"playing_time_pct"`
+	TransferRequest string            `json:"transfer_request_status,omitempty"`
+	SquadNumber     *int              `json:"squad_number,omitempty"`
 }
 
-// TransferRequest is the read model of one player transfer request.
+// TransferRequest is the read model of one player transfer request. Internal
+// flags (PlayerID/ClubID) stay for engine logic; the wire exposes the nested
+// player + club refs (manager_id is the caller's own subject identity).
 type TransferRequest struct {
-	ID             uuid.UUID  `json:"id"`
-	PlayerID       uuid.UUID  `json:"player_id"`
-	ClubID         uuid.UUID  `json:"club_id"`
-	ManagerID      uuid.UUID  `json:"manager_id"`
-	Status         string     `json:"status"`
-	Reason         string     `json:"reason"`
-	CreatedAt      time.Time  `json:"created_at"`
-	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
-	ReassuredUntil *time.Time `json:"reassured_until,omitempty"`
+	ID             uuid.UUID          `json:"id"`
+	PlayerID       uuid.UUID          `json:"-"`
+	ClubID         uuid.UUID          `json:"-"`
+	ManagerID      uuid.UUID          `json:"-"`
+	Player         *apiref.PlayerRef  `json:"player,omitempty"`
+	Club           *apiref.ClubRef    `json:"club,omitempty"`
+	Manager        *apiref.ManagerRef `json:"manager,omitempty"`
+	Status         string             `json:"status"`
+	Reason         string             `json:"reason"`
+	CreatedAt      time.Time          `json:"created_at"`
+	ResolvedAt     *time.Time         `json:"resolved_at,omitempty"`
+	ReassuredUntil *time.Time         `json:"reassured_until,omitempty"`
 }
 
 // RelationshipEventRow is one journal row on the player↔manager memory
@@ -148,10 +155,9 @@ type RelationshipEventRow struct {
 // PlayerMoraleDetail is one player's full morale picture with the "why"
 // (GET /api/clubs/:id/players/:playerID).
 type PlayerMoraleDetail struct {
-	PlayerID           uuid.UUID              `json:"player_id"`
+	Player             *apiref.PlayerRef      `json:"player"`
 	FirstName          string                 `json:"first_name"`
 	LastName           string                 `json:"last_name"`
-	DisplayName        string                 `json:"display_name"`
 	Position           string                 `json:"position"`
 	SquadRole          string                 `json:"squad_role"`
 	Morale             float64                `json:"morale"`

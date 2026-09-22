@@ -60,6 +60,12 @@ func TestSendMessageInboxLifecycle(t *testing.T) {
 	if msg.SenderID != w.HumanMgr || msg.RecipientID != secondMgr {
 		t.Errorf("message = %+v", msg)
 	}
+	if msg.Sender.Type != "manager" || msg.Sender.Name != "Ada Lovelace" || msg.Sender.ID != w.HumanMgr {
+		t.Errorf("sender ref = %+v", msg.Sender)
+	}
+	if msg.Recipient.Type != "manager" || msg.Recipient.Name != "Grace Hopper" || msg.Recipient.ID != secondMgr {
+		t.Errorf("recipient ref = %+v", msg.Recipient)
+	}
 
 	// The outbox row exists (bus is nil here, so log-only writing still runs).
 	var eventType string
@@ -80,7 +86,7 @@ func TestSendMessageInboxLifecycle(t *testing.T) {
 	if len(inbox) != 1 {
 		t.Fatalf("inbox len = %d, want 1", len(inbox))
 	}
-	if inbox[0].ID != msg.ID || inbox[0].SenderName != "Ada Lovelace" || inbox[0].Body != "Nice game last week" {
+	if inbox[0].ID != msg.ID || inbox[0].Sender.Name != "Ada Lovelace" || inbox[0].Body != "Nice game last week" {
 		t.Errorf("inbox row = %+v", inbox[0])
 	}
 
@@ -234,7 +240,7 @@ func TestSendMessagePublishesRealtime(t *testing.T) {
 		if err := json.Unmarshal(ev.Payload, &push); err != nil {
 			t.Fatalf("decoding push payload: %v", err)
 		}
-		if push.Message.Body != "over the wire" || push.SenderName != "Ada Lovelace" {
+		if push.Message.Body != "over the wire" || push.Message.Sender.Name != "Ada Lovelace" {
 			t.Errorf("push = %+v", push)
 		}
 	case <-time.After(2 * time.Second):

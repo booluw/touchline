@@ -18,6 +18,6 @@ ALTER TABLE ref.club_name_parts
 ALTER TABLE ref.club_name_parts
     ADD PRIMARY KEY (country_code, kind, value);
 
-DROP INDEX IF EXISTS idx_club_name_parts_kind;
+DROP INDEX IF EXISTS ref.idx_club_name_parts_kind;
 
 CREATE INDEX idx_club_name_parts_kind ON ref.club_name_parts(country_code, kind);

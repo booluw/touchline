@@ -40,7 +40,8 @@ func TestHTTPRelationships(t *testing.T) {
 	found := false
 	for _, raw := range edges {
 		e, _ := raw.(map[string]any)
-		if e["entity_type"] == "manager" && e["entity_id"] == targetMgr.String() {
+		ent, _ := e["entity"].(map[string]any)
+		if ent["type"] == "manager" && ent["id"] == targetMgr.String() {
 			found = true
 			if e["strength"] != float64(30) {
 				t.Errorf("edge strength = %v, want 30", e["strength"])

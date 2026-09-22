@@ -19,7 +19,7 @@ async function init() {
   await squad.fetchLineup(clubId.value)
   const bySlot: Record<number, string> = {}
   for (const s of squad.lineup?.slots ?? []) {
-    bySlot[s.slot] = s.player_id
+    bySlot[s.slot] = s.player?.id ?? ''
   }
   slots.value = bySlot
 }

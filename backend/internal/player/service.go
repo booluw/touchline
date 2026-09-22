@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/transfer"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
@@ -43,19 +44,25 @@ func NewService(pool *pgxpool.Pool, bus eventbus.Publisher, transfers *transfer.
 // GetPlayer fetches a player's identity joined to person.people.
 func (s *Service) GetPlayer(ctx context.Context, id uuid.UUID) (*Player, error) {
 	var p Player
+	var clubName string
 	err := s.pool.QueryRow(ctx, `
 		SELECT p.id, p.world_id, p.club_id, p.person_id, p.primary_position, p.squad_number,
-		       pe.first_name, pe.last_name, pe.display_name, pe.date_of_birth::text, pe.nationality_code
+		       pe.first_name, pe.last_name, pe.display_name, pe.date_of_birth::text, pe.nationality_code,
+		       cc.name
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
+		LEFT JOIN club.clubs cc ON cc.id = p.club_id
 		WHERE p.id = $1`, id,
 	).Scan(&p.ID, &p.WorldID, &p.ClubID, &p.PersonID, &p.PrimaryPosition, &p.SquadNumber,
-		&p.FirstName, &p.LastName, &p.DisplayName, &p.DateOfBirth, &p.Nationality)
+		&p.FirstName, &p.LastName, &p.DisplayName, &p.DateOfBirth, &p.Nationality, &clubName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrPlayerNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if p.ClubID != nil && clubName != "" {
+		p.Club = &apiref.ClubRef{ID: *p.ClubID, Name: clubName}
 	}
 	return &p, nil
 }

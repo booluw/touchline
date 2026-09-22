@@ -130,7 +130,7 @@ onMounted(() => init().catch(() => { error.value = 'Could not load your club fin
             </thead>
             <tbody>
               <tr v-for="c in store.contracts" :key="c.id" class="border-t border-slate-700">
-                <td class="py-1">{{ c.player_name }}</td>
+                <td class="py-1">{{ c.player.name }}</td>
                 <td>{{ fmt(c.weekly_wage) }}</td>
                 <td>{{ c.start_date }}</td>
                 <td>{{ c.end_date }}</td>

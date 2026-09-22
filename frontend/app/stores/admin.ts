@@ -26,6 +26,7 @@ export const useAdminStore = defineStore('admin', () => {
     setLeagues
   }
 }, {
-  persist: true,
-  // storage: localStorage
+  persist: {
+    key: 'admin-v2',
+  },
 })

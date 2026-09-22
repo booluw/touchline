@@ -2,7 +2,8 @@
 import { useToast } from '~/components/ui/Toast';
 import { useAdminOverview } from '~/composables/admin/overview';
 import { useAuth } from '~/composables/useAuth';
-import type { Country, League, World } from '~/types';
+import type { Country, CountryClubs, CountryStats, League, World, CountryMarketData } from '~/types';
+import { formatMoney, formatMoneyCompact } from '../../utils/helpers';
 
 definePageMeta({
   name: 'country-page',
@@ -21,31 +22,30 @@ const {
   countryLeaguePyramid,
   countryClubs,
   playersFromCountry,
-  countryFreeAgents,
-  countryEconomics,
   seedWorld,
-  seedWorldStatus
+  seedWorldStatus,
+  countryOverview,
+  countryTransferMarket
 } = useAdminOverview({ worldId: worldId.value, countryId: countryId.value })
 
-const world = computed(() => store.worlds?.find((w: World) => w.id === worldId.value ))
+const world = computed(() => store.worlds?.find((w: World) => w.id === worldId.value))
 const country = computed(() => store.countries?.find((c: Country) => c.id === countryId.value))
-const leagues = computed(() => store.leagues?.filter((l: League) => l.country_id === countryId.value) ?? [])
 
 const status = reactive<Record<string, 'loading' | 'error' | 'loaded'>>({
   pyramid: 'loading',
   clubs: 'loading',
   players: 'loading',
-  agents: 'loading',
-  economics: 'loading',
   news: 'loading',
-  seed: 'loaded'
+  seed: 'loaded',
+  overview: 'loading',
+  market: 'loading'
 })
 
-const economics = ref()
-const freeAgents = ref()
-const leagueClubs = ref<{ country: unknown; clubs: ClubRow[] }>()
+const leagueClubs = ref<CountryClubs>()
 const countryPlayers = ref()
 const leaguePyramids = ref()
+const overview = ref<CountryStats>()
+const market = ref<CountryMarketData>()
 const newsStories = ref<NewsStory[]>([])
 
 interface ClubRow {
@@ -54,8 +54,7 @@ interface ClubRow {
   short_name: string
   is_ai_controlled: boolean
   tier: number
-  league_id?: string | null
-  league_name?: string
+  league?: { id: string; name: string } | null
   league_tier: number
   squad_size: number
   top_player_name?: string
@@ -129,6 +128,17 @@ async function submitRename() {
   }
 }
 
+async function loadCountryOverview() {
+  try {
+    status.overview = 'loading'
+    overview.value = await countryOverview()
+    status.overview = 'loaded'
+  } catch (error) {
+    console.error(error)
+    status.overview = 'error'
+  }
+}
+
 async function loadLeaguePyramid() {
   try {
     status.pyramid = 'loading'
@@ -162,24 +172,14 @@ async function loadAllPlayersFromCountry() {
   }
 }
 
-async function loadFreeAgents() {
+async function loadCountryMarkets() {
   try {
-    status.agents = 'loading'
-    freeAgents.value = await countryFreeAgents()
+    status.market = 'loading'
+    market.value = await countryTransferMarket()
+    status.market = 'loaded'
   } catch (error) {
     console.error(error)
-    status.agents = 'error'
-  }
-}
-
-async function loadCountryEconomics() {
-  try {
-    status.economics = 'loading'
-    economics.value = await countryEconomics()
-    status.economics = 'loaded'
-  } catch (error) {
-    console.error(error)
-    status.economics = 'error'
+    status.market = 'error'
   }
 }
 
@@ -232,7 +232,14 @@ async function getSeedStatus() {
 }
 
 async function initCountryDashboard() {
-  await Promise.all([loadLeaguePyramid(), loadCountryClubs(), loadAllPlayersFromCountry(), loadFreeAgents(), loadCountryEconomics(), loadNews()])
+  await loadCountryOverview()
+  await Promise.all([
+    loadLeaguePyramid(),
+    loadCountryClubs(),
+    loadAllPlayersFromCountry(),
+    loadNews(),
+    loadCountryMarkets()
+  ])
 }
 
 onMounted(() => initCountryDashboard())
@@ -241,111 +248,315 @@ onMounted(() => initCountryDashboard())
   <section>
     <div class="flex justify-between items-center">
       <div class="flex flex-col gap-3 items-start mb-5">
-        <span class="pill pill--success">{{ world.status }}</span>
-        <h2 class="page__header">{{ country.name }} <span class="uppercase">[{{ country.code }}]</span>, {{ world.name }}</h2>
-      </div>
-
-      <div class="flex gap-5">
-        <button class="button" @click="seedWorldAndCountry()">
-          Seed Country
-        </button>
-        <nuxt-link
-          :to="{ name: 'admin-CountryLeagues-create', params: { id: worldId, countryId }}"
-          class="button button--outline"
-        >
-          Create New League
-        </nuxt-link>
+        <span class="pill pill--success">{{ world!.status }}</span>
+        <h2 class="page__header">{{ country!.name }} <span class="uppercase">[{{ country!.code }}]</span>, {{
+          world!.name }}</h2>
       </div>
     </div>
 
-    <div class="border-b">
-      {{ leaguePyramids }}
-    </div>
+    <section class="grid gap-5 grid-cols-4 grid-rows-3">
+      <div class="col-span-2 bg-void-900 border-brutal border-cyan-300 p-5">
+        <h3 class="heading heading--small">economics</h3>
+        <UiLoader v-if="status.overview === 'loading'" />
+        <div v-else-if="status.overview === 'loaded'" class="grid grid-cols-4 gap-5 mt-5">
+          <div class="row-span-2 flex flex-col justify-center">
+            <h3 class="heading heading--big">{{ formatMoneyCompact(overview!.economy.cash) }}</h3>
+            <h4 class="heading heading--small">cash</h4>
+          </div>
 
-    <div class="mt-6 space-y-10">
-      <section>
-        <h3 class="text-lg font-semibold mb-3">Clubs ({{ leagueClubs?.clubs?.length ?? 0 }})</h3>
-        <div v-if="status.clubs === 'loading'" class="text-slate-400">Loading clubs…</div>
-        <div v-else-if="!leagueClubs?.clubs?.length" class="text-slate-400">No clubs in this country yet.</div>
-        <div v-else class="overflow-x-auto border border-slate-700 rounded-lg">
-          <table class="w-full text-sm">
-            <thead class="text-slate-500 text-left bg-slate-800">
-              <tr>
-                <th class="py-2 px-3">Club</th>
-                <th class="py-2 px-3">Code</th>
-                <th class="py-2 px-3">Type</th>
-                <th class="py-2 px-3">League</th>
-                <th class="py-2 px-3">Squad</th>
-                <th class="py-2 px-3">Wage bill</th>
-                <th class="py-2 px-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="club in leagueClubs.clubs" :key="club.id" class="border-t border-slate-700">
-                <td class="py-2 px-3 font-medium text-white">{{ club.name }}</td>
-                <td class="py-2 px-3 uppercase">{{ club.short_name }}</td>
-                <td class="py-2 px-3">{{ club.is_ai_controlled ? 'AI' : 'Human' }}</td>
-                <td class="py-2 px-3">{{ club.league_name || '—' }}</td>
-                <td class="py-2 px-3">{{ club.squad_size }}</td>
-                <td class="py-2 px-3">{{ club.wage_bill.toLocaleString() }}</td>
-                <td class="py-2 px-3 text-right">
-                  <button @click="openRename(club)" class="text-indigo-400 hover:text-indigo-300">Rename</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="">
+            <h3 class="heading">{{ formatMoney(overview!.economy.wage_allocated) }}</h3>
+            <h4 class="heading heading--small">wage allocation</h4>
+          </div>
+
+          <div class="">
+            <h3 class="heading">{{ formatMoney(overview!.economy.wage_bill) }}</h3>
+            <h4 class="heading heading--small">total wage</h4>
+          </div>
+
+          <div class="">
+            <h3 class="heading">{{ formatMoney(overview!.economy.wage_committed) }}</h3>
+            <h4 class="heading heading--small">wage committed</h4>
+          </div>
+
+          <div class="">
+            <h3 class="heading">{{ formatMoney(overview!.economy.transfer_allocated) }}</h3>
+            <h4 class="heading heading--small">transfer allocation</h4>
+          </div>
+
+          <div class="">
+            <h3 class="heading">{{ formatMoney(overview!.economy.transfer_committed) }}</h3>
+            <h4 class="heading heading--small">transfer committed</h4>
+          </div>
+
+          <div :class="{ 'text-loss-500': overview.economy.crisis_clubs !== 0 }">
+            <h3 class="heading text-inherit">{{ overview!.economy.crisis_clubs }}</h3>
+            <h4 class="heading heading--small text-inherit">clubs in crisis</h4>
+          </div>
         </div>
-      </section>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="loadCountryOverview()">Retry</button>
+        </div>
+      </div>
 
-      <section>
-        <h3 class="text-lg font-semibold mb-3">World news</h3>
-        <div v-if="status.news === 'loading'" class="text-slate-400">Loading news…</div>
-        <div v-else-if="!newsStories.length" class="text-slate-400">No news stories yet — renaming a club publishes one.</div>
-        <ul v-else class="space-y-3">
-          <li v-for="story in newsStories" :key="story.id" class="border border-slate-700 rounded-lg p-4">
-            <div class="flex items-baseline justify-between gap-3">
-              <h4 class="font-medium text-white">{{ story.headline }}</h4>
-              <span class="text-xs text-slate-500">{{ new Date(story.published_at).toLocaleString() }}</span>
+      <div class="row-span-1 bg-void-900 border-brutal border-void-800 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
+          <h3 class="heading heading--small">leagues</h3>
+          <nuxt-link :to="{ name: 'admin-CountryLeagues-create', params: { id: worldId, countryId } }"
+            class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
+            Create League
+          </nuxt-link>
+        </div>
+        <UiLoader v-if="status.pyramid === 'loading'" />
+        <template v-else-if="status.pyramid === 'loaded'">
+          <div v-if="leaguePyramids.leagues.length === 0" class="p-10 uppercase text-xs text-void-400">
+            No league created in this country, yet.
+          </div>
+          <div v-else class="mt-5 h-37.5 overflow-auto">
+            <div v-for="(league, key) in leaguePyramids.leagues" :key
+              class="grid gap-3 justify-between grid-cols-5 text-void-400">
+              <nuxt-link :to="{ name: 'admin-league-page', params: { id: worldId, countryId, leagueId: league.id } }"
+                class="font-semibold col-span-3 text-ellipsis line-clamp-1 hover:text-cyan-500 ease-in-out uppercase text-sm font-mono">
+                #{{ league.tier }}
+                {{ league.name }}
+              </nuxt-link>
+              <div class="">{{ league.team_count }}</div>
+              <div class="flex gap-2">
+                <span class="text-win-500">{{ league.promotions }}</span>
+                <span class="text-loss-500">({{ league.relegations }})</span>
+              </div>
             </div>
-            <p class="text-slate-400 text-sm mt-1">{{ story.body }}</p>
-          </li>
-        </ul>
-      </section>
-    </div>
+          </div>
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="loadLeaguePyramid()">Retry</button>
+        </div>
+      </div>
 
-    {{ status }}
+      <div class="row-span-2 bg-void-900 border-brutal border-void-800 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
+          <h3 class="heading heading--small">players</h3>
+        </div>
+
+        <UiLoader v-if="status.players === 'loading'" />
+        <template v-else-if="status.players === 'loaded'">
+          <div v-if="countryPlayers.total === 0" class="p-10 uppercase text-xs text-void-400">
+            No player seeded for this country, yet.
+          </div>
+
+          <template v-else>
+            <div class="my-5 grid gap-3 grid-cols-2 grid-rows-2">
+              <div class="row-span-2 flex flex-col justify-center">
+                <h3 class="heading heading--big">{{ countryPlayers.total }}</h3>
+                <h4 class="heading heading--small">total players</h4>
+              </div>
+
+              <div class="">
+                <h3 class="heading">{{ countryPlayers.by_status.active }}</h3>
+                <h4 class="heading heading--small">active</h4>
+              </div>
+
+              <div class="">
+                <h3 class="heading">{{ countryPlayers.by_status.free_agent }}</h3>
+                <h4 class="heading heading--small">free agents</h4>
+              </div>
+            </div>
+
+            <div class="max-h-77.5 overflow-auto space-y-2">
+              <div v-for="(nation, key) in countryPlayers.nationalities" :key
+                class="flex gap-3 justify-between text-void-400 border-b border-void-700 py-2">
+                <div class="uppercase font-mono text-sm">{{ nation.name }}</div>
+                <div class="">{{ nation.count }}</div>
+              </div>
+            </div>
+          </template>
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="loadAllPlayersFromCountry()">Retry</button>
+        </div>
+      </div>
+
+      <div class="row-span-2 bg-void-900 border-brutal border-void-800 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
+          <h3 class="heading heading--small">news</h3>
+
+          <button
+            disabled
+            @click="seedWorldAndCountry()"
+            class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase cursor-pointer"
+          >
+            Press Release
+          </button>
+        </div>
+
+        <UiLoader v-if="status.news === 'loading'" />
+        <template v-else-if="status.news === 'loaded'">
+          {{ newsStories }}
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="loadNews()">Retry</button>
+        </div>
+      </div>
+
+      <div class="row-span-2 col-span-2 bg-void-900 border-brutal border-void-800 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
+          <h3 class="heading heading--small">clubs</h3>
+        </div>
+
+        <UiLoader v-if="status.clubs === 'loading'" />
+        <template v-else-if="status.clubs === 'loaded'">
+          <div class="h-105 mt-5 overflow-auto font-mono">
+            <div v-for="(club, key) in leagueClubs!.clubs" :key
+              class="grid gap-3 items-center justify-between grid-cols-5 text-void-400 border-b border-void-700 py-2">
+              <div class="col-span-2 flex gap-2 items-center">
+                <UiAvatar :alt="club!.short_name!" />
+                <div class="flex gap-1 flex-col">
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-mono uppercase font-semibold text-xs text-void-300">{{ club!.name }}</h3>
+                    <svg class="w-5 h-auto fill-void-600 cursor-pointer" @click="openRename(club)"
+                      viewBox="0 0 256 256">
+                      <path
+                        d="M248,92.68a15.86,15.86,0,0,0-4.69-11.31L174.63,12.68a16,16,0,0,0-22.63,0L123.57,41.11l-58,21.77A16.06,16.06,0,0,0,55.35,75.23L32.11,214.68A8,8,0,0,0,40,224a8.4,8.4,0,0,0,1.32-.11l139.44-23.24a16,16,0,0,0,12.35-10.17l21.77-58L243.31,104A15.87,15.87,0,0,0,248,92.68Zm-69.87,92.19L63.32,204l47.37-47.37a28,28,0,1,0-11.32-11.32L52,192.7,71.13,77.86,126,57.29,198.7,130ZM112,132a12,12,0,1,1,12,12A12,12,0,0,1,112,132Zm96-15.32L139.31,48l24-24L232,92.68Z">
+                      </path>
+                    </svg>
+                  </div>
+                  <div v-if="club!.is_ai_controlled" class="flex gap-3 items-center heading heading--small">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-auto fill-cyan-700" viewBox="0 0 256 256">
+                      <path
+                        d="M200,48H136V16a8,8,0,0,0-16,0V48H56A32,32,0,0,0,24,80V192a32,32,0,0,0,32,32H200a32,32,0,0,0,32-32V80A32,32,0,0,0,200,48Zm16,144a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V80A16,16,0,0,1,56,64H200a16,16,0,0,1,16,16Zm-52-56H92a28,28,0,0,0,0,56h72a28,28,0,0,0,0-56Zm-24,16v24H116V152ZM80,164a12,12,0,0,1,12-12h8v24H92A12,12,0,0,1,80,164Zm84,12h-8V152h8a12,12,0,0,1,0,24ZM72,108a12,12,0,1,1,12,12A12,12,0,0,1,72,108Zm88,0a12,12,0,1,1,12,12A12,12,0,0,1,160,108Z">
+                      </path>
+                    </svg>
+                    AI controlled
+                  </div>
+                  <h4 class="heading heading--small"></h4>
+                </div>
+              </div>
+
+              <div class="heading heading--small">{{ club.league?.name ?? "-" }}</div>
+              <div class="heading heading--small">{{ formatMoneyCompact(club.transfer_allocated) }}/{{
+                formatMoneyCompact(club.transfer_committed) }}</div>
+              <div class="heading heading--small">{{ formatMoneyCompact(club.wage_allocated) }}/{{
+                formatMoneyCompact(club.wage_bill) }}</div>
+            </div>
+          </div>
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="loadCountryClubs()">Retry</button>
+        </div>
+      </div>
+
+      <div class="bg-void-900 border-brutal border-void-800 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
+          <h3 class="heading heading--small">market</h3>
+
+          <button @click="seedWorldAndCountry()"
+            class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase cursor-pointer">
+            Seed
+          </button>
+        </div>
+
+        <UiLoader v-if="status.market === 'loading'" />
+        <template v-else-if="status.market === 'loaded'">
+          <div class="grid grid-cols-4 grid-rows-2 gap-y-3 mt-5">
+            <div class="row-span-2 flex flex-col justify-center">
+              <h3 class="heading text-3xl">{{ market?.window_days }}</h3>
+              <h4 class="heading heading--small">Window days</h4>
+            </div>
+
+
+            <div class="">
+              <h3 class="heading text-3xl">{{ market?.signings.length }}</h3>
+              <h4 class="heading heading--small">signings</h4>
+            </div>
+
+            <div class="">
+              <h3 class="heading">{{ market?.open_listings.length }}</h3>
+              <h4 class="heading heading--small">open</h4>
+            </div>
+
+            <div class="">
+              <h3 class="heading">{{ market?.bids_made.length }}</h3>
+              <h4 class="heading heading--small">made</h4>
+            </div>
+            <div class="">
+              <h3 class="heading">{{ market?.bids_received.length }}</h3>
+              <h4 class="heading heading--small">recieved</h4>
+            </div>
+            <div class="">
+              <h3 class="heading">{{ market?.transfers_in.length }}</h3>
+              <h4 class="heading heading--small">in</h4>
+            </div>
+            <div class="">
+              <h3 class="heading">{{ market?.transfers_out.length }}</h3>
+              <h4 class="heading heading--small">out</h4>
+            </div>
+          </div>
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="loadCountryMarkets()">Retry</button>
+        </div>
+      </div>
+    </section>
   </section>
 
-  <div v-if="renameTarget" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" @click.self="renameTarget = null">
+  <div v-if="renameTarget" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+    @click.self="renameTarget = null">
     <div class="bg-slate-800 border border-slate-600 rounded-lg p-6 w-full max-w-lg">
       <h3 class="text-xl font-semibold text-white mb-1">Rename club</h3>
-      <p class="text-slate-400 text-sm mb-4">{{ renameTarget.name }} — the rename publishes a news story announcing it.</p>
+      <p class="text-slate-400 text-sm mb-4">{{ renameTarget.name }} — the rename publishes a news story announcing it.
+      </p>
       <div class="space-y-3">
         <div>
           <label class="block text-sm text-slate-400 mb-1">New name</label>
-          <input v-model="renameForm.name" type="text" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2" />
+          <input v-model="renameForm.name" type="text"
+            class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2" />
         </div>
         <div>
-          <label class="block text-sm text-slate-400 mb-1">Short code <span class="text-slate-500">(optional — derived if blank)</span></label>
-          <input v-model="renameForm.short_name" type="text" maxlength="3" class="w-28 bg-slate-900 border border-slate-600 rounded px-3 py-2 uppercase" />
+          <label class="block text-sm text-slate-400 mb-1">Short code <span class="text-slate-500">(optional — derived
+              if
+              blank)</span></label>
+          <input v-model="renameForm.short_name" type="text" maxlength="3"
+            class="w-28 bg-slate-900 border border-slate-600 rounded px-3 py-2 uppercase" />
         </div>
         <div class="border-t border-slate-700 pt-3">
           <p class="text-sm text-slate-400 mb-2">News story (announces the change in-world)</p>
           <div class="space-y-3">
             <div>
               <label class="block text-sm text-slate-400 mb-1">Headline</label>
-              <input v-model="renameForm.headline" type="text" placeholder="e.g. Phoenix rise from the ashes" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2" />
+              <input v-model="renameForm.headline" type="text" placeholder="e.g. Phoenix rise from the ashes"
+                class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2" />
             </div>
             <div>
               <label class="block text-sm text-slate-400 mb-1">Body</label>
-              <textarea v-model="renameForm.body" rows="3" placeholder="The club rebrands ahead of the new season…" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2"></textarea>
+              <textarea v-model="renameForm.body" rows="3" placeholder="The club rebrands ahead of the new season…"
+                class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2"></textarea>
             </div>
           </div>
         </div>
         <p v-if="renameError" class="text-red-400 text-sm">{{ renameError }}</p>
         <div class="flex justify-end gap-3 pt-2">
-          <button @click="renameTarget = null" class="bg-slate-700 hover:bg-slate-600 text-white rounded px-4 py-2">Cancel</button>
-          <button :disabled="renameBusy" @click="submitRename" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded px-4 py-2">
+          <button @click="renameTarget = null"
+            class="bg-slate-700 hover:bg-slate-600 text-white rounded px-4 py-2">Cancel</button>
+          <button :disabled="renameBusy" @click="submitRename"
+            class="bg-indigo-600 hover:bg-indigo-500 text-white rounded px-4 py-2">
             {{ renameBusy ? 'Renaming…' : 'Rename & publish' }}
           </button>
         </div>

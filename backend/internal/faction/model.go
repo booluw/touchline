@@ -19,6 +19,7 @@ package faction
 import (
 	"github.com/google/uuid"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/explanation"
 )
 
@@ -119,32 +120,40 @@ const (
 
 // Faction is one deterministic dressing-room cluster: a connected component of
 // the relationship graph with a leader, bounded cohesion and a causal
-// explanation.
+// explanation. Flat leader/member ids stay internal; the wire carries nested
+// player refs.
 type Faction struct {
 	Label       string                   `json:"label"`
-	LeaderID    string                   `json:"leader_id"`
-	Members     []string                 `json:"members"`
+	LeaderID    string                   `json:"-"`
+	Members     []string                 `json:"-"`
+	Leader      *apiref.PlayerRef        `json:"leader,omitempty"`
+	MembersRefs []*apiref.PlayerRef      `json:"members"`
 	Cohesion    int                      `json:"cohesion"`
 	Explanation *explanation.Explanation `json:"explanation,omitempty"`
 }
 
 // Contagion is a bounded, gradual morale spill across the graph. Confidence
 // starts well under 100 and hardens hop by hop — never instant, never 100.
+// Flat source/affected ids stay internal; the wire carries nested refs.
 type Contagion struct {
-	Source      string                   `json:"source"`
-	Confidence  int                      `json:"confidence"`
-	Affected    []string                 `json:"affected"`
-	Explanation *explanation.Explanation `json:"explanation,omitempty"`
+	Source       string                   `json:"-"`
+	SourceRef    *apiref.PlayerRef        `json:"source,omitempty"`
+	Confidence   int                      `json:"confidence"`
+	Affected     []string                 `json:"-"`
+	AffectedRefs []*apiref.PlayerRef      `json:"affected"`
+	Explanation  *explanation.Explanation `json:"explanation,omitempty"`
 }
 
 // Unrest is the severe end-state: contagion that crossed the dressing room's
 // threshold becomes a delegation demanding a board meeting or en-masse
-// transfer requests, with an explanation tracing the causal chain.
+// transfer requests, with an explanation tracing the causal chain. Flat
+// affected ids stay internal; the wire carries nested refs.
 type Unrest struct {
-	Severity    int                      `json:"severity"`
-	Demand      string                   `json:"demand"`
-	Affected    []string                 `json:"affected"`
-	Explanation *explanation.Explanation `json:"explanation,omitempty"`
+	Severity     int                      `json:"severity"`
+	Demand       string                   `json:"demand"`
+	Affected     []string                 `json:"-"`
+	AffectedRefs []*apiref.PlayerRef      `json:"affected"`
+	Explanation  *explanation.Explanation `json:"explanation,omitempty"`
 }
 
 // SquadDynamics is the full deterministic outcome of one action.
@@ -157,17 +166,58 @@ type SquadDynamics struct {
 	Explanation *explanation.Explanation
 }
 
-// TierView is one hierarchy entry in the API read model.
+// AttachNames decorates the faction/contagion player ids with their display
+// names, producing the nested refs the wire carries. names maps player-id
+// strings to display names; unknown ids yield nameless refs.
+func (d *SquadDynamics) AttachNames(names map[string]string) {
+	if d == nil {
+		return
+	}
+	for i := range d.Factions {
+		d.Factions[i].Leader = playerRef(d.Factions[i].LeaderID, names)
+		d.Factions[i].MembersRefs = playerRefs(d.Factions[i].Members, names)
+	}
+	if d.Contagion != nil {
+		d.Contagion.SourceRef = playerRef(d.Contagion.Source, names)
+		d.Contagion.AffectedRefs = playerRefs(d.Contagion.Affected, names)
+	}
+}
+
+// playerRef renders one player id as a display ref (nameless when unresolved).
+func playerRef(id string, names map[string]string) *apiref.PlayerRef {
+	if id == "" {
+		return nil
+	}
+	u, err := uuid.Parse(id)
+	if err != nil {
+		u = uuid.Nil
+	}
+	return &apiref.PlayerRef{ID: u, Name: names[id]}
+}
+
+// playerRefs renders a list of player ids as display refs, preserving order.
+func playerRefs(ids []string, names map[string]string) []*apiref.PlayerRef {
+	out := make([]*apiref.PlayerRef, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, playerRef(id, names))
+	}
+	return out
+}
+
+// TierView is one hierarchy entry in the API read model. The flat player id
+// stays internal; the wire carries a player ref.
 type TierView struct {
-	PlayerID string `json:"player_id"`
-	Name     string `json:"name"`
-	Tier     Tier   `json:"tier"`
+	PlayerID string            `json:"-"`
+	Player   *apiref.PlayerRef `json:"player"`
+	Name     string            `json:"-"`
+	Tier     Tier              `json:"tier"`
 }
 
 // Dynamics is the club read model for GET /api/clubs/:id/dynamics: computed
 // structure plus club-level aggregates, all derived from the graph.
 type Dynamics struct {
-	ClubID           uuid.UUID                `json:"club_id"`
+	ClubID           uuid.UUID                `json:"-"`
+	Club             *apiref.ClubRef          `json:"club"`
 	Action           Action                   `json:"action"`
 	Cohesion         int                      `json:"cohesion"`
 	ManagerSupport   int                      `json:"manager_support"`

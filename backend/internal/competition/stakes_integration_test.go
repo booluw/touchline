@@ -67,9 +67,9 @@ func TestStakesSixPointerBands(t *testing.T) {
 		// pair1 clubs play each other on MD2; pair2 clubs play each other on
 		// MD2 (the two MD2 matches partition the league). Make pair1 win MD1,
 		// pair2 lose — pair1 then owns positions 1&2, pair2 positions 3&4.
-		pair1 := map[uuid.UUID]bool{md2[0].HomeClubID: true, md2[0].AwayClubID: true}
+		pair1 := map[uuid.UUID]bool{md2[0].HomeClub.ID: true, md2[0].AwayClub.ID: true}
 		for _, f := range fixtures {
-			if pair1[f.HomeClubID] {
+			if pair1[f.HomeClub.ID] {
 				if err := svc.ApplyResult(ctx, f.ID, 2, 0); err != nil {
 					t.Fatalf("%s apply md1: %v", name, err)
 				}
@@ -87,7 +87,7 @@ func TestStakesSixPointerBands(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s dead rubber: %v", name, err)
 			}
-			bothWinner := pair1[f.HomeClubID]
+			bothWinner := pair1[f.HomeClub.ID]
 
 			// Premier (1 relegation): only the two-win pair is a six-pointer.
 			if league.ID == premier.ID {

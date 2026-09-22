@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // Relationship is one polymorphic graph edge on social.relationships
@@ -26,18 +27,21 @@ type Relationship struct {
 	CreatedAt         time.Time `json:"created_at"`
 }
 
-// Message is one direct message on social.messages (S06-04b).
+// Message is one direct message on social.messages (S06-04b). Flat sender_id/
+// recipient_id stay internal; the wire carries nested identity refs.
 type Message struct {
-	ID            uuid.UUID  `json:"id"`
-	WorldID       uuid.UUID  `json:"world_id"`
-	SenderID      uuid.UUID  `json:"sender_id"`
-	SenderType    string     `json:"sender_type"` // manager, system
-	RecipientID   uuid.UUID  `json:"recipient_id"`
-	RecipientType string     `json:"recipient_type"` // manager, system
-	Subject       *string    `json:"subject"`
-	Body          string     `json:"body"`
-	SentAt        time.Time  `json:"sent_at"`
-	ReadAt        *time.Time `json:"read_at"`
+	ID            uuid.UUID         `json:"id"`
+	WorldID       uuid.UUID         `json:"world_id"`
+	SenderID      uuid.UUID         `json:"-"`
+	SenderType    string            `json:"-"` // manager, system
+	Sender        *apiref.EntityRef `json:"sender"`
+	RecipientID   uuid.UUID         `json:"-"`
+	RecipientType string            `json:"-"` // manager, system
+	Recipient     *apiref.EntityRef `json:"recipient"`
+	Subject       *string           `json:"subject"`
+	Body          string            `json:"body"`
+	SentAt        time.Time         `json:"sent_at"`
+	ReadAt        *time.Time        `json:"read_at"`
 }
 
 // Promise is one structured social.promises row. S06-03 writes playing-time

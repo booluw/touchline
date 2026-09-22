@@ -11,7 +11,7 @@ const worldId = computed(() => route.params.id)
 const countryId = computed(() => route.params.countryId)
 
 const country = computed(() => store.countries?.find((c: Country) => c.id === countryId.value))
-const leagues = computed(() => store.leagues?.filter((l: League) => l.country_id === countryId.value) ?? [])
+const leagues = computed(() => store.leagues?.filter((l: League) => l.country.id === countryId.value) ?? [])
 
 const schema = z.object({
   name: z.string().min(3, 'league name must be more than 3 letters'),

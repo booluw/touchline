@@ -291,6 +291,12 @@ func TestHumanListingsDrawAIBidsAndResolve(t *testing.T) {
 	if done.Status != transfer.BidStatusAccepted || completed.ToClubID != winning.BiddingClubID {
 		t.Fatalf("bought-by-ai transfer wrong: %+v / %+v", done, completed)
 	}
+	if completed.Player == nil || completed.Player.ID != player || completed.Player.Name == "" {
+		t.Fatalf("completed transfer player ref wrong: %+v", completed.Player)
+	}
+	if completed.ToClub == nil || completed.ToClub.ID != winning.BiddingClubID || completed.ToClub.Name == "" {
+		t.Fatalf("completed transfer to_club ref wrong: %+v", completed.ToClub)
+	}
 	if got := count(t, pool, `
 		SELECT COUNT(*) FROM transfer.bids
 		WHERE player_id = $1 AND status = 'expired'`, player); got != 1 {
@@ -537,6 +543,12 @@ func TestListingsAndBidsReads(t *testing.T) {
 	if got.PlayerID != p1 || got.Status != "active" {
 		t.Fatalf("get listing wrong: %+v", got)
 	}
+	if got.Player == nil || got.Player.ID != p1 || got.Player.Name == "" {
+		t.Fatalf("get listing player ref wrong: %+v", got.Player)
+	}
+	if got.ListingClub == nil || got.ListingClub.ID != tw.HumanClub || got.ListingClub.Name == "" {
+		t.Fatalf("get listing club ref wrong: %+v", got.ListingClub)
+	}
 	if _, err := svc.GetListing(ctx, tw.WorldID, uuid.New()); err != transfer.ErrListingNotFound {
 		t.Fatalf("get unknown listing err = %v, want ErrListingNotFound", err)
 	}
@@ -554,6 +566,15 @@ func TestListingsAndBidsReads(t *testing.T) {
 	for _, b := range incoming {
 		if b.SellingClubID != tw.HumanClub {
 			t.Fatalf("incoming bid selling club = %s, want human club", b.SellingClubID)
+		}
+		if b.SellingClub == nil || b.SellingClub.ID != tw.HumanClub || b.SellingClub.Name == "" {
+			t.Fatalf("incoming bid selling club ref wrong: %+v", b.SellingClub)
+		}
+		if b.Player == nil || b.Player.ID == uuid.Nil || b.Player.Name == "" {
+			t.Fatalf("incoming bid player ref wrong: %+v", b.Player)
+		}
+		if b.BiddingClub == nil || b.BiddingClub.Name == "" {
+			t.Fatalf("incoming bid bidding club ref wrong: %+v", b.BiddingClub)
 		}
 	}
 }

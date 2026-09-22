@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/touchline/backend/internal/world"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -188,6 +189,7 @@ func (s *Service) GetContracts(ctx context.Context, clubID uuid.UUID) ([]Contrac
 			&c.ReleaseClause, &c.Status); err != nil {
 			return nil, fmt.Errorf("contracts scan: %w", err)
 		}
+		c.Player = &apiref.PlayerRef{ID: c.PlayerID, Name: c.PlayerName}
 		contracts = append(contracts, c)
 	}
 	if contracts == nil {
@@ -262,10 +264,12 @@ func (s *Service) RegisterContract(ctx context.Context, actor Actor, clubID uuid
 		return nil, fmt.Errorf("commit contract: %w", err)
 	}
 
+	name := s.store.PlayerName(ctx, in.PlayerID)
 	return &ContractView{
 		ID:            contractID,
 		PlayerID:      in.PlayerID,
-		PlayerName:    s.store.PlayerName(ctx, in.PlayerID),
+		PlayerName:    name,
+		Player:        &apiref.PlayerRef{ID: in.PlayerID, Name: name},
 		WeeklyWage:    in.WeeklyWage,
 		SigningBonus:  in.SigningBonus,
 		StartDate:     in.StartDate.Format("2006-01-02"),

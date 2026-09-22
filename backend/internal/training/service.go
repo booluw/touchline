@@ -18,6 +18,7 @@ import (
 	"github.com/touchline/backend/internal/injury"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/world"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/playergen"
 )
@@ -68,13 +69,15 @@ func NewService(pool *pgxpool.Pool, bus Publishable) *Service {
 	return &Service{pool: pool, bus: bus}
 }
 
-// PlanView is the read shape for GET /api/clubs/:id/training-plan.
+// PlanView is the read shape for GET /api/clubs/:id/training-plan. The club id
+// stays internal; the wire carries a nested club ref.
 type PlanView struct {
-	ClubID            uuid.UUID  `json:"club_id"`
-	Archetype         string     `json:"archetype"`
-	EffectiveFromTick int64      `json:"effective_from_tick"`
-	LastAppliedWeek   *int64     `json:"last_applied_week,omitempty"`
-	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
+	ClubID            uuid.UUID       `json:"-"`
+	Club              *apiref.ClubRef `json:"club"`
+	Archetype         string          `json:"archetype"`
+	EffectiveFromTick int64           `json:"effective_from_tick"`
+	LastAppliedWeek   *int64          `json:"last_applied_week,omitempty"`
+	UpdatedAt         *time.Time      `json:"updated_at,omitempty"`
 }
 
 // SubmitPlan sets a club's weekly training plan (design §3). The plan is
@@ -165,6 +168,11 @@ func (s *Service) GetPlan(ctx context.Context, clubID uuid.UUID) (PlanView, erro
 	}
 	v.LastAppliedWeek = lastApplied
 	v.UpdatedAt = updatedAt
+	var name string
+	if err := s.pool.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1`, clubID).Scan(&name); err != nil {
+		return empty, fmt.Errorf("training plan: club name: %w", err)
+	}
+	v.Club = &apiref.ClubRef{ID: clubID, Name: name}
 	return v, nil
 }
 

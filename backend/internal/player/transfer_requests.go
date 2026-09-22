@@ -117,6 +117,9 @@ func (s *Service) resolveAs(ctx context.Context, worldID, managerID, clubID, req
 	if err != nil {
 		return nil, err
 	}
+	if err := decorateRequestRefs(ctx, tx, req); err != nil {
+		return nil, err
+	}
 	if req.ClubID != clubID {
 		return nil, ErrPlayerNotInClub
 	}
@@ -204,6 +207,9 @@ func (s *Service) resolveByPlayer(ctx context.Context, worldID, managerID, playe
 	}
 	if req == nil {
 		return requestView{}, ErrRequestNotFound
+	}
+	if err := decorateRequestRefs(ctx, tx, req); err != nil {
+		return requestView{}, err
 	}
 	var adjust func(ctx context.Context, tx pgx.Tx, r *TransferRequest) error
 	if !isApprove {

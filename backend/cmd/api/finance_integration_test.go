@@ -109,7 +109,8 @@ func TestHTTPFinancesRoundTrip(t *testing.T) {
 		t.Fatalf("contracts = %d, want 24", len(contracts))
 	}
 	for _, c := range contracts {
-		if c["player_name"] == "" || num(t, c, "weekly_wage") <= 0 ||
+		player, _ := c["player"].(map[string]any)
+		if player == nil || player["name"] == "" || num(t, c, "weekly_wage") <= 0 ||
 			c["start_date"] == "" || c["end_date"] == "" || c["status"] != "active" {
 			t.Fatalf("contract shape wrong: %v", c)
 		}

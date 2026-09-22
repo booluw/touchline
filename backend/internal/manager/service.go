@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -37,15 +38,18 @@ var (
 	ErrNotEmployed        = errors.New("manager has no club")
 )
 
-// JobOffer is the offer an AI club makes to an unemployed human manager.
+// JobOffer is the offer an AI club makes to an unemployed human manager. The
+// wire carries the offered manager as a nested ref; ManagerID stays internal.
 type JobOffer struct {
-	ID        uuid.UUID `json:"id"`
-	WorldID   uuid.UUID `json:"world_id"`
-	ClubID    uuid.UUID `json:"club_id"`
-	ClubName  string    `json:"club_name"`
-	ManagerID uuid.UUID `json:"manager_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID          `json:"id"`
+	WorldID   uuid.UUID          `json:"world_id"`
+	ClubID    uuid.UUID          `json:"-"`
+	ClubName  string             `json:"-"`
+	Club      *apiref.ClubRef    `json:"club,omitempty"`
+	ManagerID uuid.UUID          `json:"-"`
+	Manager   *apiref.ManagerRef `json:"manager,omitempty"`
+	Status    string             `json:"status"`
+	CreatedAt time.Time          `json:"created_at"`
 }
 
 // ReputationEvent is one append-only reputation line (never mutated).
@@ -59,6 +63,25 @@ type ReputationEvent struct {
 	Delta      int        `json:"delta"`
 	Reason     string     `json:"reason"`
 	OccurredAt time.Time  `json:"occurred_at"`
+}
+
+// queryer is the SQL surface shared by pool and transaction reads.
+type queryer interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// managerDisplayName resolves one manager's display name from the person row.
+func managerDisplayName(ctx context.Context, q queryer, managerID uuid.UUID) (string, error) {
+	var name string
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE(first_name || COALESCE(' ' || last_name, ''), '')
+		FROM manager.managers m LEFT JOIN person.people p ON p.id = m.person_id
+		WHERE m.id = $1`, managerID).Scan(&name)
+	if err != nil {
+		return "", err
+	}
+	return name, nil
 }
 
 // CareerEntry is one entry in the manager's employment history (manager.manager_history).
@@ -174,7 +197,13 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 		}
 		return nil, fmt.Errorf("insert offer: %w", err)
 	}
-	o.WorldID, o.ClubID, o.ManagerID, o.ClubName = clubWorld, clubID, candidateID, clubName
+	o.WorldID = clubWorld
+	o.ClubID = clubID
+	o.Club = &apiref.ClubRef{ID: clubID, Name: clubName}
+	o.ManagerID = candidateID
+	if name, err := managerDisplayName(ctx, tx, candidateID); err == nil {
+		o.Manager = &apiref.ManagerRef{ID: candidateID, Name: name}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit offer: %w", err)
 	}
@@ -225,9 +254,56 @@ func (s *Service) ListOffers(ctx context.Context, managerID, worldID uuid.UUID) 
 		if err := rows.Scan(&o.ID, &o.WorldID, &o.ClubID, &o.ClubName, &o.ManagerID, &o.Status, &o.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan offer: %w", err)
 		}
+		o.Club = &apiref.ClubRef{ID: o.ClubID, Name: o.ClubName}
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := decorateOfferManagers(ctx, s.pool, out...); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// decorateOfferManagers resolves the nested manager refs of offers for the
+// wire, batching the name lookups across all offers.
+func decorateOfferManagers(ctx context.Context, q queryer, offers ...*JobOffer) error {
+	ids := make([]uuid.UUID, 0, len(offers))
+	for _, o := range offers {
+		if o != nil && o.ManagerID != uuid.Nil {
+			ids = append(ids, o.ManagerID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT m.id, COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), '')
+		FROM manager.managers m LEFT JOIN person.people p ON p.id = m.person_id
+		WHERE m.id = ANY($1::uuid[])`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	names := make(map[uuid.UUID]string, len(ids))
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return err
+		}
+		names[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, o := range offers {
+		if o != nil && o.ManagerID != uuid.Nil {
+			o.Manager = &apiref.ManagerRef{ID: o.ManagerID, Name: names[o.ManagerID]}
+		}
+	}
+	return nil
 }
 
 // AcceptJobOffer hires the candidate at the offering club. Enforces the
@@ -339,10 +415,17 @@ func (s *Service) AcceptJobOffer(ctx context.Context, offerID, managerID uuid.UU
 		return nil, err
 	}
 
+	managerRef := &apiref.ManagerRef{ID: managerID}
+	if name, err := managerDisplayName(ctx, tx, managerID); err == nil {
+		managerRef.Name = name
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit acceptance: %w", err)
 	}
-	return &JobOffer{ID: offerID, WorldID: worldID, ClubID: clubID, ClubName: clubName, ManagerID: managerID, Status: "accepted", CreatedAt: createdAt}, nil
+	return &JobOffer{ID: offerID, WorldID: worldID, ClubID: clubID, ClubName: clubName,
+		Club: &apiref.ClubRef{ID: clubID, Name: clubName}, ManagerID: managerID,
+		Manager: managerRef,
+		Status:  "accepted", CreatedAt: createdAt}, nil
 }
 
 // DeclineJobOffer marks the offer declined. The club may not re-offer while a
@@ -379,10 +462,15 @@ func (s *Service) DeclineJobOffer(ctx context.Context, offerID, managerID uuid.U
 		`UPDATE manager.job_offers SET status = 'declined', responded_at = now() WHERE id = $1`, offerID); err != nil {
 		return nil, fmt.Errorf("decline offer: %w", err)
 	}
+	managerRef := &apiref.ManagerRef{ID: managerID}
+	if name, err := managerDisplayName(ctx, tx, managerID); err == nil {
+		managerRef.Name = name
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit decline: %w", err)
 	}
-	return &JobOffer{ID: offerID, ManagerID: managerID, Status: "declined", CreatedAt: createdAt}, nil
+	return &JobOffer{ID: offerID, ManagerID: managerID, Manager: managerRef,
+		Status: "declined", CreatedAt: createdAt}, nil
 }
 
 // Resign has the manager quit their current club (self-service, actor=manager).

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // Event kinds emitted by the finance module.
@@ -110,16 +112,18 @@ type ContractInput struct {
 }
 
 // ContractView is a read-only representation of a player contract for the API.
+// Flat ids stay internal; the wire carries a nested player ref.
 type ContractView struct {
-	ID            uuid.UUID `json:"id"`
-	PlayerID      uuid.UUID `json:"player_id"`
-	PlayerName    string    `json:"player_name"`
-	WeeklyWage    int64     `json:"weekly_wage"`
-	SigningBonus  int64     `json:"signing_bonus"`
-	StartDate     string    `json:"start_date"`
-	EndDate       string    `json:"end_date"`
-	ReleaseClause *int64    `json:"release_clause,omitempty"`
-	Status        string    `json:"status"`
+	ID            uuid.UUID         `json:"id"`
+	PlayerID      uuid.UUID         `json:"-"`
+	PlayerName    string            `json:"-"`
+	Player        *apiref.PlayerRef `json:"player"`
+	WeeklyWage    int64             `json:"weekly_wage"`
+	SigningBonus  int64             `json:"signing_bonus"`
+	StartDate     string            `json:"start_date"`
+	EndDate       string            `json:"end_date"`
+	ReleaseClause *int64            `json:"release_clause,omitempty"`
+	Status        string            `json:"status"`
 }
 
 // ---------- bootstrap ----------

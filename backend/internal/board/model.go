@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // Persona is the stored board personality (club.boards.personality_type).
@@ -53,19 +55,21 @@ const (
 	TargetOperatingBank = "operating_balance" // 0 = break-even requirement
 )
 
-// Mandate is one structured board target row.
+// Mandate is one structured board target row. Flat ids stay internal; the wire
+// carries a nested club ref (manager_id stays flat as the subject identity).
 type Mandate struct {
-	ID          uuid.UUID  `json:"id"`
-	ClubID      uuid.UUID  `json:"club_id"`
-	ManagerID   uuid.UUID  `json:"manager_id"`
-	Season      int        `json:"season"`
-	Category    string     `json:"category"`
-	Description string     `json:"description"`
-	TargetType  string     `json:"target_type"`
-	TargetValue string     `json:"target_value"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"created_at"`
-	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
+	ID          uuid.UUID       `json:"id"`
+	ClubID      uuid.UUID       `json:"-"`
+	Club        *apiref.ClubRef `json:"club"`
+	ManagerID   uuid.UUID       `json:"manager_id"`
+	Season      int             `json:"season"`
+	Category    string          `json:"category"`
+	Description string          `json:"description"`
+	TargetType  string          `json:"target_type"`
+	TargetValue string          `json:"target_value"`
+	Status      string          `json:"status"`
+	CreatedAt   time.Time       `json:"created_at"`
+	ResolvedAt  *time.Time      `json:"resolved_at,omitempty"`
 }
 
 // FactorScores is one snapshotted factor breakdown, mirroring the
@@ -81,13 +85,15 @@ type FactorScores struct {
 	Total              int `json:"total_score"`
 }
 
-// Snapshot is one job-security snapshot row plus its tick.
+// Snapshot is one job-security snapshot row plus its tick. Flat ids stay
+// internal; the wire carries a nested club ref (manager_id stays flat).
 type Snapshot struct {
-	ManagerID   uuid.UUID    `json:"manager_id"`
-	ClubID      uuid.UUID    `json:"club_id"`
-	WorldTick   int64        `json:"world_tick"`
-	Scores      FactorScores `json:"scores"`
-	Explanation []byte       `json:"-"`
+	ManagerID   uuid.UUID       `json:"manager_id"`
+	ClubID      uuid.UUID       `json:"-"`
+	Club        *apiref.ClubRef `json:"club"`
+	WorldTick   int64           `json:"world_tick"`
+	Scores      FactorScores    `json:"scores"`
+	Explanation []byte          `json:"-"`
 }
 
 // View is the manager-facing board read model (GET /api/managers/me/board):

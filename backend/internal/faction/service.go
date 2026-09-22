@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
@@ -93,9 +94,20 @@ func (s *Service) GetDynamics(ctx context.Context, worldID, managerID, clubID uu
 	if err != nil {
 		return Dynamics{}, err
 	}
+	if unrest != nil {
+		unrest.AffectedRefs = playerRefs(unrest.Affected, names)
+	}
+
+	res.AttachNames(names)
+
+	var clubName string
+	if err := s.pool.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1`, clubID).Scan(&clubName); err != nil {
+		return Dynamics{}, err
+	}
 
 	return Dynamics{
 		ClubID:           clubID,
+		Club:             &apiref.ClubRef{ID: clubID, Name: clubName},
 		Action:           res.Action,
 		Cohesion:         overallCohesion(res.Factions),
 		ManagerSupport:   support,

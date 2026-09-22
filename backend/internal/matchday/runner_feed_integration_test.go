@@ -45,7 +45,7 @@ func (r *feedRecorder) ticks(matchID uuid.UUID) []match.MatchTickPayload {
 		if err := json.Unmarshal(ev.Payload, &tk); err != nil {
 			continue
 		}
-		if tk.MatchID == matchID {
+		if tk.Match.ID == matchID {
 			out = append(out, tk)
 		}
 	}
@@ -133,10 +133,30 @@ func TestRunnerPublishesMatchTickFeed(t *testing.T) {
 	}
 	for i, ev := range fed {
 		want := persisted[i]
-		if ev.ID != want.ID || ev.Sequence != want.Sequence || ev.Minute != want.Minute || ev.Type != want.Type {
-			t.Fatalf("tick feed[%d] = %s seq %d m%d %s, want %s seq %d m%d %s",
-				i, ev.ID, ev.Sequence, ev.Minute, ev.Type, want.ID, want.Sequence, want.Minute, want.Type)
+		if ev.ID != want.ID || ev.Sequence != want.Sequence || ev.Minute != want.Minute ||
+			ev.Type != want.Type || ev.Match.ID != want.Match.ID {
+			t.Fatalf("tick feed[%d] = %s seq %d m%d %s match %s, want %s seq %d m%d %s match %s",
+				i, ev.ID, ev.Sequence, ev.Minute, ev.Type, ev.Match.ID,
+				want.ID, want.Sequence, want.Minute, want.Type, want.Match.ID)
 		}
+	}
+
+	// Persisted and tick rows carry identical nested club/player refs.
+	for i, ev := range fed {
+		want := persisted[i]
+		if ev.Club != nil && (want.Club == nil || ev.Club.ID != want.Club.ID) {
+			t.Fatalf("tick feed[%d] club mismatch: tick %+v, persisted %+v", i, ev.Club, want.Club)
+		}
+		if ev.Player != nil && (want.Player == nil || ev.Player.ID != want.Player.ID) {
+			t.Fatalf("tick feed[%d] player mismatch: tick %+v, persisted %+v", i, ev.Player, want.Player)
+		}
+	}
+	if ticks[0].Match.ID == uuid.Nil || ticks[0].Fixture.ID == uuid.Nil {
+		t.Fatalf("tick carried no match/fixture ref: %+v", ticks[0])
+	}
+	if ticks[0].HomeClub.ID == uuid.Nil || ticks[0].HomeClub.Name == "" ||
+		ticks[0].AwayClub.ID == uuid.Nil || ticks[0].AwayClub.Name == "" {
+		t.Fatalf("tick carried no home/away club refs: %+v", ticks[0])
 	}
 
 	// The final tick carries the authoritative server scoreline (client never

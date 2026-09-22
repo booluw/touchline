@@ -27,7 +27,6 @@ func TestDeriveProgressClampsToWindow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			v := &PlayerInjury{
 				InjuryID:         uuid.New(),
-				PlayerID:         uuid.New(),
 				InjuryType:       "muscle",
 				OccurredAt:       occurred,
 				ExpectedRecovery: expected,

@@ -22,6 +22,7 @@ import (
 
 	"github.com/touchline/backend/internal/competition"
 	"github.com/touchline/backend/internal/match"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/realtime"
 )
 
@@ -174,15 +175,15 @@ func (r *Runner) publishTick(ctx context.Context, sess *match.LiveSession, minut
 		return fmt.Errorf("match tick: scoreline: %w", err)
 	}
 	ev := realtime.MustEvent(realtime.EventMatchTick, sess.WorldID, match.MatchTickPayload{
-		MatchID:    sess.MatchID,
-		FixtureID:  sess.FixtureID,
-		Minute:     minute,
-		Status:     match.MatchStatusInProgress,
-		HomeClubID: sess.HomeClubID,
-		AwayClubID: sess.AwayClubID,
-		HomeScore:  home,
-		AwayScore:  away,
-		Events:     rows,
+		Match:     apiref.MatchRef{ID: sess.MatchID},
+		Fixture:   apiref.FixtureRef{ID: sess.FixtureID},
+		Minute:    minute,
+		Status:    match.MatchStatusInProgress,
+		HomeClub:  apiref.ClubRef{ID: sess.HomeClubID, Name: sess.HomeClubName},
+		AwayClub:  apiref.ClubRef{ID: sess.AwayClubID, Name: sess.AwayClubName},
+		HomeScore: home,
+		AwayScore: away,
+		Events:    rows,
 	})
 	if err := r.rt.Publish(ctx, ev); err != nil {
 		return fmt.Errorf("match tick: publish: %w", err)
@@ -197,14 +198,14 @@ func (r *Runner) publishCompleted(ctx context.Context, sess *match.LiveSession, 
 		return nil
 	}
 	ev := realtime.MustEvent(realtime.EventMatchTick, sess.WorldID, match.MatchTickPayload{
-		MatchID:    sess.MatchID,
-		FixtureID:  sess.FixtureID,
-		Minute:     90,
-		Status:     match.MatchStatusCompleted,
-		HomeClubID: sess.HomeClubID,
-		AwayClubID: sess.AwayClubID,
-		HomeScore:  res.HomeGoals,
-		AwayScore:  res.AwayGoals,
+		Match:     apiref.MatchRef{ID: sess.MatchID},
+		Fixture:   apiref.FixtureRef{ID: sess.FixtureID},
+		Minute:    90,
+		Status:    match.MatchStatusCompleted,
+		HomeClub:  apiref.ClubRef{ID: sess.HomeClubID, Name: sess.HomeClubName},
+		AwayClub:  apiref.ClubRef{ID: sess.AwayClubID, Name: sess.AwayClubName},
+		HomeScore: res.HomeGoals,
+		AwayScore: res.AwayGoals,
 	})
 	if err := r.rt.Publish(ctx, ev); err != nil {
 		return fmt.Errorf("match tick: publish completion: %w", err)

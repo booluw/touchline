@@ -61,7 +61,7 @@ onUnmounted(() => matchStore.disconnect())
       <template v-if="fixture">
         <header class="bg-slate-800 border border-slate-700 rounded-lg p-6">
           <div class="flex items-center justify-between gap-4 text-center">
-            <div class="flex-1 font-semibold text-white">{{ fixture.home_club_name }}</div>
+            <div class="flex-1 font-semibold text-white">{{ fixture.home_club.name }}</div>
             <div class="shrink-0">
               <div class="text-4xl font-bold text-white">
                 {{ match ? `${match.home_score}–${match.away_score}` : '–' }}
@@ -72,7 +72,7 @@ onUnmounted(() => matchStore.disconnect())
                 {{ statusText }}
               </div>
             </div>
-            <div class="flex-1 font-semibold text-white">{{ fixture.away_club_name }}</div>
+            <div class="flex-1 font-semibold text-white">{{ fixture.away_club.name }}</div>
           </div>
         </header>
 

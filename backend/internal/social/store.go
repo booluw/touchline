@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // managerBaseRow is the manager row + a display name resolved from the person
@@ -195,6 +197,7 @@ func (s *Service) rivalEdges(ctx context.Context, worldID uuid.UUID, entityID uu
 		if err := rows.Scan(&e.RelationshipType, &e.EntityType, &e.EntityID, &e.Strength, &e.Trust, &e.Sentiment, &e.EntityName); err != nil {
 			return nil, fmt.Errorf("scan rival edge: %w", err)
 		}
+		e.Entity = &apiref.EntityRef{ID: e.EntityID, Name: e.EntityName, Type: e.EntityType}
 		out = append(out, e)
 	}
 	return out, rows.Err()

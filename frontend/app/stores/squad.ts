@@ -1,7 +1,12 @@
+export interface LineupSlotPlayer {
+  id: string
+  name?: string
+}
+
 export interface LineupSlot {
   slot: number
   position: string
-  player_id: string
+  player: LineupSlotPlayer | null
 }
 
 export interface LineupView {

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // ClubRef is the compact club identity shown on a manager profile.
@@ -46,15 +47,17 @@ type H2HRecord struct {
 // RivalEdge is one relationship graph edge attached to the manager (manager↔
 // manager) or their active club (club↔club), shown on the profile. Club edges
 // are the full rivalry truth for AI-managed clubs; human managers additionally
-// see their personal edges (S06-04c).
+// see their personal edges (S06-04c). Flat ids stay internal; the wire carries
+// a nested entity ref.
 type RivalEdge struct {
-	RelationshipType string    `json:"relationship_type"`
-	EntityType       string    `json:"entity_type"`
-	EntityID         uuid.UUID `json:"entity_id"`
-	EntityName       string    `json:"entity_name"`
-	Strength         int       `json:"strength"`
-	Trust            int       `json:"trust"`
-	Sentiment        int       `json:"sentiment"`
+	RelationshipType string            `json:"relationship_type"`
+	EntityType       string            `json:"-"`
+	EntityID         uuid.UUID         `json:"-"`
+	EntityName       string            `json:"-"`
+	Entity           *apiref.EntityRef `json:"entity"`
+	Strength         int               `json:"strength"`
+	Trust            int               `json:"trust"`
+	Sentiment        int               `json:"sentiment"`
 }
 
 // Profile is the assembled manager profile page (S06-04a).

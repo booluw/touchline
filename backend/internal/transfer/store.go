@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // Store is the persistence layer for the transfer module: read helpers query
@@ -44,6 +45,8 @@ func scanListing(row pgx.Row) (Listing, error) {
 		&l.ListingClubID, &l.ListingClubName,
 		&l.AskingPrice, &l.ListingType, &l.Status, &l.ListedAt,
 	)
+	l.Player = &apiref.PlayerRef{ID: l.PlayerID, Name: l.PlayerName}
+	l.ListingClub = &apiref.ClubRef{ID: l.ListingClubID, Name: l.ListingClubName}
 	return l, err
 }
 
@@ -145,6 +148,9 @@ func scanBid(row pgx.Row) (Bid, error) {
 		&b.Round, &b.ProposedBy, &b.Status,
 		&b.CreatedAt, &b.RespondedAt,
 	)
+	b.Player = &apiref.PlayerRef{ID: b.PlayerID, Name: b.PlayerName}
+	b.BiddingClub = &apiref.ClubRef{ID: b.BiddingClubID, Name: b.BiddingClubName}
+	b.SellingClub = &apiref.ClubRef{ID: b.SellingClubID, Name: b.SellingClubName}
 	return b, err
 }
 

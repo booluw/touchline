@@ -424,8 +424,13 @@ func (s *Service) createSeason(ctx context.Context, tx pgx.Tx, worldID, leagueID
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, competition_id, season_label, season_number, status`,
 		worldID, leagueID, label, number, bootRef, status,
-	).Scan(&season.ID, &season.CompetitionID, &season.SeasonLabel, &season.SeasonNumber, &season.Status); err != nil {
+	).Scan(&season.ID, &season.Competition.ID, &season.SeasonLabel, &season.SeasonNumber, &season.Status); err != nil {
 		return nil, fmt.Errorf("insert season: %w", err)
+	}
+	if err := tx.QueryRow(ctx,
+		`SELECT name FROM competition.competitions WHERE id = $1`, leagueID).
+		Scan(&season.Competition.Name); err != nil {
+		return nil, fmt.Errorf("load competition name: %w", err)
 	}
 
 	for _, clubID := range entries {
@@ -514,9 +519,15 @@ func clubSeeds(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) []ClubSeed {
 func (s *Service) leaguesByCountry(ctx context.Context, tx pgx.Tx, countryID uuid.UUID) ([]League, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
-		       r.promotions, r.relegations, r.promotes_to_competition_id, r.relegates_to_competition_id
+		       r.promotions, r.relegations,
+		       r.promotes_to_competition_id, r.relegates_to_competition_id,
+		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),
+		       wc.name, wc.code
 		FROM competition.competitions c
 		JOIN competition.competition_rules r ON r.competition_id = c.id
+		LEFT JOIN competition.competitions ptc ON ptc.id = r.promotes_to_competition_id
+		LEFT JOIN competition.competitions rtc ON rtc.id = r.relegates_to_competition_id
+		JOIN world.countries wc ON wc.id = c.country_id
 		WHERE c.country_id = $1 AND c.competition_type = 'league'
 		ORDER BY c.tier, c.name`, countryID)
 	if err != nil {

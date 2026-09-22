@@ -16,6 +16,7 @@ import (
 	"github.com/touchline/backend/internal/player"
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/matchsim"
 )
@@ -152,11 +153,11 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}
 
-	homeClub, err := s.squad.LoadClub(ctx, f.HomeClubID)
+	homeClub, err := s.squad.LoadClub(ctx, f.HomeClub.ID)
 	if err != nil {
 		return nil, fmt.Errorf("play fixture: home club: %w", err)
 	}
-	awayClub, err := s.squad.LoadClub(ctx, f.AwayClubID)
+	awayClub, err := s.squad.LoadClub(ctx, f.AwayClub.ID)
 	if err != nil {
 		return nil, fmt.Errorf("play fixture: away club: %w", err)
 	}
@@ -213,7 +214,7 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 	// Rivalry graph + trust deltas land atomically with the result (S06-04c).
 	var socialPush *internalsocial.RelationshipPush
 	if s.social != nil {
-		if socialPush, err = s.social.RecordCompletedMatch(ctx, tx, f.WorldID, fixtureID, f.HomeClubID, f.AwayClubID, res.HomeGoals, res.AwayGoals, now); err != nil {
+		if socialPush, err = s.social.RecordCompletedMatch(ctx, tx, f.WorldID, fixtureID, f.HomeClub.ID, f.AwayClub.ID, res.HomeGoals, res.AwayGoals, now); err != nil {
 			return nil, fmt.Errorf("play fixture: %w", err)
 		}
 	}
@@ -287,7 +288,7 @@ func loadFixture(ctx context.Context, tx pgx.Tx, id uuid.UUID, forUpdate bool) (
 	}
 	f := &Fixture{}
 	err := tx.QueryRow(ctx, sql, id).Scan(
-		&f.ID, &f.WorldID, &f.CompetitionID, &f.HomeClubID, &f.AwayClubID,
+		&f.ID, &f.WorldID, &f.Competition.ID, &f.HomeClub.ID, &f.AwayClub.ID,
 		&f.Matchday, &f.ScheduledAt, &f.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("fixture %s not found", id)
@@ -353,15 +354,15 @@ func persistEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matc
 			return nil, fmt.Errorf("insert match event: %w", err)
 		}
 		out = append(out, &MatchEventRow{
-			ID:              rowID,
-			MatchID:         matchID,
-			Sequence:        ev.Sequence,
-			Minute:          ev.Minute,
-			Type:            ev.Type,
-			ClubID:          clubID,
-			PlayerID:        playerID,
-			RelatedPlayerID: relatedID,
-			Detail:          append(json.RawMessage(nil), detail...),
+			ID:            rowID,
+			Match:         apiref.MatchRef{ID: matchID},
+			Sequence:      ev.Sequence,
+			Minute:        ev.Minute,
+			Type:          ev.Type,
+			Club:          clubRef(clubID),
+			Player:        playerRef(playerID),
+			RelatedPlayer: playerRef(relatedID),
+			Detail:        append(json.RawMessage(nil), detail...),
 		})
 	}
 	return out, nil
@@ -381,6 +382,93 @@ func eventPlayers(ev matchsim.MatchEvent) (playerID, relatedID *uuid.UUID) {
 		}
 	}
 	return playerID, relatedID
+}
+
+// clubRef wraps an optional club id into a nested ref (nil stays nil).
+func clubRef(id *uuid.UUID) *apiref.ClubRef {
+	if id == nil {
+		return nil
+	}
+	return &apiref.ClubRef{ID: *id}
+}
+
+// playerRef wraps an optional player id into a nested ref (nil stays nil).
+func playerRef(id *uuid.UUID) *apiref.PlayerRef {
+	if id == nil {
+		return nil
+	}
+	return &apiref.PlayerRef{ID: *id}
+}
+
+// resolveEventRefs decorates a batch of persisted event rows with the club and
+// player display names so REST feeds and live ticks carry nested {id,name}
+// refs. Best-effort: an id that no longer resolves keeps an id-only ref.
+func resolveEventRefs(ctx context.Context, conn interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, rows []*MatchEventRow) {
+	clubIDs := make(map[uuid.UUID]struct{})
+	playerIDs := make(map[uuid.UUID]struct{})
+	for _, e := range rows {
+		if e.Club != nil {
+			clubIDs[e.Club.ID] = struct{}{}
+		}
+		if e.Player != nil {
+			playerIDs[e.Player.ID] = struct{}{}
+		}
+		if e.RelatedPlayer != nil {
+			playerIDs[e.RelatedPlayer.ID] = struct{}{}
+		}
+	}
+	names := make(map[uuid.UUID]string, len(clubIDs)+len(playerIDs))
+	if len(clubIDs) > 0 {
+		if rs, err := conn.Query(ctx,
+			`SELECT id, name FROM club.clubs WHERE id = ANY($1::uuid[])`, uuidSet(clubIDs)); err == nil {
+			for rs.Next() {
+				var id uuid.UUID
+				var name string
+				if rs.Scan(&id, &name) == nil {
+					names[id] = name
+				}
+			}
+			rs.Close()
+		}
+	}
+	if len(playerIDs) > 0 {
+		if rs, err := conn.Query(ctx, `
+			SELECT p.id, pe.display_name
+			FROM player.players p
+			JOIN person.people pe ON pe.id = p.person_id
+			WHERE p.id = ANY($1::uuid[])`, uuidSet(playerIDs)); err == nil {
+			for rs.Next() {
+				var id uuid.UUID
+				var name string
+				if rs.Scan(&id, &name) == nil {
+					names[id] = name
+				}
+			}
+			rs.Close()
+		}
+	}
+	for _, e := range rows {
+		if e.Club != nil {
+			e.Club.Name = names[e.Club.ID]
+		}
+		if e.Player != nil {
+			e.Player.Name = names[e.Player.ID]
+		}
+		if e.RelatedPlayer != nil {
+			e.RelatedPlayer.Name = names[e.RelatedPlayer.ID]
+		}
+	}
+}
+
+// uuidSet flattens a set of ids into a stable slice for ANY() parameters.
+func uuidSet(set map[uuid.UUID]struct{}) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	return out
 }
 
 // lineupsTeam stamps a plan's frozen XI/bench/taker onto the engine Team so the
@@ -554,7 +642,7 @@ func (s *Service) fixtureContext(ctx context.Context, tx pgx.Tx, f *Fixture) (sq
 	var compType string
 	var reputation int
 	err := tx.QueryRow(ctx,
-		`SELECT competition_type, reputation FROM competition.competitions WHERE id = $1`, f.CompetitionID).
+		`SELECT competition_type, reputation FROM competition.competitions WHERE id = $1`, f.Competition.ID).
 		Scan(&compType, &reputation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		compType = "custom"
@@ -566,7 +654,7 @@ func (s *Service) fixtureContext(ctx context.Context, tx pgx.Tx, f *Fixture) (sq
 		fc.LeagueTier = reputation
 	}
 
-	intensity, err := s.squad.LoadRivalryIntensity(ctx, f.HomeClubID, f.AwayClubID)
+	intensity, err := s.squad.LoadRivalryIntensity(ctx, f.HomeClub.ID, f.AwayClub.ID)
 	if err != nil {
 		return fc, err
 	}
@@ -612,7 +700,7 @@ type teamPlan struct {
 // and the engine Team. oppRep is the opponent's persisted reputation (drives
 // the giant-killing gate in ComputeMotivation).
 func (s *Service) buildTeam(ctx context.Context, f *Fixture, club squad.ClubRow, oppRep int, tick int64, fc squad.FixtureContext, seed int64, t matchsim.Tuning) (*teamPlan, error) {
-	p := &teamPlan{club: club, isHome: club.ID == f.HomeClubID, worldTick: tick}
+	p := &teamPlan{club: club, isHome: club.ID == f.HomeClub.ID, worldTick: tick}
 
 	dna, err := s.squad.LoadClubDNA(ctx, club.ID)
 	if err != nil {
@@ -872,13 +960,13 @@ func loadEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID) ([]*MatchEven
 	for rows.Next() {
 		e := &MatchEventRow{}
 		var clubID, playerID, relatedID *uuid.UUID
-		if err := rows.Scan(&e.ID, &e.MatchID, &e.Sequence, &e.Minute, &e.Type,
+		if err := rows.Scan(&e.ID, &e.Match.ID, &e.Sequence, &e.Minute, &e.Type,
 			&clubID, &playerID, &relatedID, &e.Detail); err != nil {
 			return nil, err
 		}
-		e.ClubID = clubID
-		e.PlayerID = playerID
-		e.RelatedPlayerID = relatedID
+		e.Club = clubRef(clubID)
+		e.Player = playerRef(playerID)
+		e.RelatedPlayer = playerRef(relatedID)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -899,20 +987,28 @@ func (s *Service) GetFixture(ctx context.Context, id uuid.UUID) (*Fixture, error
 	}
 	defer conn.Release()
 	f := &Fixture{}
+	var hcName, hcShort, acName, acShort, compName string
 	err = conn.QueryRow(ctx, `
 		SELECT f.id, f.world_id, f.competition_id, f.home_club_id, f.away_club_id,
 		       COALESCE(f.matchday, 0), f.scheduled_at, f.status,
-		       hc.name, ac.name
+		       hc.name, COALESCE(hc.short_name, ''), ac.name, COALESCE(ac.short_name, ''),
+		       c.name
 		FROM match.fixtures f
 		JOIN club.clubs hc ON hc.id = f.home_club_id
 		JOIN club.clubs ac ON ac.id = f.away_club_id
+		JOIN competition.competitions c ON c.id = f.competition_id
 		WHERE f.id = $1`, id).
-		Scan(&f.ID, &f.WorldID, &f.CompetitionID, &f.HomeClubID, &f.AwayClubID,
+		Scan(&f.ID, &f.WorldID, &f.Competition.ID, &f.HomeClub.ID, &f.AwayClub.ID,
 			&f.Matchday, &f.ScheduledAt, &f.Status,
-			&f.HomeClubName, &f.AwayClubName)
+			&hcName, &hcShort, &acName, &acShort, &compName)
 	if err != nil {
 		return nil, err
 	}
+	f.Competition.Name = compName
+	f.HomeClub.Name = hcName
+	f.HomeClub.Short = hcShort
+	f.AwayClub.Name = acName
+	f.AwayClub.Short = acShort
 	return f, nil
 }
 
@@ -969,15 +1065,20 @@ func (s *Service) GetMatchEvents(ctx context.Context, matchID uuid.UUID) ([]*Mat
 	var out []*MatchEventRow
 	for rows.Next() {
 		e := &MatchEventRow{}
-		if err := rows.Scan(&e.ID, &e.MatchID, &e.Sequence, &e.Minute, &e.Type,
-			&e.ClubID, &e.PlayerID, &e.RelatedPlayerID, &e.Detail); err != nil {
+		var clubID, playerID, relatedID *uuid.UUID
+		if err := rows.Scan(&e.ID, &e.Match.ID, &e.Sequence, &e.Minute, &e.Type,
+			&clubID, &playerID, &relatedID, &e.Detail); err != nil {
 			return nil, err
 		}
+		e.Club = clubRef(clubID)
+		e.Player = playerRef(playerID)
+		e.RelatedPlayer = playerRef(relatedID)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	resolveEventRefs(ctx, s.pool, out)
 	return out, nil
 }
 

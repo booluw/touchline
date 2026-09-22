@@ -13,20 +13,20 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/touchline/backend/pkg/apiref"
 )
 
-// Fixture mirrors match.fixtures for the read/feed path.
+// Fixture mirrors match.fixtures for the read/feed path (nested refs).
 type Fixture struct {
-	ID            uuid.UUID `json:"id"`
-	WorldID       uuid.UUID `json:"world_id"`
-	CompetitionID uuid.UUID `json:"competition_id"`
-	HomeClubID    uuid.UUID `json:"home_club_id"`
-	HomeClubName  string    `json:"home_club_name"`
-	AwayClubID    uuid.UUID `json:"away_club_id"`
-	AwayClubName  string    `json:"away_club_name"`
-	Matchday      int       `json:"matchday,omitempty"`
-	ScheduledAt   time.Time `json:"scheduled_at"`
-	Status        string    `json:"status"`
+	ID          uuid.UUID             `json:"id"`
+	WorldID     uuid.UUID             `json:"world_id"`
+	Competition apiref.CompetitionRef `json:"competition"`
+	HomeClub    apiref.ClubRef        `json:"home_club"`
+	AwayClub    apiref.ClubRef        `json:"away_club"`
+	Matchday    int                   `json:"matchday,omitempty"`
+	ScheduledAt time.Time             `json:"scheduled_at"`
+	Status      string                `json:"status"`
 }
 
 // MatchView is the match-screen header: the live clock, status, and the
@@ -59,19 +59,19 @@ type Match struct {
 	EndedAt       *time.Time `json:"ended_at,omitempty"`
 }
 
-// MatchEventRow mirrors match.match_events for the feed/read path. Player
-// pointers are nil when the engine event was a bare marker (kickoff/half/full
-// time) or carried no castable player.
+// MatchEventRow mirrors match.match_events for the feed/read path. Club and
+// player refs are nil when the engine event was a bare marker (kickoff/half/
+// full time) or carried no castable player/related player.
 type MatchEventRow struct {
-	ID              uuid.UUID       `json:"id"`
-	MatchID         uuid.UUID       `json:"match_id"`
-	Sequence        int             `json:"sequence"`
-	Minute          int             `json:"minute"`
-	Type            string          `json:"type"`
-	ClubID          *uuid.UUID      `json:"club_id,omitempty"`
-	PlayerID        *uuid.UUID      `json:"player_id,omitempty"`
-	RelatedPlayerID *uuid.UUID      `json:"related_player_id,omitempty"`
-	Detail          json.RawMessage `json:"detail,omitempty"` // JSONB commentary
+	ID            uuid.UUID         `json:"id"`
+	Match         apiref.MatchRef   `json:"match"`
+	Sequence      int               `json:"sequence"`
+	Minute        int               `json:"minute"`
+	Type          string            `json:"type"`
+	Club          *apiref.ClubRef   `json:"club,omitempty"`
+	Player        *apiref.PlayerRef `json:"player,omitempty"`
+	RelatedPlayer *apiref.PlayerRef `json:"related_player,omitempty"`
+	Detail        json.RawMessage   `json:"detail,omitempty"` // JSONB commentary
 }
 
 // MatchResult is the full outcome of one fixture.
@@ -86,13 +86,13 @@ type MatchResult struct {
 // outcomes. Events may be empty for silent minutes (the tick still advances
 // the clock and scoreline).
 type MatchTickPayload struct {
-	MatchID    uuid.UUID        `json:"match_id"`
-	FixtureID  uuid.UUID        `json:"fixture_id"`
-	Minute     int              `json:"minute"`
-	Status     string           `json:"status"`
-	HomeClubID uuid.UUID        `json:"home_club_id"`
-	AwayClubID uuid.UUID        `json:"away_club_id"`
-	HomeScore  int              `json:"home_score"`
-	AwayScore  int              `json:"away_score"`
-	Events     []*MatchEventRow `json:"events,omitempty"`
+	Match     apiref.MatchRef   `json:"match"`
+	Fixture   apiref.FixtureRef `json:"fixture"`
+	Minute    int               `json:"minute"`
+	Status    string            `json:"status"`
+	HomeClub  apiref.ClubRef    `json:"home_club"`
+	AwayClub  apiref.ClubRef    `json:"away_club"`
+	HomeScore int               `json:"home_score"`
+	AwayScore int               `json:"away_score"`
+	Events    []*MatchEventRow  `json:"events,omitempty"`
 }

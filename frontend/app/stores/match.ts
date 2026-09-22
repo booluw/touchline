@@ -12,24 +12,22 @@ export type EventType =
 
 export interface MatchEvent {
   id: string
-  match_id: string
+  match: { id: string }
   sequence: number
   minute: number
   type: EventType
-  club_id?: string
-  player_id?: string
-  related_player_id?: string
+  club?: { id: string; name?: string }
+  player?: { id: string; name?: string }
+  related_player?: { id: string; name?: string }
   detail?: { commentary?: string; detail?: string }
 }
 
 export interface FixtureHeader {
   id: string
   world_id: string
-  competition_id: string
-  home_club_id: string
-  home_club_name: string
-  away_club_id: string
-  away_club_name: string
+  competition: { id: string; name?: string }
+  home_club: { id: string; name?: string; short?: string }
+  away_club: { id: string; name?: string; short?: string }
   matchday: number
   scheduled_at: string
   status: string
@@ -44,12 +42,12 @@ export interface MatchHeader {
 }
 
 export interface MatchTickPayload {
-  match_id: string
-  fixture_id: string
+  match: { id: string }
+  fixture: { id: string }
   minute: number
   status: string
-  home_club_id: string
-  away_club_id: string
+  home_club: { id: string; name?: string }
+  away_club: { id: string; name?: string }
   home_score: number
   away_score: number
   events?: MatchEvent[]
@@ -99,7 +97,7 @@ export const useMatchStore = defineStore('match', {
 
       this.unwatch = socket.on('match_tick', (event) => {
         const tick = event.payload as MatchTickPayload
-        if (!tick || tick.fixture_id !== fixtureId) return
+        if (!tick || tick.fixture?.id !== fixtureId) return
         if (!this.match) return
 
         this.applyTick(tick)

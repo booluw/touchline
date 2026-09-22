@@ -18,6 +18,7 @@ import (
 	"github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/training"
 	"github.com/touchline/backend/internal/transfer"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
@@ -284,14 +285,16 @@ func (s *Service) GetPolicy(ctx context.Context, managerID uuid.UUID, policyType
 }
 
 // AbsenceView is the manager-facing absence state plus the world/club context
-// needed by the UI.
+// needed by the UI. The manager id stays flat (self-path echo); the club ids
+// nest into refs.
 type AbsenceView struct {
-	ManagerID        uuid.UUID    `json:"manager_id"`
-	WorldID          uuid.UUID    `json:"world_id"`
-	AbsenceState     AbsenceState `json:"absence_state"`
-	ClubIDs          []uuid.UUID  `json:"club_ids"`
-	NextFixtureAt    *time.Time   `json:"next_fixture_at,omitempty"`
-	DelegationActive bool         `json:"delegation_active"`
+	ManagerID        uuid.UUID         `json:"manager_id"`
+	WorldID          uuid.UUID         `json:"world_id"`
+	AbsenceState     AbsenceState      `json:"absence_state"`
+	ClubIDs          []uuid.UUID       `json:"-"`
+	Clubs            []*apiref.ClubRef `json:"clubs"`
+	NextFixtureAt    *time.Time        `json:"next_fixture_at,omitempty"`
+	DelegationActive bool              `json:"delegation_active"`
 }
 
 // GetAbsence assembles the manager's absence state with their clubs and next
@@ -315,11 +318,22 @@ func (s *Service) GetAbsence(ctx context.Context, worldID, managerID uuid.UUID) 
 			}
 		}
 	}
+	clubs := make([]*apiref.ClubRef, 0, len(clubIDs))
+	if len(clubIDs) > 0 {
+		rows, err := s.store.ClubNames(ctx, clubIDs)
+		if err != nil {
+			return AbsenceView{}, err
+		}
+		for _, id := range clubIDs {
+			clubs = append(clubs, &apiref.ClubRef{ID: id, Name: rows[id]})
+		}
+	}
 	return AbsenceView{
 		ManagerID:        managerID,
 		WorldID:          worldID,
 		AbsenceState:     state,
 		ClubIDs:          clubIDs,
+		Clubs:            clubs,
 		NextFixtureAt:    next,
 		DelegationActive: state.IsAway(),
 	}, nil

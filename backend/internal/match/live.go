@@ -70,27 +70,29 @@ type simInputs struct {
 // nextMinute is the next simulated minute to produce (1..90); a value above 90
 // means full time was reached and Finalize is pending.
 type LiveSession struct {
-	MatchID     uuid.UUID
-	FixtureID   uuid.UUID
-	WorldID     uuid.UUID
-	HomeClubID  uuid.UUID
-	AwayClubID  uuid.UUID
-	ScheduledAt time.Time
-	Seed        int64
-	Home        matchsim.Team
-	Away        matchsim.Team
-	homeXI      []squad.SquadMember
-	awayXI      []squad.SquadMember
-	homeBench   []squad.SquadMember
-	awayBench   []squad.SquadMember
-	homeTaker   *squad.SquadMember
-	awayTaker   *squad.SquadMember
-	formHome    form.FormState
-	formAway    form.FormState
-	fc          squad.FixtureContext
-	worldTick   int64
-	pacing      time.Duration
-	nextMinute  int
+	MatchID      uuid.UUID
+	FixtureID    uuid.UUID
+	WorldID      uuid.UUID
+	HomeClubID   uuid.UUID
+	HomeClubName string
+	AwayClubID   uuid.UUID
+	AwayClubName string
+	ScheduledAt  time.Time
+	Seed         int64
+	Home         matchsim.Team
+	Away         matchsim.Team
+	homeXI       []squad.SquadMember
+	awayXI       []squad.SquadMember
+	homeBench    []squad.SquadMember
+	awayBench    []squad.SquadMember
+	homeTaker    *squad.SquadMember
+	awayTaker    *squad.SquadMember
+	formHome     form.FormState
+	formAway     form.FormState
+	fc           squad.FixtureContext
+	worldTick    int64
+	pacing       time.Duration
+	nextMinute   int
 }
 
 // NextMinute reports the next simulated minute (1..90; >90 = full time).
@@ -191,11 +193,11 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 		return nil, fmt.Errorf("kickoff fixture: %w", err)
 	}
 
-	homeClub, err := s.squad.LoadClub(ctx, f.HomeClubID)
+	homeClub, err := s.squad.LoadClub(ctx, f.HomeClub.ID)
 	if err != nil {
 		return nil, fmt.Errorf("kickoff fixture: home club: %w", err)
 	}
-	awayClub, err := s.squad.LoadClub(ctx, f.AwayClubID)
+	awayClub, err := s.squad.LoadClub(ctx, f.AwayClub.ID)
 	if err != nil {
 		return nil, fmt.Errorf("kickoff fixture: away club: %w", err)
 	}
@@ -257,27 +259,29 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 	}
 
 	return &LiveSession{
-		MatchID:     matchID,
-		FixtureID:   fixtureID,
-		WorldID:     f.WorldID,
-		HomeClubID:  f.HomeClubID,
-		AwayClubID:  f.AwayClubID,
-		ScheduledAt: f.ScheduledAt,
-		Seed:        seed,
-		Home:        homePlan.team,
-		Away:        awayPlan.team,
-		homeXI:      homePlan.xi,
-		awayXI:      awayPlan.xi,
-		homeBench:   homePlan.bench,
-		awayBench:   awayPlan.bench,
-		homeTaker:   homePlan.taker,
-		awayTaker:   awayPlan.taker,
-		formHome:    homePlan.formState,
-		formAway:    awayPlan.formState,
-		fc:          fc,
-		worldTick:   tick,
-		pacing:      pacing,
-		nextMinute:  1,
+		MatchID:      matchID,
+		FixtureID:    fixtureID,
+		WorldID:      f.WorldID,
+		HomeClubID:   f.HomeClub.ID,
+		HomeClubName: homeClub.Name,
+		AwayClubID:   f.AwayClub.ID,
+		AwayClubName: awayClub.Name,
+		ScheduledAt:  f.ScheduledAt,
+		Seed:         seed,
+		Home:         homePlan.team,
+		Away:         awayPlan.team,
+		homeXI:       homePlan.xi,
+		awayXI:       awayPlan.xi,
+		homeBench:    homePlan.bench,
+		awayBench:    awayPlan.bench,
+		homeTaker:    homePlan.taker,
+		awayTaker:    awayPlan.taker,
+		formHome:     homePlan.formState,
+		formAway:     awayPlan.formState,
+		fc:           fc,
+		worldTick:    tick,
+		pacing:       pacing,
+		nextMinute:   1,
 	}, nil
 }
 
@@ -375,6 +379,7 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 	}
 
 	sess.nextMinute = m + 1
+	resolveEventRefs(ctx, s.pool, rows)
 	return rows, sess.nextMinute > 90, nil
 }
 
@@ -498,9 +503,12 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*LiveSession, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.world_id, f.home_club_id, f.away_club_id, f.scheduled_at,
+		       hc.name, ac.name,
 		       m.id, m.seed, m.sim_inputs, COALESCE(m.pacing_millis, 0), m.current_minute
 		FROM match.fixtures f
 		JOIN match.matches m ON m.fixture_id = f.id
+		JOIN club.clubs hc ON hc.id = f.home_club_id
+		JOIN club.clubs ac ON ac.id = f.away_club_id
 		WHERE f.world_id = $1 AND f.status = 'live' AND m.status = 'in_progress'
 		ORDER BY f.scheduled_at, f.id`, worldID)
 	if err != nil {
@@ -512,12 +520,14 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 	for rows.Next() {
 		var (
 			fixtureID, matchID, homeClubID, awayClubID, worldIDX uuid.UUID
+			homeClubName, awayClubName                           string
 			scheduledAt                                          time.Time
 			seed                                                 int64
 			raw                                                  []byte
 			pacingMillis, currentMinute                          int
 		)
 		if err := rows.Scan(&fixtureID, &worldIDX, &homeClubID, &awayClubID, &scheduledAt,
+			&homeClubName, &awayClubName,
 			&matchID, &seed, &raw, &pacingMillis, &currentMinute); err != nil {
 			return nil, fmt.Errorf("load live sessions: scan: %w", err)
 		}
@@ -530,27 +540,29 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 			pacing = time.Duration(pacingMillis) * time.Millisecond
 		}
 		out = append(out, &LiveSession{
-			MatchID:     matchID,
-			FixtureID:   fixtureID,
-			WorldID:     worldIDX,
-			HomeClubID:  homeClubID,
-			AwayClubID:  awayClubID,
-			ScheduledAt: scheduledAt,
-			Seed:        seed,
-			Home:        snap.HomeTeam,
-			Away:        snap.AwayTeam,
-			homeXI:      snap.HomeXI,
-			awayXI:      snap.AwayXI,
-			homeBench:   snap.HomeBench,
-			awayBench:   snap.AwayBench,
-			homeTaker:   snap.HomeTaker,
-			awayTaker:   snap.AwayTaker,
-			formHome:    snap.FormHome,
-			formAway:    snap.FormAway,
-			fc:          snap.FixtureContext,
-			worldTick:   snap.WorldTick,
-			pacing:      pacing,
-			nextMinute:  currentMinute + 1,
+			MatchID:      matchID,
+			FixtureID:    fixtureID,
+			WorldID:      worldIDX,
+			HomeClubID:   homeClubID,
+			HomeClubName: homeClubName,
+			AwayClubID:   awayClubID,
+			AwayClubName: awayClubName,
+			ScheduledAt:  scheduledAt,
+			Seed:         seed,
+			Home:         snap.HomeTeam,
+			Away:         snap.AwayTeam,
+			homeXI:       snap.HomeXI,
+			awayXI:       snap.AwayXI,
+			homeBench:    snap.HomeBench,
+			awayBench:    snap.AwayBench,
+			homeTaker:    snap.HomeTaker,
+			awayTaker:    snap.AwayTaker,
+			formHome:     snap.FormHome,
+			formAway:     snap.FormAway,
+			fc:           snap.FixtureContext,
+			worldTick:    snap.WorldTick,
+			pacing:       pacing,
+			nextMinute:   currentMinute + 1,
 		})
 	}
 	if err := rows.Err(); err != nil {

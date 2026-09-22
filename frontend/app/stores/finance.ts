@@ -29,8 +29,7 @@ export interface LedgerEntry {
 }
 export interface ContractView {
   id: string
-  player_id: string
-  player_name: string
+  player: { id: string; name: string }
   weekly_wage: number
   signing_bonus: number
   start_date: string

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/realtime"
 )
@@ -31,17 +32,15 @@ const (
 )
 
 // MessagePush is the payload shared by the MESSAGE_SENT outbox event and the
-// realtime EventSocialMessage envelope: the persisted message plus the
-// sender's display name for immediate render.
+// realtime EventSocialMessage envelope: the persisted message plus nested
+// sender/recipient identities for immediate render.
 type MessagePush struct {
-	Message    Message `json:"message"`
-	SenderName string  `json:"sender_name"`
+	Message Message `json:"message"`
 }
 
-// InboxMessage is one inbox row plus the resolved sender display name.
+// InboxMessage is one inbox row with resolved identities.
 type InboxMessage struct {
 	Message
-	SenderName string `json:"sender_name"`
 }
 
 // SendMessage delivers a direct manager→manager message within worldID. It
@@ -86,8 +85,10 @@ func (s *Service) SendMessage(ctx context.Context, worldID, senderID, recipientI
 		WorldID:       worldID,
 		SenderID:      senderID,
 		SenderType:    "manager",
+		Sender:        &apiref.EntityRef{ID: senderID, Name: sender.name, Type: "manager"},
 		RecipientID:   recipientID,
 		RecipientType: "manager",
+		Recipient:     &apiref.EntityRef{ID: recipientID, Name: recipient.name, Type: "manager"},
 		Body:          body,
 	}
 
@@ -107,7 +108,7 @@ func (s *Service) SendMessage(ctx context.Context, worldID, senderID, recipientI
 		return nil, fmt.Errorf("insert message: %w", err)
 	}
 
-	payload, err := json.Marshal(MessagePush{Message: *msg, SenderName: sender.name})
+	payload, err := json.Marshal(MessagePush{Message: *msg})
 	if err != nil {
 		return nil, fmt.Errorf("marshal MESSAGE_SENT payload: %w", err)
 	}
@@ -126,7 +127,7 @@ func (s *Service) SendMessage(ctx context.Context, worldID, senderID, recipientI
 		return nil, fmt.Errorf("commit send: %w", err)
 	}
 
-	s.pushMessage(ctx, worldID, msg, sender.name)
+	s.pushMessage(ctx, worldID, msg)
 	return msg, nil
 }
 
@@ -134,11 +135,15 @@ func (s *Service) SendMessage(ctx context.Context, worldID, senderID, recipientI
 // bounded by MessageInboxLimit) plus their unread count.
 func (s *Service) ListInbox(ctx context.Context, worldID, managerID uuid.UUID) ([]InboxMessage, int, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT m.id, m.sender_id, m.recipient_id, m.subject, m.body, m.sent_at, m.read_at,
-		       COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), '')
+		SELECT m.id, m.sender_id, m.sender_type, m.recipient_id, m.recipient_type,
+		       m.subject, m.body, m.sent_at, m.read_at,
+		       COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), ''),
+		       COALESCE(pp.first_name || COALESCE(' ' || pp.last_name, ''), '')
 		FROM social.messages m
 		LEFT JOIN manager.managers mg ON mg.id = m.sender_id
 		LEFT JOIN person.people p ON p.id = mg.person_id
+		LEFT JOIN manager.managers mg2 ON mg2.id = m.recipient_id
+		LEFT JOIN person.people pp ON pp.id = mg2.person_id
 		WHERE m.world_id = $1 AND m.recipient_id = $2 AND m.recipient_type = 'manager'
 		ORDER BY m.sent_at DESC
 		LIMIT $3`, worldID, managerID, MessageInboxLimit)
@@ -150,10 +155,14 @@ func (s *Service) ListInbox(ctx context.Context, worldID, managerID uuid.UUID) (
 	out := []InboxMessage{}
 	for rows.Next() {
 		var item InboxMessage
-		if err := rows.Scan(&item.ID, &item.SenderID, &item.RecipientID, &item.Subject,
-			&item.Body, &item.SentAt, &item.ReadAt, &item.SenderName); err != nil {
+		var senderName, recipientName string
+		if err := rows.Scan(&item.ID, &item.SenderID, &item.SenderType, &item.RecipientID, &item.RecipientType,
+			&item.Subject, &item.Body, &item.SentAt, &item.ReadAt,
+			&senderName, &recipientName); err != nil {
 			return nil, 0, fmt.Errorf("scan inbox row: %w", err)
 		}
+		item.Sender = &apiref.EntityRef{ID: item.SenderID, Name: senderName, Type: item.SenderType}
+		item.Recipient = &apiref.EntityRef{ID: item.RecipientID, Name: recipientName, Type: item.RecipientType}
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -172,15 +181,24 @@ func (s *Service) ListInbox(ctx context.Context, worldID, managerID uuid.UUID) (
 // exist — read as ErrMessageNotFound.
 func (s *Service) MarkRead(ctx context.Context, worldID, managerID, messageID uuid.UUID) (*Message, error) {
 	var m Message
+	var senderName, recipientName string
 	err := s.pool.QueryRow(ctx, `
 		UPDATE social.messages
 		SET read_at = COALESCE(read_at, now())
 		WHERE id = $1 AND world_id = $2 AND recipient_id = $3 AND recipient_type = 'manager'
-		RETURNING id, world_id, sender_id, sender_type, recipient_id, recipient_type, subject, body, sent_at, read_at`,
+		RETURNING id, world_id, sender_id, sender_type, recipient_id, recipient_type, subject, body, sent_at, read_at,
+		          (SELECT COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), '')
+		           FROM manager.managers mg LEFT JOIN person.people p ON p.id = mg.person_id
+		           WHERE mg.id = social.messages.sender_id),
+		          (SELECT COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), '')
+		           FROM manager.managers mg LEFT JOIN person.people p ON p.id = mg.person_id
+		           WHERE mg.id = social.messages.recipient_id)`,
 		messageID, worldID, managerID,
 	).Scan(&m.ID, &m.WorldID, &m.SenderID, &m.SenderType, &m.RecipientID, &m.RecipientType,
-		&m.Subject, &m.Body, &m.SentAt, &m.ReadAt)
+		&m.Subject, &m.Body, &m.SentAt, &m.ReadAt, &senderName, &recipientName)
 	if err == nil {
+		m.Sender = &apiref.EntityRef{ID: m.SenderID, Name: senderName, Type: m.SenderType}
+		m.Recipient = &apiref.EntityRef{ID: m.RecipientID, Name: recipientName, Type: m.RecipientType}
 		return &m, nil
 	}
 	if err == pgx.ErrNoRows {
@@ -205,11 +223,11 @@ func (s *Service) UnreadCount(ctx context.Context, worldID, managerID uuid.UUID)
 // pushMessage is the best-effort realtime fan-out after a message commits. A
 // missing or failing broker never fails the send: the inbox read stays the
 // source of truth.
-func (s *Service) pushMessage(ctx context.Context, worldID uuid.UUID, msg *Message, senderName string) {
+func (s *Service) pushMessage(ctx context.Context, worldID uuid.UUID, msg *Message) {
 	if s.rt == nil {
 		return
 	}
-	ev, err := realtime.NewEvent(realtime.EventSocialMessage, worldID, MessagePush{Message: *msg, SenderName: senderName})
+	ev, err := realtime.NewEvent(realtime.EventSocialMessage, worldID, MessagePush{Message: *msg})
 	if err != nil {
 		return
 	}

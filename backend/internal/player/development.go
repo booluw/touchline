@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/touchline/backend/internal/development"
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/explanation"
 )
 
@@ -24,10 +25,9 @@ const DevelopmentEventType = "DEVELOPMENT_WEEK"
 // (player_hidden_traits.potential, expansion budget, lock state) is never
 // exposed — a manager sees the trajectory, not the headroom.
 type PlayerDevelopmentDetail struct {
-	PlayerID                 uuid.UUID                `json:"player_id"`
+	Player                   *apiref.PlayerRef        `json:"player"`
 	FirstName                string                   `json:"first_name"`
 	LastName                 string                   `json:"last_name"`
-	DisplayName              string                   `json:"display_name"`
 	Position                 string                   `json:"position"`
 	LastEvaluatedWeek        int64                    `json:"last_eval_week"`
 	CumDevWeeks              int                      `json:"cum_dev_weeks"`
@@ -64,10 +64,9 @@ func (s *Service) GetPlayerDevelopmentDetail(ctx context.Context, worldID, manag
 	}
 
 	d := &PlayerDevelopmentDetail{
-		PlayerID:     prof.ID,
+		Player:       &apiref.PlayerRef{ID: prof.ID, Name: prof.DisplayName},
 		FirstName:    prof.FirstName,
 		LastName:     prof.LastName,
-		DisplayName:  prof.DisplayName,
 		Position:     prof.PrimaryPosition,
 		RecentDeltas: []AttributeDelta{},
 	}

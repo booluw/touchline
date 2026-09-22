@@ -41,6 +41,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
@@ -91,66 +92,61 @@ type LeagueParams struct {
 	RelegatesTo *uuid.UUID `json:"relegates_to,omitempty"`
 }
 
-// League is a competition row joined with its 1:1 rules row.
+// League is a competition row joined with its 1:1 rules row, its country, and
+// its promotion/relegation target leagues (nested per the wave-2 wire rule).
 type League struct {
-	ID          uuid.UUID  `json:"id"`
-	WorldID     uuid.UUID  `json:"world_id"`
-	CountryID   uuid.UUID  `json:"country_id"`
-	Name        string     `json:"name"`
-	Tier        int        `json:"tier"`
-	TeamCount   int        `json:"team_count"`
-	Status      string     `json:"status"`
-	Promotions  int        `json:"promotions"`
-	Relegations int        `json:"relegations"`
-	PromotesTo  *uuid.UUID `json:"promotes_to,omitempty"`
-	RelegatesTo *uuid.UUID `json:"relegates_to,omitempty"`
+	ID          uuid.UUID         `json:"id"`
+	WorldID     uuid.UUID         `json:"world_id"`
+	Country     apiref.CountryRef `json:"country"`
+	Name        string            `json:"name"`
+	Tier        int               `json:"tier"`
+	TeamCount   int               `json:"team_count"`
+	Status      string            `json:"status"`
+	Promotions  int               `json:"promotions"`
+	Relegations int               `json:"relegations"`
+	PromotesTo  *apiref.LeagueRef `json:"promotes_to,omitempty"`
+	RelegatesTo *apiref.LeagueRef `json:"relegates_to,omitempty"`
 }
 
 // Season is one league season with its entries implied by competition_entries.
 type Season struct {
-	ID            uuid.UUID `json:"id"`
-	CompetitionID uuid.UUID `json:"competition_id"`
-	SeasonLabel   string    `json:"season_label"`
-	SeasonNumber  int       `json:"season_number"`
-	Status        string    `json:"status"`
+	ID           uuid.UUID             `json:"id"`
+	Competition  apiref.CompetitionRef `json:"competition"`
+	SeasonLabel  string                `json:"season_label"`
+	SeasonNumber int                   `json:"season_number"`
+	Status       string                `json:"status"`
 }
 
-// Fixture is one scheduled matchday fixture.
+// Fixture is one scheduled matchday fixture (nested per the wave-2 wire rule).
 type Fixture struct {
-	ID            uuid.UUID `json:"id"`
-	WorldID       uuid.UUID `json:"world_id"`
-	CompetitionID uuid.UUID `json:"competition_id"`
-	HomeClubID    uuid.UUID `json:"home_club_id"`
-	HomeClubName  string    `json:"home_club_name"`
-	AwayClubID    uuid.UUID `json:"away_club_id"`
-	AwayClubName  string    `json:"away_club_name"`
-	Matchday      int       `json:"matchday"`
-	ScheduledAt   time.Time `json:"scheduled_at"`
-	Status        string    `json:"status"`
-	HomeScore     *int      `json:"home_score,omitempty"`
-	AwayScore     *int      `json:"away_score,omitempty"`
+	ID          uuid.UUID             `json:"id"`
+	WorldID     uuid.UUID             `json:"world_id"`
+	Competition apiref.CompetitionRef `json:"competition"`
+	HomeClub    apiref.ClubRef        `json:"home_club"`
+	AwayClub    apiref.ClubRef        `json:"away_club"`
+	Matchday    int                   `json:"matchday"`
+	ScheduledAt time.Time             `json:"scheduled_at"`
+	Status      string                `json:"status"`
+	HomeScore   *int                  `json:"home_score,omitempty"`
+	AwayScore   *int                  `json:"away_score,omitempty"`
 }
 
-// StandingRow is one club's league-table line.
+// StandingRow is one club's league-table line (nested club identity).
 type StandingRow struct {
-	ClubName     string `json:"club_name"`
-	ClubShort    string `json:"club_short"`
-	Played       int    `json:"played"`
-	Won          int    `json:"won"`
-	Drawn        int    `json:"drawn"`
-	Lost         int    `json:"lost"`
-	GoalsFor     int    `json:"goals_for"`
-	GoalsAgainst int    `json:"goals_against"`
-	Points       int    `json:"points"`
+	Club         apiref.ClubRef `json:"club"`
+	Played       int            `json:"played"`
+	Won          int            `json:"won"`
+	Drawn        int            `json:"drawn"`
+	Lost         int            `json:"lost"`
+	GoalsFor     int            `json:"goals_for"`
+	GoalsAgainst int            `json:"goals_against"`
+	Points       int            `json:"points"`
 }
 
 // StandingRowSet is a competition standings view for its active season.
 type StandingRowSet struct {
-	SeasonID     uuid.UUID     `json:"season_id"`
-	SeasonLabel  string        `json:"season_label"`
-	SeasonNumber int           `json:"season_number"`
-	Status       string        `json:"status"`
-	Rows         []StandingRow `json:"rows"`
+	Season apiref.SeasonRef `json:"season"`
+	Rows   []StandingRow    `json:"rows"`
 }
 
 // ClubSeed reports one club placed into a seeded league.
@@ -328,41 +324,50 @@ func (s *Service) CreateLeague(ctx context.Context, p LeagueParams) (*League, er
 		return nil, ErrNameCollision
 	}
 
-	var league League
+	var leagueID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO competition.competitions
 			(world_id, country_id, name, competition_type, tier, team_count, status)
 		VALUES ($1, $2, $3, 'league', $4, $5, 'active')
-		RETURNING id, world_id, country_id, name, tier, team_count, status`,
+		RETURNING id`,
 		worldID, p.CountryID, name, p.Tier, p.TeamCount,
-	).Scan(&league.ID, &league.WorldID, &league.CountryID, &league.Name, &league.Tier, &league.TeamCount, &league.Status); err != nil {
+	).Scan(&leagueID); err != nil {
 		return nil, fmt.Errorf("insert competition: %w", err)
 	}
 
-	if err := tx.QueryRow(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO competition.competition_rules
 			(competition_id, format, is_home_and_away, promotions, relegations,
 			 promotes_to_competition_id, relegates_to_competition_id)
-		VALUES ($1, 'round_robin', TRUE, $2, $3, $4, $5)
-		RETURNING promotions, relegations, promotes_to_competition_id, relegates_to_competition_id`,
-		league.ID, p.Promotions, p.Relegations, p.PromotesTo, p.RelegatesTo,
-	).Scan(&league.Promotions, &league.Relegations, &league.PromotesTo, &league.RelegatesTo); err != nil {
+		VALUES ($1, 'round_robin', TRUE, $2, $3, $4, $5)`,
+		leagueID, p.Promotions, p.Relegations, p.PromotesTo, p.RelegatesTo); err != nil {
 		return nil, fmt.Errorf("insert rules: %w", err)
+	}
+
+	league, err := s.getLeague(ctx, tx, leagueID)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit create league: %w", err)
 	}
-	return &league, nil
+	return league, nil
 }
 
 // ListLeagues returns the world's leagues ordered by country, then tier.
 func (s *Service) ListLeagues(ctx context.Context, worldID uuid.UUID) ([]League, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
-		       r.promotions, r.relegations, r.promotes_to_competition_id, r.relegates_to_competition_id
+		       r.promotions, r.relegations,
+		       r.promotes_to_competition_id, r.relegates_to_competition_id,
+		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),
+		       wc.name, wc.code
 		FROM competition.competitions c
 		JOIN competition.competition_rules r ON r.competition_id = c.id
+		LEFT JOIN competition.competitions ptc ON ptc.id = r.promotes_to_competition_id
+		LEFT JOIN competition.competitions rtc ON rtc.id = r.relegates_to_competition_id
+		JOIN world.countries wc ON wc.id = c.country_id
 		WHERE c.world_id = $1 AND c.competition_type = 'league'
 		ORDER BY c.country_id, c.tier, c.name`, worldID)
 	if err != nil {
@@ -371,15 +376,21 @@ func (s *Service) ListLeagues(ctx context.Context, worldID uuid.UUID) ([]League,
 	return scanLeagues(rows)
 }
 
-// ListLeagues returns the world's leagues ordered by country, then tier.
+// ListCountryLeagues returns a country's leagues ordered by tier, then name.
 func (s *Service) ListCountryLeagues(ctx context.Context, countryID uuid.UUID) ([]League, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
-		       r.promotions, r.relegations, r.promotes_to_competition_id, r.relegates_to_competition_id
+		       r.promotions, r.relegations,
+		       r.promotes_to_competition_id, r.relegates_to_competition_id,
+		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),
+		       wc.name, wc.code
 		FROM competition.competitions c
 		JOIN competition.competition_rules r ON r.competition_id = c.id
-		WHERE c.world_id = $1 AND c.competition_type = 'league'
-		ORDER BY c.country_id, c.tier, c.name`, countryID)
+		LEFT JOIN competition.competitions ptc ON ptc.id = r.promotes_to_competition_id
+		LEFT JOIN competition.competitions rtc ON rtc.id = r.relegates_to_competition_id
+		JOIN world.countries wc ON wc.id = c.country_id
+		WHERE c.country_id = $1 AND c.competition_type = 'league'
+		ORDER BY c.tier, c.name`, countryID)
 	if err != nil {
 		return nil, fmt.Errorf("list leagues: %w", err)
 	}
@@ -415,7 +426,7 @@ func (s *Service) UpdateLeagueAdjacency(ctx context.Context, leagueID uuid.UUID,
 		if err != nil {
 			return ErrBadAdjacency
 		}
-		if other.CountryID != league.CountryID {
+		if other.Country.ID != league.Country.ID {
 			return ErrBadAdjacency
 		}
 	}
@@ -433,18 +444,34 @@ func (s *Service) getLeague(ctx context.Context, q interface {
 }, id uuid.UUID) (*League, error) {
 	row := q.QueryRow(ctx, `
 		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
-		       r.promotions, r.relegations, r.promotes_to_competition_id, r.relegates_to_competition_id
+		       r.promotions, r.relegations,
+		       r.promotes_to_competition_id, r.relegates_to_competition_id,
+		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),
+		       wc.name, wc.code
 		FROM competition.competitions c
 		JOIN competition.competition_rules r ON r.competition_id = c.id
+		LEFT JOIN competition.competitions ptc ON ptc.id = r.promotes_to_competition_id
+		LEFT JOIN competition.competitions rtc ON rtc.id = r.relegates_to_competition_id
+		JOIN world.countries wc ON wc.id = c.country_id
 		WHERE c.id = $1 AND c.competition_type = 'league'`, id)
 	var l League
-	err := row.Scan(&l.ID, &l.WorldID, &l.CountryID, &l.Name, &l.Tier, &l.TeamCount, &l.Status,
-		&l.Promotions, &l.Relegations, &l.PromotesTo, &l.RelegatesTo)
+	var ptID, rtID *uuid.UUID
+	var ptName, rtName, countryName, countryCode string
+	err := row.Scan(&l.ID, &l.WorldID, &l.Country.ID, &l.Name, &l.Tier, &l.TeamCount, &l.Status,
+		&l.Promotions, &l.Relegations, &ptID, &rtID, &ptName, &rtName, &countryName, &countryCode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrCompetitionNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	l.Country.Name = countryName
+	l.Country.Code = countryCode
+	if ptID != nil {
+		l.PromotesTo = &apiref.LeagueRef{ID: *ptID, Name: ptName}
+	}
+	if rtID != nil {
+		l.RelegatesTo = &apiref.LeagueRef{ID: *rtID, Name: rtName}
 	}
 	return &l, nil
 }

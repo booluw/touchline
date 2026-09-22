@@ -243,7 +243,11 @@ func TestHTTPLineupRejectsInjuredPlayer(t *testing.T) {
 	slots, _ := lineup["slots"].([]any)
 	for i, s := range slots {
 		m, _ := s.(map[string]any)
-		if id, _ := m["player_id"].(string); id != uuid.Nil.String() {
+		player, _ := m["player"].(map[string]any)
+		if player == nil {
+			continue
+		}
+		if id, _ := player["id"].(string); id != "" && id != uuid.Nil.String() {
 			t.Fatalf("rejected lineup persisted player in slot %d: %s", i, id)
 		}
 	}

@@ -193,8 +193,11 @@ func TestSetLineupRoundTripsAndValidates(t *testing.T) {
 		t.Fatalf("lineup slots = %d, want 11", len(view.Slots))
 	}
 	for i, sv0 := range view.Slots {
-		if sv0.Slot != i || sv0.Position == "" || sv0.PlayerID != players[i] {
+		if sv0.Slot != i || sv0.Position == "" || sv0.Player == nil || sv0.Player.ID != players[i] {
 			t.Fatalf("slot %d = %+v, want position and player %s", i, sv0, players[i])
+		}
+		if sv0.Player.Name == "" {
+			t.Fatalf("slot %d player ref has no name", i)
 		}
 	}
 
