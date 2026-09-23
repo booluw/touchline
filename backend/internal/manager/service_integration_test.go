@@ -62,6 +62,22 @@ func TestJobOfferFullLifecycle(t *testing.T) {
 	if len(offers) != 1 || offers[0].ID != o.ID {
 		t.Fatalf("pending offers = %+v, want the fresh offer", offers)
 	}
+	if offers[0].Board == nil || len(offers[0].Board.Mandates) != 4 {
+		t.Fatalf("offer board context = %+v, want 4 computed mandates", offers[0].Board)
+	}
+	if offers[0].League == nil || offers[0].League.Name != "Harness League" {
+		t.Fatalf("offer league context = %+v, want the harness league", offers[0].League)
+	}
+	if offers[0].League.Position == nil || *offers[0].League.Position != 1 ||
+		offers[0].League.Won != 2 || offers[0].League.Lost != 1 || offers[0].League.Points != 6 {
+		t.Fatalf("offer league record = %+v, want position 1, 2W 1L, 6 points", offers[0].League)
+	}
+	if offers[0].Club == nil || offers[0].Club.Reputation == 0 || offers[0].Club.Tier == 0 {
+		t.Fatalf("offer club ref = %+v, want reputation and tier", offers[0].Club)
+	}
+	if offers[0].Finance == nil {
+		t.Fatal("offer finance context missing")
+	}
 
 	// Accept: manager active + club handed over + history opened.
 	accepted, err := svc.AcceptJobOffer(ctx, o.ID, managerRow)

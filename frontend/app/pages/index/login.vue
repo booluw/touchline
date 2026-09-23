@@ -37,6 +37,11 @@ async function logUserIn(valid: boolean, errors: Record<string, string>) {
           </UiFormItem>
           <button class="button button--primary w-full">Log In</button>
         </UiForm>
+
+        <div class="mt-5 heading heading--small">
+          Don't have an account?
+          <nuxt-link to="/register" class="text-cyan-500">Register Now</nuxt-link>
+        </div>
       </div>
     </div>
   </UiModal>

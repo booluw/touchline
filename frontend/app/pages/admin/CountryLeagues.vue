@@ -245,9 +245,9 @@ async function initCountryDashboard() {
 onMounted(() => initCountryDashboard())
 </script>
 <template>
-  <section>
+  <section class="space-y-5">
     <div class="flex justify-between items-center">
-      <div class="flex flex-col gap-3 items-start mb-5">
+      <div class="flex flex-col gap-3 items-start">
         <span class="pill pill--success">{{ world!.status }}</span>
         <h2 class="page__header">{{ country!.name }} <span class="uppercase">[{{ country!.code }}]</span>, {{
           world!.name }}</h2>

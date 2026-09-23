@@ -3711,13 +3711,74 @@ components:
 
     JobOffer:
       type: object
+      description: A pending offer from an AI club to an unemployed manager. The club and manager nest as refs; the recruitment context (board/squad/form/supporters/finance) nests as per-club sibling objects.
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        club: { $ref: "#/components/schemas/NestedClub" }
+        club: { $ref: "#/components/schemas/ClubRef" }
         manager: { $ref: "#/components/schemas/NestedManager" }
-        status: { type: string, enum: [pending, accepted, declined, withdrawn] }
+        league: { $ref: "#/components/schemas/OfferLeagueRef" }
+        board: { $ref: "#/components/schemas/BoardExpectations" }
+        squad: { $ref: "#/components/schemas/SquadOfferSummary" }
+        form: { $ref: "#/components/schemas/FormOfferState" }
+        supporters: { $ref: "#/components/schemas/SupportersOfferRef" }
+        finance: { $ref: "#/components/schemas/FinancialSummary" }
+        status: { type: string, enum: [proposed, accepted, declined, expired] }
         created_at: { type: string, format: date-time }
+    OfferLeagueRef:
+      type: object
+      description: "The offered club's domestic league and its current-season table line. Identity is always present (offers are only issued to league clubs); the position and record are omitted until a standings row exists."
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        tier: { type: integer }
+        position: { type: integer, description: League table position (1 = top) }
+        played: { type: integer }
+        won: { type: integer }
+        drawn: { type: integer }
+        lost: { type: integer }
+        points: { type: integer }
+    BoardExpectations:
+      type: object
+      description: "Computed board targets for the offered club's current season (a preview; no mandate rows are written for the candidate yet)."
+      properties:
+        season: { type: integer }
+        persona: { type: string }
+        mandates:
+          type: array
+          items: { $ref: "#/components/schemas/OfferBoardMandate" }
+    OfferBoardMandate:
+      type: object
+      properties:
+        category: { type: string, enum: [primary, secondary, strategic, financial] }
+        description: { type: string }
+        target_type: { type: string, enum: [league_finish, points_target, wage_structure, operating_balance] }
+        target_value: { type: string }
+    SquadOfferSummary:
+      type: object
+      description: The offered club's senior squad headcount and highest-rated player (position-weighted overall, capped at 99).
+      properties:
+        size: { type: integer }
+        top_player: { $ref: "#/components/schemas/OfferTopPlayer" }
+    OfferTopPlayer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        position: { type: string, enum: [GK, CB, LB, RB, DM, CM, AM, LM, RM, LW, RW, ST] }
+        overall: { type: integer }
+    FormOfferState:
+      type: object
+      description: The offered club's recent form streak; present only once the club has played a recorded match.
+      properties:
+        rating: { type: number }
+        form_string: { type: string }
+    SupportersOfferRef:
+      type: object
+      description: The offered club's supporter archetype and current sentiment.
+      properties:
+        type: { type: string, enum: [prestigious, youth_oriented, local, working_class, international] }
+        sentiment: { type: integer }
     ManagerProfile:
       type: object
       properties:
@@ -3771,6 +3832,8 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         short: { type: string }
+        reputation: { type: integer }
+        tier: { type: integer }
     CareerSummary:
       type: object
       properties:

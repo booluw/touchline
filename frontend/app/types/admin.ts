@@ -176,9 +176,11 @@ interface Transfer {
   completed_at: string;
 }
 
-interface Club {
+export interface Club {
   id: string;
   name: string;
   short: string;
+  reputation: number
+  tier: number
 }
 

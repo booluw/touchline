@@ -1,14 +1,14 @@
 <script lang="ts" setup>
-import type { World } from '~/types';
-import Country from '~/types';
+import type { World, Country } from '~/types';
 
-const { fetchCountry } = useAdmin()
+const { fetchCountry, changeWorldStatus } = useAdmin()
 const store = useAdminStore()
 const router = useRouter()
 const route = useRoute()
 
 const world = computed<World>(() => store.worlds.find((world: World) => world.id === route.params.id))
 const countries = computed<Country[]>(() => store.countries?.filter((cou: Country) => cou.world_id === world.value.id))
+
 onMounted(() => fetchCountry(world.value.id))
 </script>
 
@@ -18,7 +18,14 @@ onMounted(() => fetchCountry(world.value.id))
     :description="`All countries under World: ${world.name}`"
     @close="() => router.push({ name: 'admin-world' })"
   >
-    <div class="flex items-center justify-end mb-5">
+    <div class="flex gap-5 justify-end mb-5">
+      <button
+        v-if="world.status !== 'active'"
+        class="button button--outline"
+        @click="changeWorldStatus({ status: 'active', worldId: world.id })"
+      >
+        Activate World
+      </button>
       <nuxt-link :to="{ name: 'admin-world-id-create' }" class="button button--primary">
         Create Country
       </nuxt-link>

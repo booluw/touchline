@@ -6,7 +6,7 @@
 // multiple worlds triggers a world-picker round-trip: login returns
 // { status: 'worlds', worlds: [...] } without cookies, the user picks a world,
 
-import type { User } from "~/types"
+import type { User, Offer } from "~/types"
 import { useToast } from '../components/ui/Toast';
 
 // and login is re-posted with world_id.
@@ -26,6 +26,9 @@ export interface LoginWorldPicker {
 }
 
 export type LoginResponse = User | LoginWorldPicker
+export interface UserOffer extends User {
+  offer: Offer
+}
 
 export function useAuth() {
   const { public: { apiBase } } = useRuntimeConfig()
@@ -54,9 +57,27 @@ export function useAuth() {
         navigateTo("/admin")
         return
       }
-      navigateTo("/")
+      navigateTo("/play")
     } catch (error) {
       console.error(error)
+    }
+  }
+
+  async function register(payload: { email: string, password: string, display_name: string }) {
+    try {
+      const { offer, ...rest } = await $api.post<UserOffer>(`${apiBase}/api/auth/register`, payload)
+
+      notify({
+        title: 'Account created',
+        description: offer ? 'You have a job offer' : 'Welcome onboard',
+        type: 'success'
+      })
+      
+      store.setUser(rest)
+      navigateTo("/play")
+    } catch (error) {
+      console.error(error)
+      
     }
   }
 
@@ -88,5 +109,5 @@ export function useAuth() {
     return res
   }
 
-  return { user, worlds, needsWorldSelection, login, selectWorld, refresh, authedFetch }
+  return { user, worlds, needsWorldSelection, login, selectWorld, refresh, authedFetch, register }
 }

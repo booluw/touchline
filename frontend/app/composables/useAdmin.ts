@@ -22,6 +22,27 @@ export function useAdmin() {
     }
   }
 
+  async function changeWorldStatus({ status, worldId }: {status: 'active', worldId: string }) {
+    try {
+      await $api.post(`${apiBase}/api/admin/worlds/${worldId}/status`, { status })
+      await fetchWorlds()
+
+      notify({
+        type: 'success',
+        title: 'World is activated',
+      })
+
+      return
+    } catch (error: any | unknown) {
+      notify({
+        type: 'danger',
+        description: error,
+        title: 'An error occurred'
+      })
+      console.error(error)
+    }
+  }
+
   async function fetchWorlds() {
     try {
       const resp = await $api.get<World[]>(`${apiBase}/api/admin/worlds`)
@@ -160,6 +181,7 @@ export function useAdmin() {
   return {
     createWorld,
     fetchWorlds,
+    changeWorldStatus,
     fetchCountry,
     createCountry,
     fetchWorldLeagues,

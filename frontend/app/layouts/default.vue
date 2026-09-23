@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 const store = useAuthStore()
 
-const ROUTES = computed(() => store.user?.is_admin ? ADMIN_ROUTES : {})
+const ROUTES = computed(() => store.user?.is_admin ? ADMIN_ROUTES : MANAGER_ROUTES)
 </script>
 
 <template>

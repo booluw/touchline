@@ -11,9 +11,11 @@ import "github.com/google/uuid"
 // ClubRef is the club identity nested in fixture, standing, and event
 // responses. Short is the club's abbreviation when one exists.
 type ClubRef struct {
-	ID    uuid.UUID `json:"id"`
-	Name  string    `json:"name,omitempty"`
-	Short string    `json:"short,omitempty"`
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name,omitempty"`
+	Short      string    `json:"short,omitempty"`
+	Reputation int       `json:"reputation,omitempty"`
+	Tier       int       `json:"tier,omitempty"`
 }
 
 // PlayerRef is the player identity nested in cast event-feed responses.

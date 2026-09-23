@@ -1,18 +1,19 @@
 import { useAuthStore } from "../stores/auth"
 
-export default defineNuxtRouteMiddleware((to) => {
+export default defineNuxtRouteMiddleware(async (to) => {
   const authStore = useAuthStore()
 
-  // Protect `/admin` Routes
-  if (to.fullPath.startsWith("/admin")) {
-    if (!authStore.user?.is_admin) {
+  // Protect `/play`
+  if (to.fullPath.startsWith("/play")) {
+    console.log(authStore.user)
+    if (!authStore.user || Object.keys(authStore.user ?? {}).length === 0) {
       return navigateTo("/")
     }
   }
 
-  // Protect `/play`
-  if (to.fullPath.startsWith("/play")) {
-    if (!authStore.user || Object.keys(authStore.user ?? {}).length === 0) {
+  // Protect `/admin` Routes
+  if (to.fullPath.startsWith("/admin")) {
+    if (!authStore.user?.is_admin) {
       return navigateTo("/")
     }
   }

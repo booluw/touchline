@@ -47,7 +47,12 @@ html {
   --color-void-400: #7a8494; /* secondary text */
   --color-void-300: #a8b0bb; /* body text on dark */
   --color-void-100: #e4e7eb; /* primary text on dark */
-  --color-void-50:  #f5f6f8; /* text on cyan / inverted surfaces */
+  --color-void-50: #f5f6f8; /* text on cyan / inverted surfaces */
+
+  --color-carousel-marker: #d4d4d4;
+  --color-carousel-marker-active: #171717;
+  --color-carousel-arrow-disabled: #f5f5f5;
+  --radius-carousel: 4px;
 
   /* ---- Offside Cyan: neon accent ramp ---- */
   --color-cyan-900: #003a42; /* deep fill (selected row bg) */
@@ -55,10 +60,12 @@ html {
   --color-cyan-500: #00e8ff; /* THE accent — CTAs, focus, active nav */
   --color-cyan-400: #3aefff; /* hover state */
   --color-cyan-200: #a8f7ff; /* subtle text tint on dark */
-  --color-cyan-glow: rgb(0 232 255 / 0.35); /* box-shadow / outline glow, use sparingly */
+  --color-cyan-glow: rgb(
+    0 232 255 / 0.35
+  ); /* box-shadow / outline glow, use sparingly */
 
   /* ---- Semantic states (kept OFF the neon so meaning stays legible) ---- */
-  --color-win-500:  #3ddc84; /* result won, positive delta */
+  --color-win-500: #3ddc84; /* result won, positive delta */
   --color-loss-500: #ff4d4d; /* result lost, sacked, financial crisis */
   --color-draw-500: #a8b0bb; /* draw, neutral delta */
   --color-warn-500: #ffb800; /* board warning, contract expiring */
@@ -82,7 +89,7 @@ html {
   --color-chart-5: #ff8a3d; /* orange */
   --color-chart-6: #6ee7f5; /* pale cyan */
   --color-chart-7: #f472b6; /* pink (distinct from live-500 — softer, desaturated) */
-  --color-chart-grid: var(--color-void-700);  /* axis lines/gridlines */
+  --color-chart-grid: var(--color-void-700); /* axis lines/gridlines */
   --color-chart-axis-text: var(--color-void-400);
 
   /* =========================================================
@@ -107,25 +114,25 @@ html {
 
   /* Tight scale for dense dashboards — sits a notch below typical
      SaaS defaults so squad tables/fixture lists don't force scrolling. */
-  --text-xs:   0.6875rem; /* 11px */
+  --text-xs: 0.6875rem; /* 11px */
   --text-xs--line-height: 1.3;
-  --text-sm:   0.8125rem; /* 13px */
+  --text-sm: 0.8125rem; /* 13px */
   --text-sm--line-height: 1.35;
   --text-base: 0.9375rem; /* 15px — the UI default, not 16px */
   --text-base--line-height: 1.45;
-  --text-lg:   1.125rem;  /* 18px */
+  --text-lg: 1.125rem; /* 18px */
   --text-lg--line-height: 1.4;
-  --text-xl:   1.375rem;  /* 22px */
+  --text-xl: 1.375rem; /* 22px */
   --text-xl--line-height: 1.25;
-  --text-2xl:  1.75rem;   /* 28px */
+  --text-2xl: 1.75rem; /* 28px */
   --text-2xl--line-height: 1.15;
-  --text-3xl:  2.25rem;   /* 36px */
+  --text-3xl: 2.25rem; /* 36px */
   --text-3xl--line-height: 1.05;
   --text-display: 3.5rem; /* 56px — match score / hero number only */
   --text-display--line-height: 1;
 
-  --tracking-tight-brutal: -0.01em;  /* headlines */
-  --tracking-wide-brutal: 0.04em;    /* mono labels/badges ONLY — see note below */
+  --tracking-tight-brutal: -0.01em; /* headlines */
+  --tracking-wide-brutal: 0.04em; /* mono labels/badges ONLY — see note below */
 
   /* Numeric alignment: apply to every stat table, ledger, and
      score display so digit columns actually line up. Not a
@@ -141,21 +148,21 @@ html {
      the right number each time.
      ========================================================= */
 
-  --spacing-control-x: 1rem;      /* 16px — button/input horizontal padding */
-  --spacing-control-y: 0.625rem;  /* 10px — button/input vertical padding (compact, not tall) */
+  --spacing-control-x: 1rem; /* 16px — button/input horizontal padding */
+  --spacing-control-y: 0.625rem; /* 10px — button/input vertical padding (compact, not tall) */
   --spacing-control-sm-x: 0.625rem; /* 10px — icon buttons, table-row actions */
   --spacing-control-sm-y: 0.375rem; /* 6px */
 
-  --spacing-card: 1.5rem;         /* 24px — panel/card padding */
-  --spacing-card-sm: 1rem;        /* 16px — dense card (list item, notification) */
+  --spacing-card: 1.5rem; /* 24px — panel/card padding */
+  --spacing-card-sm: 1rem; /* 16px — dense card (list item, notification) */
 
-  --spacing-cell-x: 0.75rem;      /* 12px — table cell horizontal padding */
-  --spacing-cell-y: 0.5rem;       /* 8px — table cell vertical padding, keeps rows dense */
+  --spacing-cell-x: 0.75rem; /* 12px — table cell horizontal padding */
+  --spacing-cell-y: 0.5rem; /* 8px — table cell vertical padding, keeps rows dense */
 
-  --spacing-gutter: 2rem;         /* 32px — page/section outer gutter */
-  --spacing-gutter-sm: 1rem;      /* 16px — mobile gutter */
-  --spacing-grid-gap: 1rem;       /* 16px — default grid/flex gap between cards */
-  --spacing-stack: 0.75rem;       /* 12px — default vertical rhythm between stacked elements */
+  --spacing-gutter: 2rem; /* 32px — page/section outer gutter */
+  --spacing-gutter-sm: 1rem; /* 16px — mobile gutter */
+  --spacing-grid-gap: 1rem; /* 16px — default grid/flex gap between cards */
+  --spacing-stack: 0.75rem; /* 12px — default vertical rhythm between stacked elements */
 
   /* =========================================================
      LAYOUT
@@ -163,12 +170,12 @@ html {
      would otherwise each guess independently.
      ========================================================= */
 
-  --size-sidebar: 15rem;          /* 240px — primary nav rail, expanded */
+  --size-sidebar: 15rem; /* 240px — primary nav rail, expanded */
   --size-sidebar-collapsed: 3.5rem; /* 56px — icon-only rail */
-  --size-header: 3.5rem;          /* 56px — top bar height */
-  --size-content-max: 90rem;      /* 1440px — max width for a reading/table column before it re-splits into panels */
-  --size-row: 2.5rem;             /* 40px — default table row height (squad/fixture lists) */
-  --size-row-compact: 2rem;       /* 32px — ledger/event-feed rows, denser than squad tables */
+  --size-header: 3.5rem; /* 56px — top bar height */
+  --size-content-max: 90rem; /* 1440px — max width for a reading/table column before it re-splits into panels */
+  --size-row: 2.5rem; /* 40px — default table row height (squad/fixture lists) */
+  --size-row-compact: 2rem; /* 32px — ledger/event-feed rows, denser than squad tables */
 
   /* =========================================================
      BORDERS & RADIUS
@@ -177,15 +184,15 @@ html {
      ========================================================= */
 
   --border-width-hairline: 1px; /* default — dividers, table rows */
-  --border-width-brutal: 2px;   /* cards, inputs, buttons */
-  --border-width-thick: 4px;    /* urgent/alert blocks, active tab indicator */
+  --border-width-brutal: 2px; /* cards, inputs, buttons */
+  --border-width-thick: 4px; /* urgent/alert blocks, active tab indicator */
 
   /* Radius stays at 0 almost everywhere — this is the actual brutalist
      signal, used deliberately, not "one soft radius on everything"
      (the SaaS-card tell). The one exception is small status tags,
      which get 2px so text doesn't look clipped by a hard corner. */
-  --radius-none: 0px;    /* buttons, inputs, cards, modals — default */
-  --radius-tag: 2px;     /* status pills/badges only */
+  --radius-none: 0px; /* buttons, inputs, cards, modals — default */
+  --radius-tag: 2px; /* status pills/badges only */
 
   /* =========================================================
      SHADOW
@@ -209,7 +216,9 @@ html {
 
   --ring-width: 2px;
   --ring-offset: 2px;
-  --ring-offset-color: var(--color-void-900); /* matches default surface so the offset doesn't flash white */
+  --ring-offset-color: var(
+    --color-void-900
+  ); /* matches default surface so the offset doesn't flash white */
   --color-ring: var(--color-cyan-500);
 
   /* =========================================================
@@ -218,7 +227,7 @@ html {
 
   --size-icon-sm: 0.875rem; /* 14px — inline with text-sm */
   --size-icon-md: 1.125rem; /* 18px — default control icon */
-  --size-icon-lg: 1.5rem;   /* 24px — nav/section icons */
+  --size-icon-lg: 1.5rem; /* 24px — nav/section icons */
 
   /* =========================================================
      STATE OPACITY
@@ -231,7 +240,9 @@ html {
      OVERLAY
      ========================================================= */
 
-  --color-scrim: rgb(5 7 10 / var(--opacity-scrim)); /* void-950 at 70% — modal/drawer backdrop */
+  --color-scrim: rgb(
+    5 7 10 / var(--opacity-scrim)
+  ); /* void-950 at 70% — modal/drawer backdrop */
   --color-selection-bg: var(--color-cyan-700);
   --color-selection-text: var(--color-void-50);
 
@@ -243,10 +254,10 @@ html {
      ========================================================= */
 
   --ease-brutal: cubic-bezier(0.2, 0, 0, 1);
-  --duration-instant: 80ms;  /* hover, focus ring, button press */
-  --duration-fast: 150ms;    /* toggle, tab switch */
-  --duration-base: 220ms;    /* modal/drawer entrance — the only "slow" one */
-  --duration-pulse: 1200ms;  /* live badge / in-progress fixture pulse */
+  --duration-instant: 80ms; /* hover, focus ring, button press */
+  --duration-fast: 150ms; /* toggle, tab switch */
+  --duration-base: 220ms; /* modal/drawer entrance — the only "slow" one */
+  --duration-pulse: 1200ms; /* live badge / in-progress fixture pulse */
 
   /* =========================================================
      Z-INDEX
@@ -314,7 +325,9 @@ html {
   }
 }
 
-body { @apply bg-void-950 text-void-300 antialiased font-sans; }
+body {
+  @apply bg-void-950 text-void-300 antialiased font-sans;
+}
 
 @layer components {
   .button {
@@ -365,22 +378,30 @@ body { @apply bg-void-950 text-void-300 antialiased font-sans; }
 
     & .card__heading {
       @apply font-semibold text-white;
-      
+
       &.card__heading--small {
         color: var(--variant);
         @apply text-xs uppercase;
       }
     }
 
-    & .card__text { @apply text-sm }
+    & .card__text {
+      @apply text-sm;
+    }
     & .card__link {
       background-color: var(--variant);
       @apply inline-flex text-void-950 text-sm px-2 py-0.5 active:translate-1;
     }
 
-    &.card--success { --variant: var(--color-win-500)}
-    &.card--danger { --variant: var(--color-loss-500)}
-    &.card--warn { --variant: var(--color-warn-500)}
+    &.card--success {
+      --variant: var(--color-win-500);
+    }
+    &.card--danger {
+      --variant: var(--color-loss-500);
+    }
+    &.card--warn {
+      --variant: var(--color-warn-500);
+    }
   }
 
   .pill {
@@ -389,22 +410,93 @@ body { @apply bg-void-950 text-void-300 antialiased font-sans; }
     color: var(--variant);
     border-color: var(--variant);
 
-
-    &.pill--success {--variant: var(--color-win-500)}
-    &.pill--warning {--variant: var(--color-warn-500)}
-    &.pill--loss {--variant: var(--color-loss-500)}
+    &.pill--success {
+      --variant: var(--color-win-500);
+    }
+    &.pill--warning {
+      --variant: var(--color-warn-500);
+    }
+    &.pill--loss {
+      --variant: var(--color-loss-500);
+    }
   }
 
   .heading {
-      @apply font-mono font-semibold text-white;
-      
-      &.heading--small {
-        color: var(--color-void-500);
-        @apply text-xs uppercase;
+    @apply font-mono font-semibold text-white;
+
+    &.heading--small {
+      color: var(--color-void-500);
+      @apply text-xs uppercase;
+    }
+
+    &.heading--big {
+      @apply text-5xl uppercase font-bold;
+    }
+  }
+
+  .carousel {
+    @apply relative flex gap-5 w-full overflow-x-auto px-0 mt-5;
+
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-marker-group: after;
+    anchor-name: --carousel;
+
+    @media (prefers-reduced-motion: no-preference) {
+      scroll-behavior: smooth;
+    }
+
+    .carousel__item {
+      @apply shrink-0;
+      scroll-snap-align: center;
+
+      &::scroll-marker {
+        content: ".";
+        color: transparent;
+        background-color: var(--color-carousel-marker);
+        height: 5px;
+        border-radius: var(--radius-carousel);
+        transition: all 200ms ease-in-out;
       }
 
-      &.heading--big {
-        @apply text-5xl uppercase font-bold;
+      &::scroll-marker:target-current {
+        background-color: var(--color-carousel-marker-active);
       }
     }
+
+    .carousel__blind {
+      display: none;
+    }
+
+    &::scroll-marker-group {
+      position: fixed;
+      position-anchor: --carousel;
+      position-area: block-end;
+      position-visibility: always;
+
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 10px;
+      gap: 5px;
+
+      transform: translate(0, 0);
+    }
+
+    @media screen and (min-width: 760px) {
+      width: 100%;
+
+      .carousel__blind {
+        display: flex;
+        position: absolute;
+        inset-block: 0;
+        right: 0;
+        padding: 20px;
+        background-image: linear-gradient(to left, #ffffff, #ffffff02);
+      }
+
+      &::scroll-marker-group {
+        gap: 10px;
+      }
+    }
+  }
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/explanation"
@@ -31,6 +32,7 @@ var (
 	ErrManagerUnavailable = errors.New("manager cannot be hired right now")
 	ErrClubNotFound       = errors.New("club not found")
 	ErrClubNotPlayable    = errors.New("club is not in a playable world")
+	ErrClubNotInLeague    = errors.New("club is not in a league")
 	ErrClubOccupied       = errors.New("club already has a human manager")
 	ErrNotAIClub          = errors.New("offer is not from an AI club")
 	ErrClubWorldMismatch  = errors.New("club is not in the candidate's world")
@@ -40,16 +42,26 @@ var (
 
 // JobOffer is the offer an AI club makes to an unemployed human manager. The
 // wire carries the offered manager as a nested ref; ManagerID stays internal.
+// The recruitment context blocks (Board/Squad/Form/Supporters/Finance) are
+// decorated siblings — nested per club, never flattened into the offer struct.
 type JobOffer struct {
-	ID        uuid.UUID          `json:"id"`
-	WorldID   uuid.UUID          `json:"world_id"`
-	ClubID    uuid.UUID          `json:"-"`
-	ClubName  string             `json:"-"`
-	Club      *apiref.ClubRef    `json:"club,omitempty"`
-	ManagerID uuid.UUID          `json:"-"`
-	Manager   *apiref.ManagerRef `json:"manager,omitempty"`
-	Status    string             `json:"status"`
-	CreatedAt time.Time          `json:"created_at"`
+	ID             uuid.UUID               `json:"id"`
+	WorldID        uuid.UUID               `json:"world_id"`
+	ClubID         uuid.UUID               `json:"-"`
+	ClubName       string                  `json:"-"`
+	ClubReputation int                     `json:"-"`
+	ClubTier       int                     `json:"-"`
+	Club           *apiref.ClubRef         `json:"club,omitempty"`
+	ManagerID      uuid.UUID               `json:"-"`
+	Manager        *apiref.ManagerRef      `json:"manager,omitempty"`
+	League         *OfferLeagueRef         `json:"league,omitempty"`
+	Board          *BoardExpectations      `json:"board,omitempty"`
+	Squad          *SquadOfferSummary      `json:"squad,omitempty"`
+	Form           *FormOfferState         `json:"form,omitempty"`
+	Supporters     *SupportersOfferRef     `json:"supporters,omitempty"`
+	Finance        *finance.FinanceSummary `json:"finance,omitempty"`
+	Status         string                  `json:"status"`
+	CreatedAt      time.Time               `json:"created_at"`
 }
 
 // ReputationEvent is one append-only reputation line (never mutated).
@@ -184,6 +196,11 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 	} else if !ok {
 		return nil, ErrClubNotPlayable
 	}
+	if in, err := clubInLeague(ctx, tx, clubID); err != nil {
+		return nil, fmt.Errorf("check league: %w", err)
+	} else if !in {
+		return nil, ErrClubNotInLeague
+	}
 
 	o := &JobOffer{}
 	err = tx.QueryRow(ctx, `
@@ -207,6 +224,9 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit offer: %w", err)
 	}
+	if err := s.decorateOfferContext(ctx, o); err != nil {
+		return nil, err
+	}
 	return o, nil
 }
 
@@ -224,6 +244,8 @@ func (s *Service) OnboardingAIClubID(ctx context.Context, worldID uuid.UUID) (uu
 		WHERE c.world_id = $1
 		  AND c.is_ai_controlled = TRUE
 		  AND (c.current_manager_id IS NULL OR m.is_policy_bot = TRUE)
+		  AND EXISTS (SELECT 1 FROM competition.club_competitions cc
+		               WHERE cc.club_id = c.id AND cc.role = 'league')
 		ORDER BY c.id
 		LIMIT 1`, worldID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -238,7 +260,7 @@ func (s *Service) OnboardingAIClubID(ctx context.Context, worldID uuid.UUID) (uu
 // ListOffers returns the candidate's pending offers for a given world.
 func (s *Service) ListOffers(ctx context.Context, managerID, worldID uuid.UUID) ([]*JobOffer, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT o.id, o.world_id, o.club_id, c.name, o.manager_id, o.status, o.created_at
+		SELECT o.id, o.world_id, o.club_id, c.name, c.tier, c.reputation, o.manager_id, o.status, o.created_at
 		FROM manager.job_offers o
 		JOIN club.clubs c ON c.id = o.club_id
 		WHERE o.manager_id = $1 AND o.status = 'proposed' AND (o.world_id = $2 OR $2::uuid IS NULL)
@@ -251,10 +273,10 @@ func (s *Service) ListOffers(ctx context.Context, managerID, worldID uuid.UUID) 
 	var out []*JobOffer
 	for rows.Next() {
 		o := &JobOffer{}
-		if err := rows.Scan(&o.ID, &o.WorldID, &o.ClubID, &o.ClubName, &o.ManagerID, &o.Status, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.WorldID, &o.ClubID, &o.ClubName, &o.ClubReputation, &o.ClubTier, &o.ManagerID, &o.Status, &o.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan offer: %w", err)
 		}
-		o.Club = &apiref.ClubRef{ID: o.ClubID, Name: o.ClubName}
+		o.Club = &apiref.ClubRef{ID: o.ClubID, Name: o.ClubName, Reputation: o.ClubReputation, Tier: o.ClubTier}
 		out = append(out, o)
 	}
 	if err := rows.Err(); err != nil {
@@ -263,7 +285,24 @@ func (s *Service) ListOffers(ctx context.Context, managerID, worldID uuid.UUID) 
 	if err := decorateOfferManagers(ctx, s.pool, out...); err != nil {
 		return nil, err
 	}
+	if err := s.decorateOfferContext(ctx, out...); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// clubInLeague reports whether the club holds a domestic-league membership.
+// Offers are only issued for league clubs — a candidate has nothing meaningful
+// to manage when a club is not slotted into a competition.
+func clubInLeague(ctx context.Context, q queryer, clubID uuid.UUID) (bool, error) {
+	var in bool
+	err := q.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM competition.club_competitions
+		               WHERE club_id = $1 AND role = 'league')`, clubID).Scan(&in)
+	if err != nil {
+		return false, fmt.Errorf("league membership: %w", err)
+	}
+	return in, nil
 }
 
 // decorateOfferManagers resolves the nested manager refs of offers for the

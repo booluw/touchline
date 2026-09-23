@@ -333,5 +333,36 @@ func CreateClubWithAIManager(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID
 		`UPDATE club.clubs SET current_manager_id = $2, is_ai_controlled = TRUE WHERE id = $1`, id, botID); err != nil {
 		t.Fatalf("assign AI manager: %v", err)
 	}
+
+	// Offers are only issued to league clubs (ErrClubNotInLeague); join a fresh
+	// domestic league so offer-path tests exercise the gate, not the fallback.
+	// A season + a small standings line give the offer's league context
+	// real position/W-L data (won 2, drawn 0, lost 1 -> position 1 as the
+	// only recorded table row).
+	var compID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO competition.competitions (world_id, name, competition_type, tier, status)
+		VALUES ($1, 'Harness League', 'league', 3, 'active') RETURNING id`, worldID).Scan(&compID); err != nil {
+		t.Fatalf("create harness league: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competition.club_competitions (world_id, club_id, competition_id, role)
+		VALUES ($1, $2, $3, 'league')`, worldID, id, compID); err != nil {
+		t.Fatalf("join harness league: %v", err)
+	}
+	var seasonID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO competition.seasons
+			(world_id, competition_id, season_label, season_number, start_date, status)
+		VALUES ($1, $2, '2026/27', 1, CURRENT_DATE, 'in_progress') RETURNING id`,
+		worldID, compID).Scan(&seasonID); err != nil {
+		t.Fatalf("create harness season: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competition.standings
+			(season_id, club_id, played, won, drawn, lost, goals_for, goals_against, points)
+		VALUES ($1, $2, 3, 2, 0, 1, 4, 2, 6)`, seasonID, id); err != nil {
+		t.Fatalf("create harness standing: %v", err)
+	}
 	return id, botID
 }

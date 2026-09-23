@@ -45,6 +45,11 @@ export default defineNuxtConfig({
     },
   },
 
+  routeRules: {
+    '/play/**/*': { ssr: false },
+    '/admin/**/*': { ssr: false },
+  },
+
   css: ['~/assets/css/main.css'],
 
   vite: {

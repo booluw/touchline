@@ -136,7 +136,8 @@ func (s *server) handleCreateOffer(c *gin.Context) {
 		errors.Is(err, internalmanager.ErrClubOccupied),
 		errors.Is(err, internalmanager.ErrClubWorldMismatch),
 		errors.Is(err, internalmanager.ErrOfferResolved),
-		errors.Is(err, internalmanager.ErrClubNotPlayable):
+		errors.Is(err, internalmanager.ErrClubNotPlayable),
+		errors.Is(err, internalmanager.ErrClubNotInLeague):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	case err != nil:
