@@ -2816,6 +2816,103 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/cups:
+    post:
+      tags: [admin]
+      summary: Declare a domestic cup
+      operationId: createCup
+      description: |
+        Declares a knockout domestic cup under a world's country. Metadata plus
+        staged eligibility (IM04): N top tier-1 clubs (first_tier_bye) sit out
+        the qualifiers and join when X (survivor_threshold) lower clubs remain;
+        golden goal decides drawn ties. The bracket is drawn lazily round by
+        round from a persisted plan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [world_id, country_id, name]
+              properties:
+                world_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+                country_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
+                name: { type: string, example: "FA Cup" }
+                first_tier_bye: { type: integer, minimum: 0, example: 4, description: "N: top tier-1 clubs that join late." }
+                survivor_threshold: { type: integer, minimum: 1, example: 8, description: "X: lower clubs remaining when the top N join." }
+                prize_pool: { type: number, example: 1000000 }
+                scheduling_rules:
+                  type: object
+                  description: Overrides for matchdays_per_week, days_per_week, kickoff_hours.
+      responses:
+        "201":
+          description: The created cup.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cup" }
+        "400":
+          description: Malformed payload or staged-eligibility conflict (N+X < 2).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: World or country not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Cup name already taken in the country / stage conflict.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/cups/{cupID}/campaign:
+    post:
+      tags: [admin]
+      summary: Start a cup campaign
+      operationId: startCupCampaign
+      description: |
+        Starts the cup's first campaign from the country's league membership:
+        lower-tier clubs enter qualifiers, top-N tier-1 clubs seed the late
+        entries, and the plan (entrants + full ladder) is persisted for lazy
+        bracket draws. Fixtures are scheduled weekly.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - name: countryID
+          in: path
+          required: true
+          description: Country owning the cup.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
+        - name: cupID
+          in: path
+          required: true
+          description: Cup id.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000b" }
+      responses:
+        "201":
+          description: The started season (status in_progress).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Season" }
+              examples:
+                sample:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000011
+                    competition:
+                      id: 00000000-0000-4000-8000-00000000000b
+                      name: FA Cup
+                    season_label: 2031/32
+                    season_number: 1
+                    status: in_progress
+        "404":
+          description: World, country, or cup not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Cup already has a campaign / insufficient entrants / already a cup member.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/admin/offers:
     post:
       tags: [admin]
@@ -3074,6 +3171,45 @@ paths:
                     rows:
                       - { club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }, played: 12, won: 8, drawn: 3, lost: 1, goals_for: 27, goals_against: 9, points: 27 }
                       - { club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }, played: 12, won: 7, drawn: 4, lost: 1, goals_for: 24, goals_against: 11, points: 25 }
+  /api/cups:
+    get:
+      tags: [cup]
+      summary: Cups in my world
+      operationId: myCups
+      description: Every declared domestic cup of the caller's world (IM04).
+      responses:
+        "200":
+          description: Cup list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Cup" }
+  /api/cups/{id}:
+    get:
+      tags: [cup]
+      summary: Cup campaign view
+      operationId: getCup
+      description: |
+        The cup with its qualification read-back, season, and materialized
+        bracket rounds (ties plus byes) once the campaign starts (IM04).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Cup id.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000b" }
+      responses:
+        "200":
+          description: Cup campaign.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CupCampaign" }
+        "404":
+          description: Cup not found in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/fixtures/{id}:
     get:
       tags: [match]
@@ -3197,6 +3333,12 @@ components:
       required: true
       description: Competition id.
       schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000a" }
+    CupID:
+      name: id
+      in: path
+      required: true
+      description: Cup id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000b" }
     LeagueID:
       name: id
       in: path
@@ -3994,6 +4136,59 @@ components:
         short: { type: string }
         reputation: { type: integer }
         tier: { type: integer }
+    Cup:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        country: { $ref: "#/components/schemas/CountryRef" }
+        name: { type: string }
+        competition_type: { type: string, example: domestic_cup }
+        status: { type: string }
+        prize_pool: { type: number }
+        format: { type: string, example: knockout }
+        is_home_and_away: { type: boolean }
+        first_tier_bye: { type: integer, description: "N top tier-1 clubs seeded straight into the bracket." }
+        survivor_threshold: { type: integer, description: "X qualifier survivors remaining when the top N join." }
+    CupCampaign:
+      type: object
+      description: "The manager cup view (IM04): cup, qualification read-back, season, materialized bracket, champion."
+      properties:
+        cup: { $ref: "#/components/schemas/Cup" }
+        qualification_rules:
+          type: object
+          description: The persisted campaign plan (entrants + ladder).
+        late_entry_round: { type: integer }
+        total_rounds: { type: integer }
+        season: { $ref: "#/components/schemas/Season" }
+        champion: { $ref: "#/components/schemas/ClubRef" }
+        rounds:
+          type: array
+          items: { $ref: "#/components/schemas/CupRound" }
+    CupRound:
+      type: object
+      description: "One materialized knockout round: decided ties plus clubs that advanced on a bye."
+      properties:
+        round: { type: integer }
+        scheduled_at: { type: string, format: date-time, nullable: true }
+        ties:
+          type: array
+          items: { $ref: "#/components/schemas/CupTie" }
+        byes:
+          type: array
+          items: { $ref: "#/components/schemas/ClubRef" }
+    CupTie:
+      type: object
+      description: One bracket tie — a scheduled fixture with a decided winner once the round completes.
+      properties:
+        id: { type: string, format: uuid }
+        home_club: { $ref: "#/components/schemas/ClubRef" }
+        away_club: { $ref: "#/components/schemas/ClubRef" }
+        scheduled_at: { type: string, format: date-time }
+        status: { type: string }
+        home_score: { type: integer, nullable: true }
+        away_score: { type: integer, nullable: true }
+        winner: { $ref: "#/components/schemas/ClubRef" }
     CareerSummary:
       type: object
       properties:

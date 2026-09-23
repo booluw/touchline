@@ -4,7 +4,7 @@
 // the engine schedules a deterministic round-robin once seeded.
 import { ref, computed } from 'vue'
 
-import type { Country, League, SeedResult, ClubNamePools } from '~/composables/useCompetition'
+import type { Country, League, SeedResult, ClubNamePools, Cup, CupCampaign } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
 import { useAuth } from '~/composables/useAuth'
 
@@ -78,12 +78,29 @@ const leagueForm = ref({
   relegations: 1,
 })
 
+// IM04 domestic cups: declare a knockout cup with staged eligibility, then
+// start its campaign (qualifiers + top-N bye entries), and read back the
+// materialized bracket.
+const cups = ref<Cup[]>([])
+const cupCampaigns = ref<Record<string, CupCampaign | null>>({})
+const cupForm = ref({
+  country_id: '',
+  name: '',
+  first_tier_bye: 4,
+  survivor_threshold: 8,
+  prize_pool: 100000,
+})
+const activeCup = ref<string | null>(null)
+
+const countryName = (id: string) => countries.value.find((c) => c.id === id)?.name ?? id.slice(0, 8)
+
 const countriesFor = (countryId: string) => leagues.value.filter((l) => l.country.id === countryId)
 const leaguesOfCountry = computed(() => leagueForm.value.country_id ? countriesFor(leagueForm.value.country_id) : [])
 
 async function loadAll() {
   countries.value = await comp.listCountries(worldId.value)
   leagues.value = await comp.listLeagues(worldId.value)
+  cups.value = await comp.listMyCups()
 }
 async function call(fn: () => Promise<void>) {
   error.value = ''
@@ -136,6 +153,29 @@ async function doSeed(starterLeagueId: string) {
     seedResult.value = await comp.seedCompetition(worldId.value, leagueForm.value.country_id, starterLeagueId)
     notice.value = `Country seeded — ${seedResult.value.leagues.length} leagues, fixtures scheduled.`
   })
+}
+async function doCreateCup() {
+  await call(async () => {
+    const cup = await comp.createCup({
+      ...cupForm.value,
+      world_id: worldId.value,
+    })
+    notice.value = `Cup "${cup.name}" declared (N ${cup.first_tier_bye} join at ${cup.survivor_threshold} survivors).`
+    activeCup.value = cup.id
+    cupForm.value = { ...cupForm.value, name: '', prize_pool: 100000 }
+    await loadAll()
+  })
+}
+async function doStartCampaign(cup: Cup) {
+  await call(async () => {
+    await comp.startCupCampaign(worldId.value, cup.country.id, cup.id)
+    notice.value = `Campaign started for "${cup.name}".`
+    cupCampaigns.value[cup.id] = await comp.getCup(cup.id)
+  })
+}
+async function toggleCupView(cup: Cup) {
+  activeCup.value = activeCup.value === cup.id ? null : cup.id
+  cupCampaigns.value[cup.id] = await comp.getCup(cup.id)
 }
 </script>
 
@@ -301,6 +341,72 @@ async function doSeed(starterLeagueId: string) {
             <h3 class="font-medium text-white">{{ ls.name }} <span class="text-slate-500 text-sm">— {{ ls.season_label }}</span></h3>
             <p class="text-sm text-slate-400">{{ ls.team_count }} teams · {{ ls.matchdays }} matchdays · {{ ls.fixture_count }} fixtures</p>
           </div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+        <h2 class="text-xl font-semibold text-white mb-1">Domestic cups</h2>
+        <p class="text-slate-400 text-sm mb-3">
+          IM04 knockout cups with staged eligibility: the top N tier-1 clubs
+          (first_tier_bye) sit out the qualifiers and join the bracket when X
+          survivor_threshold qualifiers remain. Golden goal decides drawn ties.
+          The bracket draws lazily, one round at a time, from a persisted plan.
+        </p>
+
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-2 items-end mb-3">
+          <div>
+            <label class="block text-xs text-slate-400">Country</label>
+            <select v-model="cupForm.country_id" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 w-full">
+              <option v-for="c in countries" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400">Name</label>
+            <input v-model="cupForm.name" type="text" placeholder="FA Cup" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 w-full" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400">N (top-N bye)</label>
+            <input v-model.number="cupForm.first_tier_bye" type="number" min="0" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 w-full" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400">X (survivors)</label>
+            <input v-model.number="cupForm.survivor_threshold" type="number" min="1" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 w-full" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400">Prize pool</label>
+            <input v-model.number="cupForm.prize_pool" type="number" min="0" class="bg-slate-900 border border-slate-600 rounded px-3 py-2 w-full" />
+          </div>
+        </div>
+        <button :disabled="busy || leaguesOfCountry.length === 0" @click="doCreateCup"
+                class="bg-indigo-600 hover:bg-indigo-500 text-white rounded px-4 py-2">Declare cup</button>
+        <p v-if="leaguesOfCountry.length === 0" class="text-slate-500 text-sm mt-2">
+          Declare leagues in a country first — the cup draws entrant clubs from that country's league membership.
+        </p>
+
+        <div v-if="cups.length" class="mt-4 space-y-3">
+          <div v-for="cup in cups" :key="cup.id" class="bg-slate-900 border border-slate-700 rounded-lg p-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h3 class="font-medium text-white">{{ cup.name }} <span class="text-slate-500 text-sm">— {{ countryName(cup.country.id) }}</span></h3>
+                <p class="text-sm text-slate-400">
+                  {{ cup.format }} · top {{ cup.first_tier_bye }} join at {{ cup.survivor_threshold }} survivors
+                  · <span class="text-emerald-400">£{{ cup.prize_pool.toLocaleString() }}</span>
+                </p>
+              </div>
+              <div class="flex gap-2">
+                <button :disabled="busy" @click="doStartCampaign(cup)"
+                        class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-3 py-1 text-sm">Start campaign</button>
+                <button @click="toggleCupView(cup)"
+                        class="bg-slate-700 hover:bg-slate-600 text-white rounded px-3 py-1 text-sm">
+                  {{ activeCup === cup.id ? 'Hide' : 'Bracket' }}
+                </button>
+              </div>
+            </div>
+            <div v-if="activeCup === cup.id && cupCampaigns[cup.id]">
+              <CupBracketView :campaign="cupCampaigns[cup.id]" />
+            </div>
+          </div>
+          <p v-if="!cups.length" class="text-slate-500 text-sm">No cups declared yet.</p>
         </div>
       </section>
     </div>

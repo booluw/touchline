@@ -161,6 +161,8 @@ func (s *server) router() *gin.Engine {
 			admin.GET("/countries", s.handleListCountries)
 			admin.POST("/leagues", s.handleCreateLeague)
 			admin.GET("/leagues", s.handleListLeagues)
+			admin.POST("/cups", s.handleCreateCup)
+			admin.POST("/worlds/:id/countries/:countryID/cups/:cupID/campaign", s.handleStartCupCampaign)
 			admin.PATCH("/leagues/:id/adjacency", s.handleUpdateAdjacency)
 			admin.GET("/club-name-parts", s.handleListClubNameParts)
 			admin.POST("/club-name-parts", s.handleAddClubNamePart)
@@ -188,6 +190,10 @@ func (s *server) router() *gin.Engine {
 		api.GET("/competitions/:id/fixtures", s.requireAuth, s.handleGetFixtures)
 		api.GET("/competitions/:id/calendar", s.requireAuth, s.handleGetSeasonCalendar)
 		api.GET("/competitions/:id/standings", s.requireAuth, s.handleGetStandings)
+
+		// Cups (IM04): roster grouped by cup; the manager view groups by world.
+		api.GET("/cups", s.requireAuth, s.handleListCups)
+		api.GET("/cups/:id", s.requireAuth, s.handleGetCup)
 
 		// Match feed (S04-03): the fixture header for the match screen and
 		// the persisted event feed. Both are world-scoped to the caller.

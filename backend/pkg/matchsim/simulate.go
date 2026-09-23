@@ -89,7 +89,11 @@ func Simulate(opts Options) MatchResult {
 
 	homeMinutes := 0
 
-	for minute := 1; minute <= 90; minute++ {
+	// step draws one simulated minute. Regulation runs minutes 1..90; a golden
+	// goal (Options.GoldenGoal) reuses the same minute machinery past 90 until
+	// sudden death lands. The closure keeps the draw order byte-identical for
+	// every non-golden-goal minute (same draw sequence, same digest).
+	step := func(minute int) {
 		// A live tactic_change input applies the side's new style for the
 		// remainder of the match from this minute (v1.5; no RNG consumed).
 		if in := liveInputs.tacticAt(minute, hs.team.ID); in != nil {
@@ -110,7 +114,9 @@ func Simulate(opts Options) MatchResult {
 		var att, def *side
 		if r.nextFloat() < ph {
 			att, def = hs, as
-			homeMinutes++
+			if minute <= 90 {
+				homeMinutes++
+			}
 		} else {
 			att, def = as, hs
 		}
@@ -212,9 +218,27 @@ func Simulate(opts Options) MatchResult {
 		}
 	}
 
+	for minute := 1; minute <= 90; minute++ {
+		step(minute)
+	}
+
 	res.HomePossession = math.Round(float64(homeMinutes) / 90 * 100)
-	emit(90, EventFullTime, "",
-		fmt.Sprintf("Full-time! %d–%d. %s.", res.HomeGoals, res.AwayGoals, winnerName(res, home, away)), "")
+
+	goldenGoal := opts.GoldenGoal && res.HomeGoals == res.AwayGoals
+	if goldenGoal {
+		emit(90, EventFullTime, "",
+			fmt.Sprintf("Ninety minutes. Level at %d–%d — sudden-death golden goal decides the tie.", res.HomeGoals, res.AwayGoals), "")
+		minute := 91
+		for res.HomeGoals == res.AwayGoals {
+			step(minute)
+			minute++
+		}
+		emit(minute-1, EventFullTime, "",
+			fmt.Sprintf("GOLDEN GOAL! Full time %d–%d. %s.", res.HomeGoals, res.AwayGoals, goldenWinnerName(res, home, away)), "")
+	} else {
+		emit(90, EventFullTime, "",
+			fmt.Sprintf("Full-time! %d–%d. %s.", res.HomeGoals, res.AwayGoals, winnerName(res, home, away)), "")
+	}
 
 	// Attribution pass (v1.6, addendum): link castable events to players and
 	// derive per-side ratings. Strictly post-canonical draws, so the v1.5 draw
@@ -523,4 +547,13 @@ func winnerName(res MatchResult, home, away Team) string {
 	default:
 		return "the points are shared"
 	}
+}
+
+// goldenWinnerName is the sudden-death summary line for a decided knockout tie:
+// the golden goal guarantees a winner, so there is no shared-points branch.
+func goldenWinnerName(res MatchResult, home, away Team) string {
+	if res.HomeGoals > res.AwayGoals {
+		return fmt.Sprintf("%s win the tie", home.ClubName)
+	}
+	return fmt.Sprintf("%s win the tie", away.ClubName)
 }

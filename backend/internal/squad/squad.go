@@ -130,6 +130,7 @@ type FixtureContext struct {
 	IsCupTie       bool // knockout tie
 	IsDeadRubber   bool // nothing riding on it
 	LeagueTier     int  // fixture's league tier (reputation signal, 1 = elite)
+	GoldenGoal     bool // knockout format: a level regulation score is decided
 }
 
 // IsHighStakes reports whether a fixture carries material stakes — the switch

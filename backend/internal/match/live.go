@@ -317,7 +317,11 @@ func (s *Service) resolveMatchPacing(ctx context.Context, worldID uuid.UUID) tim
 // are exactly the persisted feed for this minute (S04-03 publishes them as the
 // live match_tick envelope). finished reports that full time was reached.
 func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEventRow, bool, error) {
-	if sess.nextMinute > 90 {
+	// A golden-goal cup tie (IM04) keeps pacing past 90 while the tie is still
+	// level so the deciding goal streams like a live minute; every other match
+	// reports full time as soon as the clock passes 90.
+	levelAt90 := sess.fc.GoldenGoal && sess.nextMinute <= 90
+	if sess.nextMinute > 90 && !levelAt90 {
 		return nil, true, nil
 	}
 	m := sess.nextMinute
@@ -333,6 +337,7 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 		Away:       away,
 		Tuning:     matchsim.DefaultTuning(),
 		LiveInputs: inputsUpTo(inputs, m),
+		GoldenGoal: sess.fc.GoldenGoal,
 	})
 
 	// Persist only this minute's events: everything up to m is already on
@@ -380,7 +385,23 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 
 	sess.nextMinute = m + 1
 	resolveEventRefs(ctx, s.pool, rows)
-	return rows, sess.nextMinute > 90, nil
+
+	finished := sess.nextMinute > 90
+	if finished && sess.fc.GoldenGoal {
+		// A golden-goal tie stays "in progress" while the score is level: the
+		// engine's sudden-death minutes continue to stream until a goal lands
+		// (then Finalize resolves the identical outcome).
+		scored := 0
+		for _, e := range res.Events {
+			if e.Minute <= m && (e.Type == matchsim.EventGoal || e.Type == matchsim.EventPenaltyScored) {
+				scored++
+			}
+		}
+		if scored%2 == 0 {
+			finished = false
+		}
+	}
+	return rows, finished, nil
 }
 
 // Finalize completes a fully-paced live match: it re-runs the engine over the
@@ -404,6 +425,7 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		Away:       away,
 		Tuning:     matchsim.DefaultTuning(),
 		LiveInputs: inputs,
+		GoldenGoal: sess.fc.GoldenGoal,
 	})
 	now := time.Now().UTC()
 

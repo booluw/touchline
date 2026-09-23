@@ -72,6 +72,10 @@ var (
 	ErrClubNotFound             = errors.New("club not found")
 	ErrClubWorldMismatch        = errors.New("club does not belong to this world")
 	ErrSeasonNotFound           = errors.New("season not found")
+	ErrCupLimit                 = errors.New("a club may hold at most 3 cup memberships")
+	ErrCupCampaignExists        = errors.New("this cup already has a live campaign")
+	ErrStagingInvalid           = errors.New("cup staging does not form a valid knockout")
+	ErrCupDraw                  = errors.New("knockout ties cannot finish level; the golden goal must decide")
 )
 
 var errInternalRollover = errors.New("competition: internal rollover error")

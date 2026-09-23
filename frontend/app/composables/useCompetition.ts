@@ -116,6 +116,50 @@ export interface ClubNamePools {
   suffixes: string[]
 }
 
+// ---------- Domestic cups (IM04) ----------
+
+export interface Cup {
+  id: string
+  world_id: string
+  country: CountryRef
+  name: string
+  competition_type: string
+  status: string
+  prize_pool: number
+  format: string
+  is_home_and_away: boolean
+  first_tier_bye: number
+  survivor_threshold: number
+}
+
+export interface CupTie {
+  id: string
+  home_club: ClubRef
+  away_club: ClubRef
+  scheduled_at: string
+  status: string
+  home_score: number | null
+  away_score: number | null
+  winner?: ClubRef
+}
+
+export interface CupRound {
+  round: number
+  scheduled_at?: string | null
+  ties: CupTie[]
+  byes: ClubRef[]
+}
+
+export interface CupCampaign {
+  cup: Cup
+  qualification_rules: unknown
+  late_entry_round: number
+  total_rounds: number
+  season?: SeasonRef | null
+  champion?: ClubRef | null
+  rounds: CupRound[]
+}
+
 export function useCompetition() {
   const { authedFetch } = useAuth()
 
@@ -222,6 +266,47 @@ export function useCompetition() {
     return res.json()
   }
 
+  // ---------- Caps (IM04) ----------
+
+  async function createCup(params: {
+    world_id: string
+    country_id: string
+    name: string
+    first_tier_bye: number
+    survivor_threshold: number
+    prize_pool?: number
+  }): Promise<Cup> {
+    const res = await authedFetch('/api/admin/cups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    return res.json()
+  }
+
+  async function startCupCampaign(worldId: string, countryId: string, cupId: string): Promise<{ id: string }> {
+    const res = await authedFetch(
+      `/api/admin/worlds/${worldId}/countries/${countryId}/cups/${cupId}/campaign`,
+      { method: 'POST' },
+    )
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    return res.json()
+  }
+
+  async function listMyCups(): Promise<Cup[]> {
+    const res = await authedFetch('/api/cups')
+    if (!res.ok) return []
+    const body = await res.json()
+    return body.cups ?? []
+  }
+
+  async function getCup(cupId: string): Promise<CupCampaign | null> {
+    const res = await authedFetch(`/api/cups/${cupId}`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
   // ---------- Club-name pools (admin: country-scoped, '' = global) ----------
 
   async function listClubNameParts(countryCode = ''): Promise<ClubNamePools> {
@@ -264,5 +349,9 @@ export function useCompetition() {
     listClubNameParts,
     addClubNamePart,
     removeClubNamePart,
+    createCup,
+    startCupCampaign,
+    listMyCups,
+    getCup,
   }
 }

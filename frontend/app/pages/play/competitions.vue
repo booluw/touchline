@@ -4,12 +4,14 @@
 // kickoff times) and its live standings table.
 import { computed, onMounted, ref } from 'vue'
 
-import type { Fixture, League, SeasonCalendar, Standings } from '~/composables/useCompetition'
+import type { Cup, CupCampaign, Fixture, League, SeasonCalendar, Standings } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
 
 const comp = useCompetition()
 
 const leagues = ref<League[]>([])
+const cups = ref<Cup[]>([])
+const cupCampaigns = ref<Record<string, CupCampaign | null>>({})
 const selected = ref<string | null>(null)
 const calendar = ref<SeasonCalendar | null>(null)
 const standings = ref<Standings | null>(null)
@@ -22,6 +24,10 @@ const totalMatchdays = computed(() => {
 
 async function load() {
   leagues.value = await comp.listMyCompetitions()
+  cups.value = await comp.listMyCups()
+  for (const cup of cups.value) {
+    cupCampaigns.value[cup.id] = await comp.getCup(cup.id)
+  }
   const best = leagues.value[0]
   if (best) await selectLeague(best.id)
 }
@@ -80,6 +86,23 @@ onMounted(() => { load().catch(() => { error.value = 'Could not load your compet
           {{ l.name }}
         </button>
       </div>
+
+      <section v-if="cups.length" class="bg-slate-800 border border-slate-700 rounded-lg p-4">
+        <h2 class="text-lg font-semibold text-white mb-3">Cups</h2>
+        <div class="space-y-4">
+          <div v-for="cup in cups" :key="cup.id" class="bg-slate-900 border border-slate-700 rounded-lg p-3">
+            <h3 class="font-medium text-white mb-1">
+              {{ cup.name }}
+              <span class="text-slate-500 text-sm">{{ cup.country.name ?? '' }}</span>
+            </h3>
+            <p class="text-sm text-slate-400 mb-2">
+              {{ cup.format }} · top {{ cup.first_tier_bye }} join at {{ cup.survivor_threshold }} survivors
+            </p>
+            <CupBracketView v-if="cupCampaigns[cup.id]" :campaign="cupCampaigns[cup.id]" />
+            <p v-else class="text-slate-500 text-sm">No campaign started yet.</p>
+          </div>
+        </div>
+      </section>
 
       <template v-if="selected">
         <section v-if="standings" class="bg-slate-800 border border-slate-700 rounded-lg p-4">

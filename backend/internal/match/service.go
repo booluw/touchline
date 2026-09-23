@@ -172,10 +172,11 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 	}
 
 	res := matchsim.Simulate(matchsim.Options{
-		Seed:   seed,
-		Home:   lineupsTeam(homePlan),
-		Away:   lineupsTeam(awayPlan),
-		Tuning: tuning,
+		Seed:       seed,
+		Home:       lineupsTeam(homePlan),
+		Away:       lineupsTeam(awayPlan),
+		Tuning:     tuning,
+		GoldenGoal: fc.GoldenGoal,
 	})
 
 	matchID, now, err := persistMatch(ctx, tx, fixtureID, f.WorldID, seed, res)
@@ -640,16 +641,22 @@ func (s *Service) fixtureContext(ctx context.Context, tx pgx.Tx, f *Fixture) (sq
 	fc := squad.FixtureContext{LeagueTier: 10}
 
 	var compType string
+	var format string
 	var reputation int
 	err := tx.QueryRow(ctx,
-		`SELECT competition_type, reputation FROM competition.competitions WHERE id = $1`, f.Competition.ID).
-		Scan(&compType, &reputation)
+		`SELECT competition_type, reputation, COALESCE(r.format, '') FROM competition.competitions c
+		 LEFT JOIN competition.competition_rules r ON r.competition_id = c.id
+		 WHERE c.id = $1`, f.Competition.ID).
+		Scan(&compType, &reputation, &format)
 	if errors.Is(err, pgx.ErrNoRows) {
 		compType = "custom"
 	} else if err != nil {
 		return fc, err
 	}
 	fc.IsCupTie = compType == "domestic_cup" || compType == "continental"
+	// Golden goal is the knockout tie-decision contract (IM04): only fixtures
+	// whose competition rules declare format='knockout' arm sudden death.
+	fc.GoldenGoal = format == "knockout"
 	if reputation > 0 {
 		fc.LeagueTier = reputation
 	}

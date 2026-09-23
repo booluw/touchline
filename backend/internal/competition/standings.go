@@ -120,14 +120,17 @@ func (s *Service) ApplyResult(ctx context.Context, fixtureID uuid.UUID, homeScor
 
 	var (
 		worldID, countryID, leagueID, homeClub, awayClub uuid.UUID
+		format                                           string
 		applied                                          *time.Time
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT f.world_id, c.country_id, f.competition_id, f.home_club_id, f.away_club_id, f.standings_applied_at
+		SELECT f.world_id, c.country_id, f.competition_id, f.home_club_id, f.away_club_id,
+		       COALESCE(r.format, ''), f.standings_applied_at
 		FROM match.fixtures f
 		JOIN competition.competitions c ON c.id = f.competition_id
+		LEFT JOIN competition.competition_rules r ON r.competition_id = f.competition_id
 		WHERE f.id = $1 FOR UPDATE OF f`, fixtureID).
-		Scan(&worldID, &countryID, &leagueID, &homeClub, &awayClub, &applied)
+		Scan(&worldID, &countryID, &leagueID, &homeClub, &awayClub, &format, &applied)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrFixtureNotFound
 	}
@@ -158,6 +161,17 @@ func (s *Service) ApplyResult(ctx context.Context, fixtureID uuid.UUID, homeScor
 		WHERE fixture_id = $1 AND status <> 'completed'`,
 		fixtureID, homeScore, awayScore); err != nil {
 		return fmt.Errorf("update match: %w", err)
+	}
+
+	// Knockout competitions (domestic cups, format 'knockout') apply a decided
+	// tie directly: the bracket advances, never the league table, and never the
+	// country rollover. Standings are marked applied above so the league
+	// completeness count cannot be blocked by an unapplied cup fixture.
+	if format == "knockout" {
+		if err := s.applyKnockoutResult(ctx, tx, fixtureID, worldID, leagueID, homeClub, awayClub, homeScore, awayScore); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 
 	homePts, awayPts := resultPoints(homeScore, awayScore)
@@ -215,9 +229,9 @@ func resultPoints(home, away int) (int, int) {
 	}
 }
 
-func (s *Service) activeSeason(ctx context.Context, tx pgx.Tx, leagueID, worldID uuid.UUID) (*Season, error) {
+func (s *Service) activeSeason(ctx context.Context, q rowQueryer, leagueID, worldID uuid.UUID) (*Season, error) {
 	var se Season
-	err := tx.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT id, competition_id, season_label, season_number, status
 		FROM competition.seasons
 		WHERE competition_id = $1 AND world_id = $2 AND status <> 'completed'

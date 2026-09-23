@@ -706,3 +706,131 @@ func TestPenaltyTakerDrawsNoCast(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Golden goal (IM04)
+// ---------------------------------------------------------------------------
+
+// goldenGoalRegulation reports whether a seed's plain match ends level — the
+// precondition that arms sudden death.
+func goldenGoalRegulation(seed int64) bool {
+	res := Simulate(sampleOptions(seed))
+	return res.HomeGoals == res.AwayGoals
+}
+
+// TestGoldenGoalDecidesLevelTie: a level-at-90 knockout tie is resolved by a
+// sudden-death goal past minute 90, deterministically, with the deciding goal
+// and a golden-goal summary in the feed. Seed 1's regulation match is 0-0
+// (pinned by the suite's scan), so it must trigger.
+func TestGoldenGoalDecidesLevelTie(t *testing.T) {
+	seed := int64(1)
+	if !goldenGoalRegulation(seed) {
+		t.Fatalf("test fixture drift: seed %d no longer levels at 90", seed)
+	}
+
+	opts := sampleOptions(seed)
+	opts.GoldenGoal = true
+	res := Simulate(opts)
+
+	if res.HomeGoals == res.AwayGoals {
+		t.Fatalf("golden goal must break a level tie, got %d-%d", res.HomeGoals, res.AwayGoals)
+	}
+	var best int
+	for _, ev := range res.Events {
+		if ev.Minute > best {
+			best = ev.Minute
+		}
+	}
+	if best <= 90 {
+		t.Fatalf("no minute past 90 in feed; tie left unresolved after regulation")
+	}
+
+	// Exactly one post-90 goal + one golden-goal summary, both after 90'.
+	deciding, summaries := 0, 0
+	for _, ev := range res.Events {
+		if ev.Minute <= 90 {
+			continue
+		}
+		if ev.Type == EventGoal || ev.Type == EventPenaltyScored {
+			deciding++
+		}
+		if ev.Type == EventFullTime && strings.HasPrefix(ev.Description, "GOLDEN GOAL!") {
+			summaries++
+			if ev.Minute != best {
+				t.Fatalf("golden-goal summary minute %d != deciding minute %d", ev.Minute, best)
+			}
+			if !strings.Contains(ev.Description, "win the tie") {
+				t.Fatalf("golden-goal summary should name the winner: %q", ev.Description)
+			}
+		}
+	}
+	if deciding != 1 {
+		t.Fatalf("expected exactly one sudden-death goal, got %d (score %d-%d)", deciding, res.HomeGoals, res.AwayGoals)
+	}
+	if summaries != 1 {
+		t.Fatalf("expected one golden-goal full-time summary, got %d", summaries)
+	}
+	if scoringEvents(res) != res.HomeGoals+res.AwayGoals {
+		t.Fatalf("scoring events disagree with final score %d-%d", res.HomeGoals, res.AwayGoals)
+	}
+
+	// Same seed ⇒ identical resolution (the replay contract holds into extra
+	// minutes), and the deciding minute is beyond regulation.
+	if again := Simulate(opts); canonicalDigest(again) != canonicalDigest(res) {
+		t.Fatal("golden-goal tie must be deterministic per seed")
+	}
+}
+
+// TestGoldenGoalRegulationOnly: golden goal is armed solely by a level score at
+// 90'. A regulation winner (seed 2) must be byte-identical with the option on
+// and off — no extra RNG, no feed change.
+func TestGoldenGoalRegulationOnly(t *testing.T) {
+	seed := int64(2)
+	if goldenGoalRegulation(seed) {
+		t.Fatalf("test fixture drift: seed %d unexpectedly levels at 90", seed)
+	}
+	base := canonicalDigest(Simulate(sampleOptions(seed)))
+	opts := sampleOptions(seed)
+	opts.GoldenGoal = true
+	if got := canonicalDigest(Simulate(opts)); got != base {
+		t.Fatalf("golden goal must not touch a regulation winner:\n got %s\nwant %s", got, base)
+	}
+}
+
+// TestGoldenGoalScansManySeeds stresses the sudden-death loop across many
+// level-at-90 seeds: every one resolves, deterministically, past 90', with a
+// valid final score and no event out of range.
+func TestGoldenGoalScansManySeeds(t *testing.T) {
+	scored := 0
+	for seed := int64(1); seed <= 200; seed++ {
+		opts := sampleOptions(seed)
+		opts.GoldenGoal = true
+		res := Simulate(opts)
+
+		reg := Simulate(sampleOptions(seed))
+		if reg.HomeGoals != reg.AwayGoals {
+			// Non-level regulation: option must be inert (already tested above,
+			// re-checked in-suite for the aggregate property).
+			continue
+		}
+		scored++
+		if res.HomeGoals == res.AwayGoals {
+			t.Fatalf("seed %d: golden goal left tie level at %d-%d", seed, res.HomeGoals, res.AwayGoals)
+		}
+		var maxMin int
+		for _, ev := range res.Events {
+			if ev.Minute > maxMin {
+				maxMin = ev.Minute
+			}
+		}
+		if maxMin <= 90 {
+			t.Fatalf("seed %d: decided tie has no minute past 90", seed)
+		}
+		if again := Simulate(opts); canonicalDigest(again) != canonicalDigest(res) {
+			t.Fatalf("seed %d: golden-goal tie not deterministic", seed)
+		}
+	}
+	if scored == 0 {
+		t.Fatal("no level-at-90 seed found in range — level generator drift")
+	}
+}

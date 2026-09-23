@@ -1,6 +1,6 @@
 # IM04 — Domestic cup: knockout staging, N/X eligibility, and golden-goal ties
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Improvements (competition scheduling)
 **Source:** Product decision (manual session)
 **Depends on:** S04-01 (StartSeason seam + rollover); IM01 (season lifecycle);

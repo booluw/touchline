@@ -113,6 +113,15 @@ type Options struct {
 	// non-live/quick-result matches. Replay contract: seed + LiveInputs ⇒
 	// identical outcome.
 	LiveInputs []LiveInput
+	// GoldenGoal enables sudden-death for knockout cup ties (IM04): when the
+	// regulation 90 minutes end level, the engine keeps drawing deterministic
+	// minutes past 90 until a goal is produced. The deciding goal and a
+	// golden-goal full-time summary land in the event stream; the score is
+	// final at that minute. Off (the default) matches — league and any
+	// regulation result — draw exactly 90 minutes and consume no extra RNG, so
+	// the v1.4/v1.5 replay block is unchanged. A regulation winner is also
+	// untouched: golden goal only fires when the score is level at 90'.
+	GoldenGoal bool
 }
 
 // MatchEvent is one ordered feed event. Type values are the exact subset of
