@@ -2816,6 +2816,150 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/leagues/{id}/scheduling:
+    patch:
+      tags: [admin]
+      summary: Set a league's allowed scheduling weekdays (IM05)
+      operationId: updateLeagueScheduling
+      description: |
+        Persists the league's allowed_weekdays override and re-paces its
+        calendar: matchdays with a live/completed fixture are frozen and every
+        unstarted matchday slides forward onto the earliest allowed weekday at
+        least two game-days clear, keeping matchday order and the kickoff-hour
+        rotation. An empty array clears the override (restoring the country/
+        legacy fallback) without moving fixtures. Publish a country-scoped
+        'scheduling' news story when fixtures move.
+      parameters:
+        - $ref: "#/components/parameters/LeagueID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowed_weekdays]
+              properties:
+                allowed_weekdays:
+                  type: array
+                  items: { type: integer, minimum: 1, maximum: 7, example: 3 }
+                  description: "ISO weekdays the league may play on (1=Mon..7=Sun). Empty clears the override."
+      responses:
+        "200":
+          description: The re-pacing result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calendar_updated: { type: boolean, example: true }
+                  matchdays_re_paced: { type: integer, example: 4 }
+                  fixtures_moved: { type: integer, example: 12 }
+        "400":
+          description: Malformed payload or competition is not a league.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: League not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/cups/{id}/scheduling:
+    patch:
+      tags: [admin]
+      summary: Set a cup's allowed scheduling weekdays (IM05)
+      operationId: updateCupScheduling
+      description: |
+        Persists the cup's allowed_weekdays override. The cup's existing round
+        dates stand until the next round is materialized; the anchored
+        backward walk (planCupCalendar) honors the weekday set from the next
+        campaign onward.
+      parameters:
+        - $ref: "#/components/parameters/CupID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowed_weekdays]
+              properties:
+                allowed_weekdays:
+                  type: array
+                  items: { type: integer, minimum: 1, maximum: 7, example: 3 }
+                  description: "ISO weekdays the cup may play on (1=Mon..7=Sun). Empty clears the override."
+      responses:
+        "200":
+          description: The persisted override (cup dates stand unchanged).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calendar_updated: { type: boolean, example: true }
+        "400":
+          description: Malformed payload or competition is not a domestic cup.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Cup not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/scheduling:
+    patch:
+      tags: [admin]
+      summary: Set a country's default scheduling weekdays (IM05)
+      operationId: updateCountryScheduling
+      description: |
+        Persists the country's default_scheduling_rules allowed_weekdays set
+        and re-paces every one of its leagues that has no override of its own,
+        so a country-wide rule change propagates to the whole calendar in one
+        shot. Start-of-season materialization falls back per-competition →
+        country default → legacy day-formula pacing. Clearing the default
+        (empty array) persists the rules without moving fixtures; a country-scoped
+        'scheduling' news story is published on any league whose calendar moves.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - name: countryID
+          in: path
+          required: true
+          description: Country owning the calendar.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [allowed_weekdays]
+              properties:
+                allowed_weekdays:
+                  type: array
+                  items: { type: integer, minimum: 1, maximum: 7, example: 3 }
+                  description: "ISO weekdays leagues in this country default to (1=Mon..7=Sun). Empty clears the default."
+      responses:
+        "200":
+          description: The re-pacing result across affected leagues.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calendar_updated: { type: boolean, example: true }
+                  matchdays_re_paced: { type: integer, example: 7 }
+                  fixtures_moved: { type: integer, example: 21 }
+        "400":
+          description: Malformed payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Country not found in world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/admin/cups:
     post:
       tags: [admin]

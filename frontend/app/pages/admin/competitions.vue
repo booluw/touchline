@@ -177,6 +177,62 @@ async function toggleCupView(cup: Cup) {
   activeCup.value = activeCup.value === cup.id ? null : cup.id
   cupCampaigns.value[cup.id] = await comp.getCup(cup.id)
 }
+
+// IM05 weekday-aware scheduling. The chips edit an "allowed weekdays" set
+// (1=Mon..7=Sun); an empty set clears the override/country default. League
+// re-pacing freezes matchdays with live/completed fixtures and slides the rest
+// forward; cups keep existing dates until the next round is materialized.
+const WEEKDAYS = [
+  { v: 1, label: 'Mon' },
+  { v: 2, label: 'Tue' },
+  { v: 3, label: 'Wed' },
+  { v: 4, label: 'Thu' },
+  { v: 5, label: 'Fri' },
+  { v: 6, label: 'Sat' },
+  { v: 7, label: 'Sun' },
+]
+const schedDays = ref<Record<string, number[]>>({})
+const schedMsg = ref<Record<string, string>>({})
+const schedBusy = ref('')
+
+const leagueSchedMessages = computed(() =>
+  Object.entries(schedMsg.value)
+    .filter(([id, m]) => id.startsWith('l:') && m)
+    .map(([id, msg]) => ({ id, msg })))
+
+function toggleWeekday(id: string, day: number) {
+  const cur = schedDays.value[id] ?? []
+  schedDays.value[id] = cur.includes(day) ? cur.filter((d) => d !== day) : [...cur, day].sort((a, b) => a - b)
+  schedMsg.value[id] = ''
+}
+function applyWeekdays(id: string, apply: () => Promise<{ matchdays_re_paced?: number; fixtures_moved?: number }>) {
+  schedBusy.value = id
+  schedMsg.value[id] = ''
+  apply()
+    .then((res) => {
+      schedMsg.value[id] = res.matchdays_re_paced
+        ? `Re-paced ${res.matchdays_re_paced} matchdays · ${res.fixtures_moved} fixtures moved.`
+        : 'Weekday set saved.'
+    })
+    .catch((e) => {
+      schedMsg.value[id] = e instanceof Error ? e.message : String(e)
+    })
+    .finally(() => {
+      schedBusy.value = ''
+    })
+}
+function saveCountryWeekdays(countryId: string) {
+  applyWeekdays(`c:${countryId}`, () =>
+    comp.updateCountryScheduling(worldId.value, countryId, schedDays.value[`c:${countryId}`] ?? []))
+}
+function saveLeagueWeekdays(leagueId: string) {
+  applyWeekdays(`l:${leagueId}`, () =>
+    comp.updateLeagueScheduling(leagueId, schedDays.value[`l:${leagueId}`] ?? []))
+}
+function saveCupWeekdays(cupId: string) {
+  applyWeekdays(`cu:${cupId}`, () =>
+    comp.updateCupScheduling(cupId, schedDays.value[`cu:${cupId}`] ?? []))
+}
 </script>
 
 <template>
@@ -254,8 +310,19 @@ async function toggleCupView(cup: Cup) {
           <button :disabled="busy" @click="doCreateCountry" class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2">Add country</button>
         </div>
         <ul class="flex flex-wrap gap-2">
-          <li v-for="c in countries" :key="c.id" class="bg-slate-900 border border-slate-700 rounded-full px-4 py-1 text-sm">
-            {{ c.name }} <span class="text-slate-500 uppercase">({{ c.code }})</span>
+          <li v-for="c in countries" :key="c.id" class="bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-sm">
+            <div class="font-medium text-white">{{ c.name }} <span class="text-slate-500 uppercase">({{ c.code }})</span></div>
+            <div class="mt-2 flex flex-wrap items-center gap-1">
+              <button v-for="d in WEEKDAYS" :key="d.v"
+                      :class="(schedDays[`c:${c.id}`] ?? []).includes(d.v)
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-800 text-slate-400 border border-slate-600'"
+                      class="rounded px-2 py-0.5 text-xs" @click="toggleWeekday(`c:${c.id}`, d.v)">{{ d.label }}</button>
+              <button :disabled="schedBusy === `c:${c.id}`" @click="saveCountryWeekdays(c.id)"
+                      class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-3 py-1 text-xs ml-1">Apply</button>
+            </div>
+            <p v-if="schedMsg[`c:${c.id}`]" class="text-xs text-emerald-400 mt-1">{{ schedMsg[`c:${c.id}`] }}</p>
+            <p class="text-slate-600 text-xs mt-1">Country-wide default; leagues without their own override follow it (re-paced when changed).</p>
           </li>
           <li v-if="!countries.length" class="text-slate-500 text-sm">No countries for this world yet.</li>
         </ul>
@@ -323,6 +390,41 @@ async function toggleCupView(cup: Cup) {
               </tbody>
             </table>
           </div>
+        </div>
+
+        <div v-if="leaguesOfCountry.length" class="mt-4">
+          <h3 class="text-sm text-slate-400 mb-2">Scheduling weekdays (IM05)</h3>
+          <p class="text-xs text-slate-500 mb-2">
+            Allowed match weekdays for each league. Re-pacing freezes matchdays
+            with live/completed fixtures and moves the rest forward; clearing the
+            chips restores the country default without moving fixtures.
+          </p>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-slate-500 text-left">
+                <tr><th class="py-1 pr-3">League</th><th class="py-1 pr-3">Weekdays</th><th class="py-1 pr-3">Action</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="l in leaguesOfCountry" :key="l.id" class="border-t border-slate-700">
+                  <td class="py-2 pr-3 font-medium text-white">{{ l.name }}</td>
+                  <td class="py-2 pr-3">
+                    <div class="flex flex-wrap gap-1">
+                      <button v-for="d in WEEKDAYS" :key="d.v"
+                              :class="(schedDays[`l:${l.id}`] ?? []).includes(d.v)
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-800 text-slate-400 border border-slate-600'"
+                              class="rounded px-2 py-0.5 text-xs" @click="toggleWeekday(`l:${l.id}`, d.v)">{{ d.label }}</button>
+                    </div>
+                  </td>
+                  <td class="py-2">
+                    <button :disabled="schedBusy === `l:${l.id}`" @click="saveLeagueWeekdays(l.id)"
+                            class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-3 py-1 text-xs">Apply</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-for="m in leagueSchedMessages" :key="m.id" class="text-xs text-emerald-400 mt-1">{{ m.msg }}</p>
         </div>
       </section>
 
@@ -402,6 +504,18 @@ async function toggleCupView(cup: Cup) {
                 </button>
               </div>
             </div>
+            <div class="mt-2 flex flex-wrap items-center gap-1">
+              <span class="text-xs text-slate-500 mr-1">Weekdays:</span>
+              <button v-for="d in WEEKDAYS" :key="d.v"
+                      :class="(schedDays[`cu:${cup.id}`] ?? []).includes(d.v)
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-800 text-slate-400 border border-slate-600'"
+                      class="rounded px-2 py-0.5 text-xs" @click="toggleWeekday(`cu:${cup.id}`, d.v)">{{ d.label }}</button>
+              <button :disabled="schedBusy === `cu:${cup.id}`" @click="saveCupWeekdays(cup.id)"
+                      class="bg-emerald-600 hover:bg-emerald-500 text-white rounded px-3 py-1 text-xs ml-1">Apply</button>
+              <span v-if="schedMsg[`cu:${cup.id}`]" class="text-xs text-emerald-400 ml-1">{{ schedMsg[`cu:${cup.id}`] }}</span>
+            </div>
+            <p class="text-slate-600 text-xs mt-1">Cup rounds play on these weekdays; live rounds keep today's dates until the next round materializes.</p>
             <div v-if="activeCup === cup.id && cupCampaigns[cup.id]">
               <CupBracketView :campaign="cupCampaigns[cup.id]" />
             </div>

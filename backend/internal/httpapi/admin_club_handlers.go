@@ -55,7 +55,7 @@ func (s *server) handleAdminWorldNews(c *gin.Context) {
 		return
 	}
 	limit := intQuery(c, "limit", 30, 100)
-	stories, err := s.adminSvc.News(c.Request.Context(), worldID, limit)
+	stories, err := s.adminSvc.News(c.Request.Context(), worldID, nil, limit)
 	if err != nil {
 		internalError(c, err)
 		return
@@ -65,7 +65,8 @@ func (s *server) handleAdminWorldNews(c *gin.Context) {
 
 // handleNews returns the calling manager's world news feed (the world is
 // resolved from the session identity; a manager with no club gets an empty
-// feed rather than an error).
+// feed rather than an error). IM05 country scoping: the feed shows world-wide
+// stories plus the stories of the manager's own club country.
 func (s *server) handleNews(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
@@ -76,8 +77,13 @@ func (s *server) handleNews(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "news unavailable"})
 		return
 	}
+	countryID, err := s.callerCountry(c)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
 	limit := intQuery(c, "limit", 30, 100)
-	stories, err := s.adminSvc.News(c.Request.Context(), worldID, limit)
+	stories, err := s.adminSvc.News(c.Request.Context(), worldID, countryID, limit)
 	if err != nil {
 		internalError(c, err)
 		return

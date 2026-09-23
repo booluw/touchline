@@ -99,3 +99,26 @@ func (s *server) callerWorld(c *gin.Context) (uuid.UUID, error) {
 	}
 	return worldID, err
 }
+
+// callerCountry resolves the world.countries id of the manager's club (via
+// the club's country *name*, which the club row carries). A manager with no
+// club, or a club whose country name doesn't match a world country, yields a
+// nil country — the caller then sees world-wide stories only.
+func (s *server) callerCountry(c *gin.Context) (*uuid.UUID, error) {
+	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
+	var countryID *uuid.UUID
+	err := s.pool.QueryRow(c.Request.Context(), `
+		SELECT wc.id
+		FROM manager.managers m
+		JOIN club.clubs cl ON cl.id = m.current_club_id
+		JOIN world.countries wc
+		  ON wc.world_id = cl.world_id AND lower(wc.name) = lower(cl.country)
+		WHERE m.id = $1`, ident.ManagerID).Scan(&countryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return countryID, nil
+}

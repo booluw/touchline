@@ -94,6 +94,33 @@ it does, in one transaction:
   season was built with: week = `game_day ÷ days_per_week` from the season's
   `start_date`.
 
+### Weekday-aware pacing (IM05)
+
+IM05 adds one optional knob on top of the day formula: an **allowed weekday
+set**, which replaces the mechanical day spacing when present.
+
+- `allowed_weekdays` is a JSONB array of ISO weekdays (`1` = Monday … `7` =
+  Sunday) under `competition_rules.scheduling_rules->'allowed_weekdays'` for a
+  single league or cup, or under a country-wide default at
+  `world.countries.default_scheduling_rules->'allowed_weekdays'`.
+- Resolution is **per competition → country default → legacy day formula**: a
+  league without its own set inherits its country's; a league whose country has
+  none (or an explicitly cleared set) reproduces the exact IM03
+  day-spaced calendar.
+- When a set resolves, matchday 1 = the earliest allowed weekday on/after the
+  day after the season anchor; every later matchday = the earliest allowed
+  weekday at least **two game-days** after its predecessor (the two-day rest
+  is structural — it still holds for monotone sets like "Saturdays only").
+  Kickoff times keep the same deterministic `kickoff_hours` rotation.
+- `PATCH /api/admin/leagues/:id/scheduling` with a non-empty set **re-paces a
+  live league**: matchdays containing a `live`/`completed` fixture are frozen;
+  every unstarted matchday slides forward onto the new weekdays, strictly
+  forward, order and kickoff hours preserved. Clearing the set (empty array)
+  persists the rules but never moves fixtures. A country-default change
+  (`PATCH /api/admin/worlds/:id/countries/:countryID/scheduling`) re-paces
+  every league of that country with no override of its own. A league re-pacing
+  that moves fixtures publishes a country-scoped `scheduling` news story.
+
 Error mapping: `404` for unknown world/league; `409` for an archived world,
 a league from another world, an already-seeded league, or an unseeded league.
 

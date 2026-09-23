@@ -394,9 +394,11 @@ curl -c /tmp/jar -b /tmp/jar -X POST \
 
 Every country league club is eligible; the top `first_tier_bye` clubs of tier
 1 join late, when `survivor_threshold` bottom-tier survivors remain. Cup ties
-resolve by golden goal on a draw, bracket rounds reuse the IM03 pacing, and
-cup results never touch league standings or the rollover. See
-[cup-competitions.md](cup-competitions.md).
+resolve by golden goal on a draw. Unless a country has a weekday default set
+(IM05), bracket rounds reuse the IM03 pacing; with one, the cup's final lands
+a few game-days after the country's latest league fixture and earlier rounds
+walk backward on league-free days. Cup results never touch league standings or
+the rollover. See [cup-competitions.md](cup-competitions.md).
 
 ---
 

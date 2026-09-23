@@ -20,6 +20,11 @@ type scheduleParamsResolved struct {
 	matchdaysPerWeek int   // how many matchdays pack into one game-week
 	daysPerWeek      int   // length of one game-week in world game-days
 	kickoffHours     []int // kickoff-hour rotation (UTC); matchday k uses kickoffHours[(base+k-1)%len]
+	// allowedWeekdays is the IM05 ISO-weekday set (1=Mon..7=Sun) the season
+	// may play on. Empty means weekday-aware scheduling is OFF and the legacy
+	// day-formula pacing below applies unchanged (regression: an unconfigured
+	// season reproduces the exact IM03 calendar).
+	allowedWeekdays []int
 }
 
 // rowQueryer is the subset of *pgxpool.Pool / pgx.Tx the pacing reads need.
@@ -31,7 +36,8 @@ type rowQueryer interface {
 // (inside createFixtures, so values are stamped onto the fixtures) and again at
 // calendar-read time to reproduce the same grouping. Precedence mirrors
 // offSeasonTicks: per-league scheduling_rules override → world calendar config
-// (IM02) → compiled defaults (IM03). kickoff_hours is a JSONB array.
+// (IM02) → compiled defaults (IM03). kickoff_hours is a JSONB array. The
+// allowed_weekdays set (IM05) resolves per-league → country default → unset.
 func (s *Service) scheduleParams(ctx context.Context, q rowQueryer, leagueID, worldID uuid.UUID) (*scheduleParamsResolved, error) {
 	p := &scheduleParamsResolved{
 		matchdaysPerWeek: DefaultMatchdaysPerWeek,
@@ -80,6 +86,17 @@ func (s *Service) scheduleParams(ctx context.Context, q rowQueryer, leagueID, wo
 	}
 	if hours := normalizeHours(declared); len(hours) > 0 {
 		p.kickoffHours = hours
+	}
+
+	// allowed_weekdays (IM05): per-league → country default → unset. The
+	// country id is nil whenever the league is country-less, which the
+	// resolver treats as "no weekday set" (legacy pacing).
+	countryID, err := competitionCountry(ctx, q, leagueID)
+	if err != nil {
+		return nil, err
+	}
+	if p.allowedWeekdays, err = s.resolveAllowedWeekdays(ctx, q, leagueID, countryID); err != nil {
+		return nil, err
 	}
 	return p, nil
 }

@@ -799,3 +799,220 @@ func TestOffSeasonGapRolloverAndActivation(t *testing.T) {
 		t.Fatalf("SEASON_STARTED events = %d, want 2", started)
 	}
 }
+
+// matchdayDays returns each matchday's single scheduled calendar day.
+func matchdayDays(t *testing.T, pool *pgxpool.Pool, competitionID uuid.UUID) map[int]time.Time {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := pool.Query(ctx, `
+		SELECT matchday, MIN(scheduled_at)::date
+		FROM match.fixtures WHERE competition_id = $1 GROUP BY matchday`, competitionID)
+	if err != nil {
+		t.Fatalf("query matchday days: %v", err)
+	}
+	defer rows.Close()
+	out := map[int]time.Time{}
+	for rows.Next() {
+		var md int
+		var d time.Time
+		if err := rows.Scan(&md, &d); err != nil {
+			t.Fatalf("scan matchday day: %v", err)
+		}
+		out[md] = d
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate matchday days: %v", err)
+	}
+	return out
+}
+
+// assertWeekdayInvariant enforces IM05 on a competition's fixtures: every
+// matchday lands on an allowed ISO weekday and consecutive matchdays are at
+// least two game-days apart (the structural two-day rest floor).
+func assertWeekdayInvariant(t *testing.T, pool *pgxpool.Pool, competitionID uuid.UUID, allowed []int) {
+	t.Helper()
+	days := matchdayDays(t, pool, competitionID)
+	n := len(days)
+	if n < 2 {
+		t.Fatalf("weekday invariant needs >=2 matchdays, got %d", n)
+	}
+	sorted := make([]time.Time, 0, n)
+	for md := 1; md <= n; md++ {
+		d, ok := days[md]
+		if !ok {
+			t.Fatalf("matchday %d missing from %v", md, days)
+		}
+		if !containsWeekday(allowed, isoWeekday(d)) {
+			t.Fatalf("matchday %d on %s (ISO weekday %d), not in allowed %v", md, d.Format("2006-01-02"), isoWeekday(d), allowed)
+		}
+		sorted = append(sorted, daysTruncate(d))
+	}
+	for i := 1; i < len(sorted); i++ {
+		if daysBetween(sorted[i-1], sorted[i]) < 2 {
+			t.Fatalf("matchdays %d/%d only %d days apart: %s → %s",
+				i, i+1, daysBetween(sorted[i-1], sorted[i]), sorted[i-1].Format("2006-01-02"), sorted[i].Format("2006-01-02"))
+		}
+	}
+}
+
+func containsWeekday(list []int, w int) bool {
+	for _, x := range list {
+		if x == w {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWeekdayPacingAndRePace covers the IM05 league calendar end to end: a
+// country wideweekend default (Fri/Sat/Sun) drives a freshly materialized
+// season onto those days, then a mid-season league override (Mon/Wed) freezes
+// the started matchday and slides every unstarted matchday forward onto the
+// new weekdays, keeping the two-day rest floor and staging a 'scheduling'
+// news story for the country.
+func TestWeekdayPacingAndRePace(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	weekend := []int{5, 6, 7} // Fri, Sat, Sun
+	res, err := svc.UpdateCountryScheduling(ctx, worldID, countryID, weekend)
+	if err != nil {
+		t.Fatalf("set country weekdays: %v", err)
+	}
+	if !res.CalendarUpdated {
+		t.Fatal("country scheduling must report an update")
+	}
+
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+	assertSingleDayPerMatchday(t, pool, premier.ID)
+	assertWeekdayInvariant(t, pool, premier.ID, weekend)
+	before := matchdayDays(t, pool, premier.ID)
+
+	// Freeze matchday 1 (played) and re-pace the rest onto Mon/Wed.
+	if _, err := pool.Exec(ctx, `
+		UPDATE match.fixtures SET status = 'completed'
+		WHERE competition_id = $1 AND matchday = 1`, premier.ID); err != nil {
+		t.Fatalf("complete matchday 1: %v", err)
+	}
+	weekMid := []int{1, 3} // Mon, Wed
+	rp, err := svc.UpdateLeagueScheduling(ctx, premier.ID, weekMid)
+	if err != nil {
+		t.Fatalf("re-pace premier: %v", err)
+	}
+	if rp.MatchdaysRePaced == 0 || rp.FixturesMoved == 0 {
+		t.Fatalf("re-pacing moved nothing: %+v", rp)
+	}
+	after := matchdayDays(t, pool, premier.ID)
+
+	if !before[1].Equal(after[1]) {
+		t.Fatalf("frozen matchday 1 moved: %v → %v", before[1], after[1])
+	}
+	for md := 2; md <= len(before); md++ {
+		if !containsWeekday(weekMid, isoWeekday(after[md])) {
+			t.Fatalf("re-paced matchday %d on %s (weekday %d), want Mon/Wed",
+				md, after[md].Format("2006-01-02"), isoWeekday(after[md]))
+		}
+	}
+	if daysBetween(after[1], after[2]) < 2 {
+		t.Fatalf("first unstarted matchday too close to frozen one: %v → %v", after[1], after[2])
+	}
+	assertWeekdayInvariant(t, pool, premier.ID, weekMid)
+
+	// The re-pace staged a country-scoped scheduling story.
+	var stories int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM world.news_stories
+		WHERE category = 'scheduling' AND country_id = $1`, countryID).Scan(&stories); err != nil {
+		t.Fatalf("count scheduling news: %v", err)
+	}
+	if stories == 0 {
+		t.Fatal("expected a country-scoped 'scheduling' news story after re-pacing")
+	}
+}
+
+// TestCupCalendarAnchoredToLeagueEnd covers IM05 cup anchoring: with a
+// country weekend default, a cup campaign's rounds land only on allowed
+// weekdays, keep two-day gaps, avoid league days, and pull the final a few
+// days after the league season's last fixture.
+func TestCupCalendarAnchoredToLeagueEnd(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	weekend := []int{5, 6, 7}
+	if _, err := svc.UpdateCountryScheduling(ctx, worldID, countryID, weekend); err != nil {
+		t.Fatalf("set country weekdays: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+
+	cup, err := svc.CreateCup(ctx, CupParams{
+		WorldID:           worldID,
+		CountryID:         countryID,
+		Name:              "FA Cup",
+		FirstTierBye:      0,
+		SurvivorThreshold: 2,
+	})
+	if err != nil {
+		t.Fatalf("create cup: %v", err)
+	}
+	if _, err := svc.StartCupCampaign(ctx, worldID, countryID, cup.ID); err != nil {
+		t.Fatalf("start campaign: %v", err)
+	}
+
+	leagueDays := map[time.Time]bool{}
+	for _, l := range []uuid.UUID{premier.ID} {
+		for _, d := range matchdayDays(t, pool, l) {
+			leagueDays[daysTruncate(d)] = true
+		}
+	}
+	leagueEnd := time.Time{}
+	for d := range leagueDays {
+		if d.After(leagueEnd) {
+			leagueEnd = d
+		}
+	}
+
+	cupDays := matchdayDays(t, pool, cup.ID)
+	if len(cupDays) == 0 {
+		t.Fatal("cup campaign produced no fixtures")
+	}
+	var oldest time.Time
+	for md, d := range cupDays {
+		dd := daysTruncate(d)
+		if !containsWeekday(weekend, isoWeekday(dd)) {
+			t.Fatalf("cup round %d on %s (weekday %d), not allowed %v", md, dd.Format("2006-01-02"), isoWeekday(dd), weekend)
+		}
+		if leagueDays[dd] {
+			t.Fatalf("cup round %d collides with a league day %s", md, dd.Format("2006-01-02"))
+		}
+		if oldest.IsZero() || dd.After(oldest) {
+			oldest = dd
+		}
+	}
+	if !oldest.After(leagueEnd.AddDate(0, 0, 2)) {
+		t.Fatalf("cup final %v must clear the league end %v by a few days", oldest, leagueEnd)
+	}
+
+	sorted := make([]time.Time, 0, len(cupDays))
+	for md := 1; md <= len(cupDays); md++ {
+		sorted = append(sorted, daysTruncate(cupDays[md]))
+	}
+	for i := 1; i < len(sorted); i++ {
+		if daysBetween(sorted[i], sorted[i-1]) < 2 {
+			t.Fatalf("cup rounds %d/%d only %d days apart",
+				i, i+1, daysBetween(sorted[i], sorted[i-1]))
+		}
+	}
+}

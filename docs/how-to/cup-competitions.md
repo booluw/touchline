@@ -83,12 +83,21 @@ mirroring `ErrLeagueAlreadySeeded` for leagues).
 - Every draw is a pure function of `world_seed ⊕ cup_id ⊕ round` over the
   advancing set, so identical seeds and identical results reproduce identical
   brackets (same replay guarantee league seeding has).
-- **Round pacing reuses the IM03 machinery:** each round is a fixture day
-  spaced by the cup's `scheduling_rules` (default `days_per_week` spacing) at a
-  kickoff hour from the kickoff rotation; `matchday` on the fixture row doubles
-  as the round index. Beware: the **week-grouped season calendar
-  (`GET /api/competitions/:id/calendar`) is league-shaped** — cups are read
-  through their own round view instead.
+- **Round pacing (IM05) is anchored to the league calendar:** the cup's final
+  lands on the first allowed weekday at least **3 game-days after the country's
+  latest league fixture**; every earlier round walks **backward** from there by
+  a seeded 2-3-day gap (the round just before the final draws 3 with 75%), and
+  is **snapped to a league-free day** — a cup round never shares a day with any
+  country league while a free day fits in its window, keeps the two-day rest
+  from its successor, and honors the cup's own `allowed_weekdays` set when one
+  is declared (falling back to any fit only if enforcing it would strand the
+  round). The walk is deterministic per `world_seed ⊕ cup_id ⊕ round`, and
+  `matchday` on the fixture row doubles as the round index. Beware: the
+  **week-grouped season calendar (`GET /api/competitions/:id/calendar`) is
+  league-shaped** — cups are read through their own round view instead.
+- `PATCH /api/admin/cups/:id/scheduling` sets a cup's `allowed_weekdays`; cup
+  dates already materialized stand until the next campaign materializes its
+  ladder (the anchored walk re-stamps future campaigns).
 - Ties are single-legged; home advantage is drawn deterministically.
 - When the final's result is applied, the winner's entry becomes `champion`,
   every other entry is `eliminated`, and the cup season closes

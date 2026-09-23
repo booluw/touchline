@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,14 +180,27 @@ func (s *Service) RenameClub(ctx context.Context, worldID, countryID, clubID uui
 }
 
 // News lists a world's news stories, newest first. limit is capped by the
-// caller (defaults to 30).
-func (s *Service) News(ctx context.Context, worldID uuid.UUID, limit int) ([]NewsStoryRow, error) {
-	rows, err := s.pool.Query(ctx, `
+// caller (defaults to 30). A non-nil countryID restricts the feed to
+// world-wide stories (NULL country_id) plus that country's own stories — the
+// manager-feed scoping (IM05). A nil countryID returns everything.
+func (s *Service) News(ctx context.Context, worldID uuid.UUID, countryID *uuid.UUID, limit int) ([]NewsStoryRow, error) {
+	query := `
 		SELECT id, world_id, headline, body, category, related_event_id, published_at
 		FROM world.news_stories
 		WHERE world_id = $1
 		ORDER BY published_at DESC
-		LIMIT $2`, worldID, limit)
+		LIMIT ` + strconv.Itoa(limit)
+	args := []any{worldID}
+	if countryID != nil {
+		query = `
+			SELECT id, world_id, headline, body, category, related_event_id, published_at
+			FROM world.news_stories
+			WHERE world_id = $1 AND (country_id IS NULL OR country_id = $2)
+			ORDER BY published_at DESC
+			LIMIT ` + strconv.Itoa(limit)
+		args = []any{worldID, *countryID}
+	}
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("admin: news: %w", err)
 	}

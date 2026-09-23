@@ -449,7 +449,9 @@ func (s *Service) createSeason(ctx context.Context, tx pgx.Tx, worldID, leagueID
 // IM03 pacing: matchdays spread across the game-week per the league's
 // scheduling parameters (3 in a default 7-game-day week), each at a kickoff
 // hour from the league's rotation derived from the world seed — all
-// deterministic, so identical inputs reproduce identical calendars.
+// deterministic, so identical inputs reproduce identical calendars. With an
+// allowed_weekdays set (IM05) the calendar plays only on those weekdays via a
+// forward weekday walk; unconfigured leagues use the exact IM03 day formula.
 func (s *Service) createFixtures(ctx context.Context, tx pgx.Tx, worldID, leagueID uuid.UUID, entries []uuid.UUID, bootRef time.Time) (int, int, error) {
 	rounds := roundRobin(len(entries))
 
@@ -465,15 +467,19 @@ func (s *Service) createFixtures(ctx context.Context, tx pgx.Tx, worldID, league
 
 	count := 0
 	for r, round := range rounds { // matchday is 1-based
-		kickoff := scheduledAtFromDay(bootRef, r+1, p.daysPerWeek, p.matchdaysPerWeek,
-			kickoffHour(seed, leagueID, p.kickoffHours, r+1))
+		md := r + 1
+		hour := kickoffHour(seed, leagueID, p.kickoffHours, md)
+		kickoff := scheduledAtFromDay(bootRef, md, p.daysPerWeek, p.matchdaysPerWeek, hour)
+		if len(p.allowedWeekdays) > 0 {
+			kickoff = paceWeekdayMatchday(bootRef, md, p.allowedWeekdays, hour)
+		}
 		for _, pair := range round {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO match.fixtures
 					(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
 				VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
-				worldID, leagueID, entries[pair[0]], entries[pair[1]], r+1, kickoff); err != nil {
-				return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", r+1, err)
+				worldID, leagueID, entries[pair[0]], entries[pair[1]], md, kickoff); err != nil {
+				return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", md, err)
 			}
 			count++
 		}

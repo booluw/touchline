@@ -111,6 +111,12 @@ type roundPlan struct {
 	N     int `json:"n"`
 	Ties  int `json:"ties"`
 	Byes  int `json:"byes"`
+	// Date is the IM05 anchored calendar slot: the final lands a few days
+	// after the country's latest league fixture, and earlier rounds walk
+	// backward on seeded 2-3-day gaps snapped to league-free days. Nil keeps
+	// the legacy one-round-per-week placement (used when the country has no
+	// league season to anchor against).
+	Date *time.Time `json:"date,omitempty"`
 }
 
 // cupPlan is the per-cup campaign read-back stored on
@@ -559,6 +565,182 @@ func drawRound(seed int64, cupID uuid.UUID, round, ties, byes int, clubs []uuid.
 	return pairs, ids[len(ids)-byes:]
 }
 
+// cupGap is the seeded number of days a cup round sits before the round it
+// feeds. The draw streams from world_seed ⊕ cup_id ⊕ round (roundSeed), so a
+// round's gap is deterministic and replayable. Close to the final the gap is
+// biased toward 3 game-days so the run-in breathes: the round directly before
+// the final draws 3 days 75% of the time, one step out 50/50, and every
+// earlier round takes the flat 2-day minimum (IM05).
+func cupGap(seed int64, cupID uuid.UUID, round, total int) int {
+	dist := total - round
+	var weight3 int
+	switch {
+	case dist == 1:
+		weight3 = 3
+	case dist == 2:
+		weight3 = 1
+	}
+	if weight3 == 0 {
+		return 2
+	}
+	rng := rand.New(rand.NewSource(roundSeed(seed, cupID, round)))
+	if rng.Intn(weight3+1) < weight3 {
+		return 3
+	}
+	return 2
+}
+
+// countryLeagueDays returns the sorted set of calendar days on which any of
+// the country's leagues has a non-cancelled fixture — the days a cup round
+// must not land on, because the league calendar is the country's anchor.
+func (s *Service) countryLeagueDays(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.UUID) ([]time.Time, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT scheduled_at::date
+		FROM match.fixtures f
+		JOIN competition.competitions c ON c.id = f.competition_id
+		WHERE c.country_id = $1 AND f.world_id = $2
+		  AND c.competition_type = 'league' AND f.status <> 'cancelled'`,
+		countryID, worldID)
+	if err != nil {
+		return nil, fmt.Errorf("country league days: %w", err)
+	}
+	defer rows.Close()
+	seen := map[time.Time]bool{}
+	out := []time.Time{}
+	for rows.Next() {
+		var d time.Time
+		if err := rows.Scan(&d); err != nil {
+			return nil, fmt.Errorf("scan league day: %w", err)
+		}
+		d = daysTruncate(d)
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Before(out[j]) })
+	return out, rows.Err()
+}
+
+// dayClearance is the number of whole days between d and the nearest country
+// league day. A clearance of >= 2 is a full rest day; 0 means d itself is a
+// league day (a collision to avoid when possible).
+func dayClearance(d time.Time, leagueDays []time.Time) int {
+	best := 1000
+	for _, ld := range leagueDays {
+		g := daysBetween(d, ld)
+		if g < 0 {
+			g = -g
+		}
+		if g < best {
+			best = g
+		}
+	}
+	return best
+}
+
+// cupDayScore ranks a candidate round day: a full two-day rest from the
+// league calendar dominates, then the borderline "book-ended by league days"
+// case, and finally proximity to the backward-walk target. Days that collide
+// with a league day score zero, so they are only chosen when nothing else
+// survives.
+func cupDayScore(d, target time.Time, leagueDays []time.Time) int {
+	cleared := dayClearance(d, leagueDays)
+	base := 0
+	switch {
+	case cleared >= 2:
+		base = 10000 + cleared
+	case cleared == 1:
+		base = 1000 // adjacent to a league day — permitted only as last resort
+	}
+	return base - daysBetween(target, d)
+}
+
+// findCupRoundDay places one cup round (IM05). It scans the game-days within
+// two of the backward-walk target, bounded so the round keeps at least a
+// two-day rest from its successor, and picks the day that (1) honors the
+// allowed-weekday set when the cup declares one — falling back to any fit
+// only when no allowed weekday exists in the window — (2) keeps the widest
+// full-rest clearance from the country's league days (league days themselves
+// are never picked while any other day survives), and (3) sits closest to the
+// target.
+func findCupRoundDay(target, next time.Time, leagueDays []time.Time, weekdays []int) time.Time {
+	low := daysTruncate(target).AddDate(0, 0, -2)
+	high := target.AddDate(0, 0, 2)
+	if cap := daysTruncate(next).AddDate(0, 0, -2); high.After(cap) {
+		high = cap
+	}
+	best, bestScore := time.Time{}, 0
+	for d := low; !d.After(high); d = d.AddDate(0, 0, 1) {
+		if len(weekdays) > 0 && !isAllowedWeekday(d, weekdays) {
+			continue
+		}
+		score := cupDayScore(d, target, leagueDays)
+		if best.IsZero() || score > bestScore {
+			best, bestScore = d, score
+		}
+	}
+	if !best.IsZero() {
+		return best
+	}
+	// No allowed weekday fits the window — degrade to the best day regardless
+	// of weekday (anchoring beats never playing the round).
+	for d := low; !d.After(high); d = d.AddDate(0, 0, 1) {
+		score := cupDayScore(d, target, leagueDays)
+		if best.IsZero() || score > bestScore {
+			best, bestScore = d, score
+		}
+	}
+	if best.IsZero() {
+		return daysTruncate(target)
+	}
+	return best
+}
+
+// planCupCalendar derives the anchored calendar slot of every cup round
+// (IM05). The final lands the first allowed weekday at least three game-days
+// after the country's latest league fixture — a small window ahead of the next
+// season's rollover anchor — then each earlier round walks backward on a
+// seeded 2-3-day gap (cupGap) and snaps onto the best league-free day
+// (findCupRoundDay). Rounds are stamped onto the ladder, which StartCupCampaign
+// persists so lazy materialization reproduces them. When the country has no
+// league fixtures (no running season), no round is stamped and materializeRound
+// keeps the legacy weekly placement.
+func (s *Service) planCupCalendar(ctx context.Context, tx pgx.Tx, worldID, countryID, cupID uuid.UUID, seed int64, ladder []roundPlan) ([]roundPlan, error) {
+	k := len(ladder)
+	if k == 0 {
+		return ladder, nil
+	}
+	days, err := s.countryLeagueDays(ctx, tx, worldID, countryID)
+	if err != nil {
+		return nil, err
+	}
+	if len(days) == 0 {
+		return ladder, nil
+	}
+	leagueEnd := days[len(days)-1]
+
+	p, err := s.scheduleParams(ctx, tx, cupID, worldID)
+	if err != nil {
+		return nil, err
+	}
+
+	finalDate := leagueEnd.AddDate(0, 0, 3)
+	if len(p.allowedWeekdays) > 0 {
+		finalDate = nextAllowedWeekday(finalDate, p.allowedWeekdays)
+	}
+	ladder[k-1].Date = &finalDate
+
+	for idx := k - 2; idx >= 0; idx-- {
+		next := *ladder[idx+1].Date
+		round := idx + 1 // 1-based round
+		target := next.AddDate(0, 0, -cupGap(seed, cupID, round, k))
+		date := findCupRoundDay(target, next, days, p.allowedWeekdays)
+		ladder[idx].Date = &date
+	}
+	return ladder, nil
+}
+
 // materializeRound writes a round's bracket rows and fixture list for the
 // given participants (canonical order) in one transaction. Called at campaign
 // start for Round 1 and lazily, in the result transaction, for every later
@@ -594,9 +776,14 @@ func (s *Service) materializeRound(ctx context.Context, tx pgx.Tx, worldID, cupI
 		return err
 	}
 	// Cup rounds are their own matchday; with the one-round-per-week default
-	// each round occupies a fresh game day.
-	day := scheduledAtFromDay(worldRef, plan.Round, p.daysPerWeek, p.matchdaysPerWeek,
-		kickoffHour(seed, cupID, p.kickoffHours, plan.Round))
+	// each round occupies a fresh game day. When the campaign plan carries an
+	// IM05 anchored slot (planCupCalendar) that wins; otherwise the legacy
+	// weekly formula applies.
+	kickoff := kickoffHour(seed, cupID, p.kickoffHours, plan.Round)
+	day := scheduledAtFromDay(worldRef, plan.Round, p.daysPerWeek, p.matchdaysPerWeek, kickoff)
+	if plan.Date != nil {
+		day = kickOff(daysTruncate(*plan.Date), kickoff)
+	}
 	for _, pair := range pairs {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO match.fixtures
@@ -606,7 +793,22 @@ func (s *Service) materializeRound(ctx context.Context, tx pgx.Tx, worldID, cupI
 			return fmt.Errorf("insert cup fixture round %d: %w", plan.Round, err)
 		}
 	}
+	if err := s.publishCupRoundNews(ctx, tx, worldID, cupID, plan.Round, day); err != nil {
+		return err
+	}
 	return nil
+}
+
+// publishCupRoundNews covers a materialized cup round with a country-scoped
+// scheduling story.
+func (s *Service) publishCupRoundNews(ctx context.Context, tx pgx.Tx, worldID, cupID uuid.UUID, round int, day time.Time) error {
+	name, err := s.competitionName(ctx, tx, cupID)
+	if err != nil {
+		return err
+	}
+	return s.publishSchedulingNews(ctx, tx, worldID, cupID,
+		fmt.Sprintf("%s: round %d schedule set", name, round),
+		fmt.Sprintf("The %s round %d ties are set for %s.", name, round, day.Format("Mon 2 Jan 2006")))
 }
 
 // ---------------------------------------------------------------------------
@@ -734,6 +936,10 @@ func (s *Service) StartCupCampaign(ctx context.Context, worldID, countryID, cupI
 		`SELECT COALESCE(world_seed, 0) FROM world.worlds WHERE id = $1`, worldID).Scan(&seed); err != nil {
 		return nil, fmt.Errorf("load world seed: %w", err)
 	}
+	ladder, err = s.planCupCalendar(ctx, tx, worldID, countryID, cupID, seed, ladder)
+	if err != nil {
+		return nil, err
+	}
 
 	// Round-1 participants: the bottom pool, or — when the pool is already
 	// exactly X strong (F == X) — the late entrants join at Round 1 itself.
@@ -754,6 +960,12 @@ func (s *Service) StartCupCampaign(ctx context.Context, worldID, countryID, cupI
 			}
 		}
 		planDoc.TopNClubIDs = append([]uuid.UUID(nil), topN[:cup.FirstTierBye]...)
+		// F == X (the bottom pool is already exactly X strong): the late
+		// entrants are in from Round 1, so the plan must not join them again
+		// when applyKnockoutResult reaches LateEntry.
+		if len(bottom) == cup.SurvivorThreshold {
+			planDoc.Joined = true
+		}
 	}
 	pb, err := json.Marshal(planDoc)
 	if err != nil {

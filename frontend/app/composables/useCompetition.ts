@@ -160,6 +160,12 @@ export interface CupCampaign {
   rounds: CupRound[]
 }
 
+export interface RescheduleResult {
+  calendar_updated: boolean
+  matchdays_re_paced?: number
+  fixtures_moved?: number
+}
+
 export function useCompetition() {
   const { authedFetch } = useAuth()
 
@@ -307,6 +313,38 @@ export function useCompetition() {
     return res.json()
   }
 
+  // ---------- IM05 scheduling (admin: allowed weekdays + re-pacing) ----------
+
+  async function updateLeagueScheduling(leagueId: string, allowedWeekdays: number[]): Promise<RescheduleResult> {
+    const res = await authedFetch(`/api/admin/leagues/${leagueId}/scheduling`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowed_weekdays: allowedWeekdays }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    return res.json()
+  }
+
+  async function updateCupScheduling(cupId: string, allowedWeekdays: number[]): Promise<RescheduleResult> {
+    const res = await authedFetch(`/api/admin/cups/${cupId}/scheduling`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowed_weekdays: allowedWeekdays }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    return res.json()
+  }
+
+  async function updateCountryScheduling(worldId: string, countryId: string, allowedWeekdays: number[]): Promise<RescheduleResult> {
+    const res = await authedFetch(`/api/admin/worlds/${worldId}/countries/${countryId}/scheduling`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowed_weekdays: allowedWeekdays }),
+    })
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    return res.json()
+  }
+
   // ---------- Club-name pools (admin: country-scoped, '' = global) ----------
 
   async function listClubNameParts(countryCode = ''): Promise<ClubNamePools> {
@@ -353,5 +391,8 @@ export function useCompetition() {
     startCupCampaign,
     listMyCups,
     getCup,
+    updateLeagueScheduling,
+    updateCupScheduling,
+    updateCountryScheduling,
   }
 }
