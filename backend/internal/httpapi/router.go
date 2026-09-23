@@ -154,6 +154,7 @@ func (s *server) router() *gin.Engine {
 			admin.POST("/worlds/:id/config", s.handleWorldConfig)
 			admin.POST("/worlds/:id/seed", s.handleSeedWorld)
 			admin.GET("/worlds/:id/seed-status", s.handleSeedWorldStatus)
+			admin.POST("/worlds/:id/leagues/:leagueID/season", s.handleStartSeason)
 			admin.POST("/offers", s.handleCreateOffer)
 			admin.POST("/countries", s.handleCreateCountry)
 			admin.GET("/countries", s.handleListCountries)

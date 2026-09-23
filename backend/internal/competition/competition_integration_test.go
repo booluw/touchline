@@ -5,6 +5,7 @@ package competition
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -293,3 +294,181 @@ func TestStartSeasonAndApplyResultAndRollover(t *testing.T) {
 }
 
 func newInt(v int) *int { return &v }
+
+// TestOffSeasonGapRolloverAndActivation verifies the IM01 off-season: a league
+// whose next season rolls over anchors its calendar after the configured gap
+// (world config, overridable per league), no fixtures fall inside the gap, and
+// the upcoming season flips to in_progress (with SEASON_STARTED) exactly when
+// its first fixture becomes due — and only then.
+func TestOffSeasonGapRolloverAndActivation(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, champ := twoTierLeague(t, svc, countryID)
+
+	// World-wide default gap of 20 ticks; the premier league overrides to 5.
+	worldSvc := internalworld.NewService(pool, nil)
+	if err := worldSvc.SetConfig(ctx, worldID, "season.off_season_ticks", 20); err != nil {
+		t.Fatalf("set off-season config: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE competition.competition_rules
+		SET scheduling_rules = '{"off_season_ticks": 5}'
+		WHERE competition_id = $1`, premier.ID); err != nil {
+		t.Fatalf("override premier off-season: %v", err)
+	}
+
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for _, l := range []*League{premier, champ} {
+		if _, err := svc.StartSeason(ctx, worldID, l.ID); err != nil {
+			t.Fatalf("start %s: %v", l.Name, err)
+		}
+	}
+
+	// Play the whole season: 6 matchdays x 2 leagues x 2 fixtures.
+	played := map[uuid.UUID]bool{}
+	for round := 0; round < 6; round++ {
+		for _, leagueID := range []uuid.UUID{premier.ID, champ.ID} {
+			fixtures, err := svc.GetFixtures(ctx, leagueID, worldID, newInt(round+1))
+			if err != nil {
+				t.Fatalf("matchday %d fixtures: %v", round+1, err)
+			}
+			for _, f := range fixtures {
+				if played[f.ID] {
+					continue
+				}
+				if err := svc.ApplyResult(ctx, f.ID, 1, 0); err != nil {
+					t.Fatalf("apply result: %v", err)
+				}
+				played[f.ID] = true
+			}
+		}
+	}
+	if len(played) != 24 {
+		t.Fatalf("played = %d, want 24", len(played))
+	}
+
+	var dayZero time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT date_trunc('day', COALESCE(launched_at, created_at))
+		FROM world.worlds WHERE id = $1`, worldID).Scan(&dayZero); err != nil {
+		t.Fatalf("day zero: %v", err)
+	}
+
+	// Season 2 anchored at last fixture (day 6) + gap: premier 5, champ 20.
+	var premierStart, champStart time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT start_date FROM competition.seasons
+		WHERE competition_id = $1 AND season_number = 2`, premier.ID).Scan(&premierStart); err != nil {
+		t.Fatalf("premier season 2 start: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT start_date FROM competition.seasons
+		WHERE competition_id = $1 AND season_number = 2`, champ.ID).Scan(&champStart); err != nil {
+		t.Fatalf("champ season 2 start: %v", err)
+	}
+	if got := int(premierStart.Sub(dayZero).Hours() / 24); got != 11 {
+		t.Fatalf("premier season 2 starts at day %d, want 11 (6 matchdays + 5 gap)", got)
+	}
+	if got := int(champStart.Sub(dayZero).Hours() / 24); got != 26 {
+		t.Fatalf("champ season 2 starts at day %d, want 26 (6 matchdays + 20 gap)", got)
+	}
+
+	// No scheduled fixture falls inside either gap: nothing pending before its
+	// next season's start_date.
+	var inGap int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM match.fixtures f
+		JOIN competition.seasons s ON s.competition_id = f.competition_id
+		WHERE s.world_id = $1 AND s.season_number = 2
+		  AND f.status = 'scheduled' AND f.scheduled_at::date < s.start_date`,
+		worldID).Scan(&inGap); err != nil {
+		t.Fatalf("count gap fixtures: %v", err)
+	}
+	if inGap != 0 {
+		t.Fatalf("scheduled fixtures inside the off-season gap = %d, want 0", inGap)
+	}
+
+	// Activation boundary for the premier league: first fixture at day 12.
+	var firstOffset int
+	if err := pool.QueryRow(ctx, `
+		SELECT (MIN(f.scheduled_at)::date - (date_trunc('day', COALESCE(w.launched_at, w.created_at)))::date)
+		FROM match.fixtures f
+		JOIN world.worlds w ON w.id = f.world_id
+		WHERE f.competition_id = $1 AND f.world_id = $2 AND f.status = 'scheduled'`,
+		premier.ID, worldID).Scan(&firstOffset); err != nil {
+		t.Fatalf("first fixture offset: %v", err)
+	}
+	if firstOffset != 12 {
+		t.Fatalf("premier season 2 first fixture at day %d, want 12", firstOffset)
+	}
+
+	setDay := func(day int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE world.worlds SET current_day = $1 WHERE id = $2`, day, worldID); err != nil {
+			t.Fatalf("set current_day=%d: %v", day, err)
+		}
+	}
+	statusOf := func(leagueID uuid.UUID) string {
+		t.Helper()
+		var s string
+		if err := pool.QueryRow(ctx, `
+			SELECT status FROM competition.seasons
+			WHERE competition_id = $1 AND season_number = 2`, leagueID).Scan(&s); err != nil {
+			t.Fatalf("season 2 status: %v", err)
+		}
+		return s
+	}
+
+	// The day before the first fixture: nothing activates yet.
+	setDay(firstOffset - 1)
+	if n, err := svc.ActivateDueSeasons(ctx, worldID); err != nil {
+		t.Fatalf("activate (gap): %v", err)
+	} else if n != 0 {
+		t.Fatalf("activated %d season(s) during the gap, want 0", n)
+	}
+	if statusOf(premier.ID) != "upcoming" || statusOf(champ.ID) != "upcoming" {
+		t.Fatalf("statuses during gap = %s/%s, want upcoming/upcoming", statusOf(premier.ID), statusOf(champ.ID))
+	}
+
+	// Premier's first fixture day: only the premier league flips.
+	setDay(firstOffset)
+	if n, err := svc.ActivateDueSeasons(ctx, worldID); err != nil {
+		t.Fatalf("activate premier: %v", err)
+	} else if n != 1 {
+		t.Fatalf("activated %d season(s), want 1", n)
+	}
+	if statusOf(premier.ID) != "in_progress" || statusOf(champ.ID) != "upcoming" {
+		t.Fatalf("statuses after premier = %s/%s, want in_progress/upcoming", statusOf(premier.ID), statusOf(champ.ID))
+	}
+
+	// Champ's first fixture day (27) activates the champ league.
+	setDay(27)
+	if n, err := svc.ActivateDueSeasons(ctx, worldID); err != nil {
+		t.Fatalf("activate champ: %v", err)
+	} else if n != 1 {
+		t.Fatalf("activated %d season(s), want 1", n)
+	}
+	if statusOf(champ.ID) != "in_progress" {
+		t.Fatalf("champ status = %s, want in_progress", statusOf(champ.ID))
+	}
+
+	// Idempotent: a repeat pass activates nothing and emits no events.
+	if n, err := svc.ActivateDueSeasons(ctx, worldID); err != nil {
+		t.Fatalf("activate re-run: %v", err)
+	} else if n != 0 {
+		t.Fatalf("re-run activated %d season(s), want 0", n)
+	}
+
+	var started int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM world.events
+		WHERE world_id = $1 AND event_type = 'SEASON_STARTED'`, worldID).Scan(&started); err != nil {
+		t.Fatalf("count SEASON_STARTED: %v", err)
+	}
+	if started != 2 {
+		t.Fatalf("SEASON_STARTED events = %d, want 2", started)
+	}
+}

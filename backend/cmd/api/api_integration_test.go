@@ -506,3 +506,79 @@ func cookieHeader(cookies map[string]string) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// TestHTTPStartSeasonEndpoint covers the IM01 admin start-season route:
+// 201 for a seeded league, 404 for unknown ids, 409 for duplicate/unseeded.
+func TestHTTPStartSeasonEndpoint(t *testing.T) {
+	ts, pool := testHTTPServer(t)
+	testdb.SeedRefData(t, pool)
+	testdb.SeedClubNameParts(t, pool)
+
+	w := testdb.CreateWorld(t, pool, "W-SEASON")
+	userID := testdb.CreateUser(t, pool, "season@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	testdb.MakeAdmin(t, pool, userID)
+	cookies := login(t, ts, ts.Client(), "season@example.com", "s3cret")
+
+	ctx := context.Background()
+	svc := internalcompetition.NewService(pool, nil)
+	country, err := svc.CreateCountry(ctx, w, "eng", "England")
+	if err != nil {
+		t.Fatalf("create country: %v", err)
+	}
+	league, err := svc.CreateLeague(ctx, internalcompetition.LeagueParams{CountryID: country.ID, Name: "Premier", Tier: 1, TeamCount: 4})
+	if err != nil {
+		t.Fatalf("create league: %v", err)
+	}
+	unseeded, err := svc.CreateLeague(ctx, internalcompetition.LeagueParams{CountryID: country.ID, Name: "League Two", Tier: 2, TeamCount: 4})
+	if err != nil {
+		t.Fatalf("create unseeded league: %v", err)
+	}
+	if _, err := svc.SeedWorld(ctx, w); err != nil {
+		t.Fatalf("seed world: %v", err)
+	}
+
+	client := ts.Client()
+	seasonURL := func(leagueID uuid.UUID) string {
+		return fmt.Sprintf("/api/admin/worlds/%s/leagues/%s/season", w, leagueID)
+	}
+
+	// Unknown league -> 404.
+	if resp := post(t, ts, client, seasonURL(uuid.New()), "", cookies); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown league = %d, want 404", resp.StatusCode)
+	}
+
+	// Seeded league -> 201, season 1 in_progress.
+	resp := post(t, ts, client, seasonURL(league.ID), "", cookies)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("start season = %d, want 201", resp.StatusCode)
+	}
+	var season map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&season); err != nil {
+		t.Fatalf("decode season: %v", err)
+	}
+	if season["status"] != "in_progress" || season["season_number"] != float64(1) {
+		t.Fatalf("season = %+v, want status in_progress / number 1", season)
+	}
+
+	// The season is playable: its fixture list is materialized.
+	var fixtureCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM match.fixtures
+		WHERE competition_id = $1 AND world_id = $2 AND status = 'scheduled'`,
+		league.ID, w).Scan(&fixtureCount); err != nil {
+		t.Fatalf("count fixtures: %v", err)
+	}
+	if fixtureCount == 0 {
+		t.Fatal("start season must materialize its fixture list")
+	}
+
+	// Duplicate start -> 409.
+	if resp := post(t, ts, client, seasonURL(league.ID), "", cookies); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate start = %d, want 409", resp.StatusCode)
+	}
+
+	// Unseeded league -> 409.
+	if resp := post(t, ts, client, seasonURL(unseeded.ID), "", cookies); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("unseeded start = %d, want 409", resp.StatusCode)
+	}
+}

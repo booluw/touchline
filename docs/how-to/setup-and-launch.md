@@ -27,9 +27,9 @@ derivation is indexed in [glossary.md](glossary.md).
 2. **Seed** the whole world in one admin call — every league is filled up to its
    `team_count` with **AI clubs + squads** (all AI; no human starter club, no
    seasons, no fixtures). Re-seeding is incremental and idempotent.
-3. **Start a season** per league afterwards via the competition service seam (`StartSeason`)
-   — this is what creates the `in_progress` season and its deterministic fixture
-   list.
+3. **Start a season per league** afterwards via the admin endpoint
+   `POST /api/admin/worlds/:id/leagues/:leagueID/season` — this is what creates
+   the `in_progress` season and its deterministic fixture list.
 
 ---
 
@@ -351,26 +351,30 @@ Player lifecycle additions (A01–A11, OPD-26..29):
 
 ---
 
-## 7. Start a season (service seam)
+## 7. Start a season (admin endpoint)
 
-There is **no Phase-1 endpoint** for starting a season — seeding and seasons are
-deliberately decoupled. Start each league's season #1 through the competition
-service:
+Start each league's season #1 through the admin API:
 
-```go
-started, err := s.compSvc.StartSeason(ctx, worldID, leagueID) // Season{season_label, status, ...}
+```bash
+curl -c /tmp/jar -b /tmp/jar -X POST \
+  localhost:8080/api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season
+# 201 → { "id": ..., "competition": {...}, "season_label": "2026/27",
+#          "season_number": 1, "status": "in_progress" }
 ```
 
-`StartSeason` creates the season (`in_progress`), a deterministic double
-round-robin fixture list, and one matchday per game-day from the world's boot
+The endpoint wraps the `Service.StartSeason` seam: it creates the season
+(`in_progress`), its `competition_entries`, and a deterministic double
+round-robin fixture list — one matchday per game-day from the world's boot
 reference date (fixtures are spaced ≥2 game-days apart to satisfy the phase-2
-rest rule). Executable samples live in the integration suite
-(`internal/competition/runner_integration_test.go`, the `TestStartSeason…`
-tests). Calling it twice for the same league returns `ErrLeagueAlreadySeeded`.
+rest rule). Errors: `404` unknown world/league, `409` for an archived world, a
+league from another world, an already-seeded league, or a league with no clubs
+(run Step 6's seed first). Executable samples live in the integration suite
+(`internal/competition/competition_integration_test.go`).
 
-To run a season end-to-end right now without a new endpoint, either wait for the
-phase-2 rest surface or drive the seam from a scratch `go run` main (or the
-matchday runner tests).
+Later seasons need no manual step: the rollover creates them automatically
+after the off-season gap (`season.off_season_ticks`, default 30 daily ticks;
+per-league override via `competition_rules.scheduling_rules`) — see
+[seasons.md](seasons.md) §3.
 
 ---
 
@@ -425,8 +429,10 @@ curl -c /tmp/jar -b /tmp/jar localhost:8080/api/matches/<match-id>/events
 **Season completion is automatic.** When the final fixture's result is applied,
 the standings roll over (promotions/relegations), the season is marked
 `completed`, and the next season is created as `upcoming` with fresh fixtures —
-`SEASON_COMPLETED`/`SEASON_CREATED` events ride the same transaction. No manual
-"next season" step exists.
+`SEASON_COMPLETED`/`SEASON_CREATED` events ride the same transaction. The next
+season's fixtures start after the configured off-season gap
+(`season.off_season_ticks`, default 30 daily ticks; see seasons.md §3) and are
+activated on the daily tick. No manual "next season" step exists.
 
 **Human managers play for real.** With login resolution open (Step 3), a
 registered manager (Step 8b) or `user-create` account can log in with their own
@@ -512,7 +518,7 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/transfers/bids/<bid-id>/
 | `go run ./cmd/touchline serve` exits immediately | `JWT_SECRET` unset | `export JWT_SECRET=…` (set in Step 1) |
 | Scheduler fires no ticks | world not `active`/`open_beta` | Launch via Step 8 (playable worlds only) |
 | Cadence change "does nothing" | next resample is up to 15s away | Wait one `SCHEDULER_POLL_INTERVAL`; `tick.match_cadence` is deliberately ignored by the world clock (`OPD-17`) |
-| Matches never start | no season started, or daily tick not firing | Run the `StartSeason` seam (Step 7); set `tick.daily_cadence=* * * * *`; fixtures are day-gated by the season reference date |
+| Matches never start | no season started, or daily tick not firing | Run `POST /api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season` (Step 7); set `tick.daily_cadence=* * * * *`; fixtures are day-gated by the season reference date |
 
 ---
 
@@ -544,5 +550,6 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/s
   -H 'Content-Type: application/json' -d '{"status":"active"}'
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
   -H 'Content-Type: application/json' -d '{"key":"tick.daily_cadence","value":"* * * * *"}'
-# then StartSeason(worldID, LEAGUE_ID) via the service seam (Step 7)
+# then start season #1, per league (Step 7)
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season
 ```

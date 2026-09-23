@@ -22,19 +22,25 @@ var (
 	ErrNameCollision     = errors.New("world name already taken")
 )
 
-// defaultConfigKeys are the runtime cadences seeded at launch (S02-03 reads
-// these exact keys). Values are JSON-configurable per world, never compiled-in
-// — the scheduling contract lives in the DB, not the code.
+// defaultConfigKeys are the runtime cadences + pacing defaults seeded at launch
+// (S02-03 reads the tick.* keys; the calendar/season keys are gameplay tuning
+// read by the competition and academy engines). Values are JSON-configurable
+// per world, never compiled-in — the scheduling contract lives in the DB, not
+// the code.
 // tick.daily_cadence defaults to every 8 hours (00/08/16 UTC), i.e. ~3 in-game
 // days per real day: each WORLD_TICK{daily} emission advances the calendar by
 // exactly one game day (world.worlds.current_day, OPD-24).
+// season.off_season_ticks is the IM01 off-season gap in daily ticks the next
+// rollover anchors the new season after (fallback default in the competition
+// service: DefaultOffSeasonTicks).
 var defaultConfigKeys = map[string]any{
-	"tick.match_cadence":    "20s",
-	"tick.hourly_cadence":   "0 * * * *",
-	"tick.daily_cadence":    "0 */8 * * *",
-	"tick.weekly_cadence":   "0 0 * * 0",
-	"tick.monthly_cadence":  "0 0 1 * *",
-	"tick.seasonal_cadence": "0 0 1 1 *",
+	"tick.match_cadence":      "20s",
+	"tick.hourly_cadence":     "0 * * * *",
+	"tick.daily_cadence":      "0 */8 * * *",
+	"tick.weekly_cadence":     "0 0 * * 0",
+	"tick.monthly_cadence":    "0 0 1 * *",
+	"tick.seasonal_cadence":   "0 0 1 1 *",
+	"season.off_season_ticks": 30,
 }
 
 // Publishable is the event sink used to fan lifecycle events out to

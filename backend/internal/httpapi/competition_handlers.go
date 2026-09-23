@@ -161,6 +161,39 @@ func (s *server) handleSeedWorld(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"status": "queued", "world_id": worldID, "job_id": jobID})
 }
 
+// handleStartSeason starts a league's first season (IM01). It requires the
+// league to already be seeded (clubs present). Later seasons are created
+// automatically at rollover, after the configured off-season gap.
+func (s *server) handleStartSeason(c *gin.Context) {
+	worldID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		return
+	}
+	leagueID, err := uuid.Parse(c.Param("leagueID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid league id"})
+		return
+	}
+	season, err := s.compSvc.StartSeason(c.Request.Context(), worldID, leagueID)
+	switch {
+	case errors.Is(err, internalcompetition.ErrWorldNotFound),
+		errors.Is(err, internalcompetition.ErrCompetitionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	case errors.Is(err, internalcompetition.ErrWorldArchived),
+		errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch),
+		errors.Is(err, internalcompetition.ErrLeagueAlreadySeeded),
+		errors.Is(err, internalcompetition.ErrCompetitionNotSeeded):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	case err != nil:
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, season)
+}
+
 // seedJobStatus is the normalized view of the world's most recent seed job.
 type seedJobStatus struct {
 	ID          int64      `json:"id"`

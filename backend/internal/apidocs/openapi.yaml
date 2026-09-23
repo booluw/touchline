@@ -2597,6 +2597,55 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/leagues/{leagueID}/season:
+    post:
+      tags: [admin]
+      summary: Start a league's first season
+      operationId: startSeason
+      description: |
+        Starts the first season of a league from its seeded member clubs:
+        creates the season row, its competition_entries, and the deterministic
+        double round-robin fixture list. Requires the world to be seeded for
+        that league first (clubs present). The first season is created
+        `in_progress`; later seasons are created automatically by the season
+        rollover, after the admin-tunable off-season gap
+        (`season.off_season_ticks` world config, or a per-league override in
+        `competition_rules.scheduling_rules`).
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - name: leagueID
+          in: path
+          required: true
+          description: League id.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000a" }
+      responses:
+        "201":
+          description: The started season (status in_progress).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Season" }
+              examples:
+                sample:
+                  value:
+                    id: 00000000-0000-4000-8000-000000000011
+                    competition:
+                      id: 00000000-0000-4000-8000-00000000000a
+                      name: Premier
+                    season_label: 2031/32
+                    season_number: 1
+                    status: in_progress
+        "404":
+          description: World or league not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: |
+            League already has a season, is not seeded, or does not belong to
+            this world; the world is archived.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/admin/countries:
     get:
       tags: [admin]
@@ -3949,6 +3998,15 @@ components:
         id: { type: string, format: uuid }
         label: { type: string }
         number: { type: integer }
+        status: { type: string }
+    Season:
+      type: object
+      description: One league season as returned by the admin start-season endpoint.
+      properties:
+        id: { type: string, format: uuid }
+        competition: { $ref: "#/components/schemas/NestedCompetition" }
+        season_label: { type: string }
+        season_number: { type: integer }
         status: { type: string }
     League:
       type: object

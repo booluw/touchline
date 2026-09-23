@@ -187,6 +187,14 @@ type SeedResult struct {
 // S04-01 delivery evidence.
 const KickoffHourUTC = 19
 
+// DefaultOffSeasonTicks is the fallback off-season length in daily world ticks
+// the season rollover anchors the next season's calendar after (IM01). A world
+// seeds the same value into world_config as season.off_season_ticks on launch;
+// a league may override it per-competition via
+// competition_rules.scheduling_rules->>'off_season_ticks'. The precedence is
+// per-league override → world config → this constant.
+const DefaultOffSeasonTicks = 30
+
 // Service orchestrates competition administration, seeding, standings, and
 // season rollover.
 type Service struct {

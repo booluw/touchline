@@ -350,6 +350,15 @@ func (a *App) RunWorker(ctx context.Context) error {
 		}
 
 		if payload.Granularity == "daily" && runnerEnabled {
+			// IM01: a rollover-created 'upcoming' season flips to 'in_progress'
+			// (and emits SEASON_STARTED) the moment its first fixture is due,
+			// before the kickoff pass so the season reads in_progress as its
+			// first matchday simulates.
+			if activated, err := a.CompSvc.ActivateDueSeasons(ctx, ev.WorldID); err != nil {
+				return fmt.Errorf("world %s daily tick: activate seasons: %w", ev.WorldID, err)
+			} else if activated > 0 {
+				log.Printf("world %s daily tick: activated %d season(s)", ev.WorldID, activated)
+			}
 			sum, err := a.Runner.KickoffDue(ctx, ev.WorldID)
 			if err != nil {
 				log.Printf("world %s daily tick: kickoff: %v", ev.WorldID, err)

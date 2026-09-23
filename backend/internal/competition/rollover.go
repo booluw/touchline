@@ -115,6 +115,15 @@ func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, count
 		if err != nil {
 			return err
 		}
+		// IM01: the new season anchors after the configured off-season gap
+		// instead of the day after the last fixture, so the break between
+		// seasons is admin-tunable in daily ticks. Read at rollover: the value
+		// is fixed at the point the final result lands.
+		gap, err := s.offSeasonTicks(ctx, tx, l.ID, worldID)
+		if err != nil {
+			return err
+		}
+		anchor = anchor.AddDate(0, 0, gap)
 		next, err := s.createSeason(ctx, tx, worldID, l.ID, anchor, entries)
 		if err != nil {
 			return err
@@ -154,9 +163,11 @@ func (s *Service) orderedClubIDs(ctx context.Context, tx pgx.Tx, seasonID uuid.U
 	return out, rows.Err()
 }
 
-// lastScheduledDay is the day the next season's fixtures anchor to: the day
-// after the reference date of the season just completed (its last scheduled
-// fixture), so calendaring stays continuous across seasons.
+// lastScheduledDay is the day the next season's calendar anchors from: the day
+// of the season just completed's last scheduled fixture. rolloverCountry then
+// adds the off-season gap (IM01) so the break between seasons is tunable; with
+// a zero gap the next season starts the day after — calendaring stays
+// continuous across seasons.
 func (s *Service) lastScheduledDay(ctx context.Context, tx pgx.Tx, leagueID, worldID uuid.UUID) (time.Time, error) {
 	var last time.Time
 	var start time.Time
