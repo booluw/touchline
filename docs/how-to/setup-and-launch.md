@@ -364,9 +364,10 @@ curl -c /tmp/jar -b /tmp/jar -X POST \
 
 The endpoint wraps the `Service.StartSeason` seam: it creates the season
 (`in_progress`), its `competition_entries`, and a deterministic double
-round-robin fixture list — one matchday per game-day from the world's boot
-reference date (fixtures are spaced ≥2 game-days apart to satisfy the phase-2
-rest rule). Errors: `404` unknown world/league, `409` for an archived world, a
+round-robin fixture list paced across the game-week from the world's boot
+reference date (IM03: `matchdays_per_week` default 3 over `days_per_week`
+default 7, with kickoff times from the league's `kickoff_hours` rotation; see
+seasons.md). Errors: `404` unknown world/league, `409` for an archived world, a
 league from another world, an already-seeded league, or a league with no clubs
 (run Step 6's seed first). Executable samples live in the integration suite
 (`internal/competition/competition_integration_test.go`).

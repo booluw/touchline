@@ -476,6 +476,49 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               example: { error: "club not found" }
+  /api/clubs/{id}/fixtures:
+    get:
+      tags: [clubs]
+      summary: Club fixture list
+      operationId: getClubFixtures
+      description: |
+        One club's fixtures ordered by kickoff time, earliest first. World-scoped
+        exactly like the other club reads (IM03): fixtures only ever belong to
+        the caller's own world.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The club's fixture list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Fixture" }
+              examples:
+                sample:
+                  value:
+                    - id: 00000000-0000-4000-8000-000000000007
+                      world_id: 00000000-0000-4000-8000-000000000001
+                      competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                      home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                      away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                      matchday: 1
+                      scheduled_at: "2026-06-02T15:00:00Z"
+                      status: scheduled
+                    - id: 00000000-0000-4000-8000-000000000008
+                      world_id: 00000000-0000-4000-8000-000000000001
+                      competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                      home_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                      away_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                      matchday: 2
+                      scheduled_at: "2026-06-04T18:00:00Z"
+                      status: scheduled
+        "404":
+          description: Club not found, or not in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/lineup:
     get:
       tags: [clubs]
@@ -2945,8 +2988,72 @@ paths:
                       home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
                       away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
                       matchday: 1
-                      scheduled_at: "2026-06-07T19:00:00Z"
+                      scheduled_at: "2026-06-02T18:00:00Z"
                       status: scheduled
+  /api/competitions/{id}/calendar:
+    get:
+      tags: [competition]
+      summary: Season fixture calendar
+      operationId: getSeasonCalendar
+      description: |
+        The current season's fixture calendar in the caller's world, grouped
+        into game-weeks (IM03). One week spans calendar.days_per_week game-days
+        (default 7) and a league plays matchdays_per_week of them (default 3);
+        every fixture of a matchday shares one scheduled_at. Pacing follows
+        competition_rules.scheduling_rules (matchdays_per_week, days_per_week,
+        kickoff_hours), falling back to the world calendar, then defaults.
+        An optional season=N resolves that numbered season instead of the
+        active one.
+      parameters:
+        - $ref: "#/components/parameters/CompetitionID"
+        - name: season
+          in: query
+          description: Season number to serve instead of the active season.
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Season calendar.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SeasonCalendar" }
+              examples:
+                sample:
+                  value:
+                    season: { id: 00000000-0000-4000-8000-00000000000a, label: "2026-27", number: 1, status: in_progress }
+                    weeks:
+                      - week: 0
+                        first_day: "2026-06-01T00:00:00Z"
+                        matchdays:
+                          - matchday: 1
+                            scheduled_at: "2026-06-02T15:00:00Z"
+                            fixtures:
+                              - id: 00000000-0000-4000-8000-000000000007
+                                world_id: 00000000-0000-4000-8000-000000000001
+                                competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                                home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                                away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                                matchday: 1
+                                scheduled_at: "2026-06-02T15:00:00Z"
+                                status: scheduled
+                          - matchday: 2
+                            scheduled_at: "2026-06-04T18:00:00Z"
+                            fixtures:
+                              - id: 00000000-0000-4000-8000-000000000008
+                                world_id: 00000000-0000-4000-8000-000000000001
+                                competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                                home_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                                away_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                                matchday: 2
+                                scheduled_at: "2026-06-04T18:00:00Z"
+                                status: scheduled
+        "404":
+          description: Competition (or its season) not found in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/competitions/{id}/standings:
     get:
       tags: [competition]
@@ -2991,7 +3098,7 @@ paths:
                       home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
                       away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
                       matchday: 1
-                      scheduled_at: "2026-06-07T19:00:00Z"
+                      scheduled_at: "2026-06-02T20:00:00Z"
                       status: scheduled
         "404":
           description: Fixture not found in the caller's world.
@@ -4145,6 +4252,37 @@ components:
         goals_for: { type: integer }
         goals_against: { type: integer }
         points: { type: integer }
+    SeasonCalendar:
+      type: object
+      description: |
+        The current season grouped into game-weeks (IM03). week = game-day /
+        days_per_week (default 7, world config); a league plays
+        matchdays_per_week of them (default 3).
+      properties:
+        season: { $ref: "#/components/schemas/NestedSeason" }
+        weeks:
+          type: array
+          items: { $ref: "#/components/schemas/FixtureWeek" }
+    FixtureWeek:
+      type: object
+      properties:
+        week: { type: integer, description: Zero-based game-week of the season. }
+        first_day:
+          type: string
+          format: date-time
+          description: The week's first game-day (the season start plus week × days_per_week).
+        matchdays:
+          type: array
+          items: { $ref: "#/components/schemas/FixtureMatchday" }
+    FixtureMatchday:
+      type: object
+      description: One matchday's fixtures — every fixture shares this scheduled_at.
+      properties:
+        matchday: { type: integer }
+        scheduled_at: { type: string, format: date-time, description: Kickoff of the matchday (UTC, from the league's kickoff_hours rotation). }
+        fixtures:
+          type: array
+          items: { $ref: "#/components/schemas/Fixture" }
     FixtureMatch:
       type: object
       properties:

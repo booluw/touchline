@@ -4,6 +4,7 @@ package competition
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -295,6 +296,331 @@ func TestStartSeasonAndApplyResultAndRollover(t *testing.T) {
 
 func newInt(v int) *int { return &v }
 
+// TestFixturePacing locks the IM03 paced calendar: a 4-team league's 6
+// matchdays land at 1,3,5,8,10,12 under the default 3-matchdays-per-7-day-week;
+// the pacing follows the league's scheduling_rules override, and days_per_week
+// falls back to the world's calendar.days_per_week config. Every matchday
+// shares one game-day, and kickoff hours stay inside the league's rotation.
+func TestFixturePacing(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, champ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Premier: default pacing (3 matchdays per 7 game-days, kickoffs 15/18/20).
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+	wantDays := []int{1, 3, 5, 8, 10, 12}
+	assertPacedDays(t, pool, premier.ID, worldID, wantDays)
+	assertKickoffHours(t, pool, premier.ID, []int{15, 18, 20})
+	assertSingleDayPerMatchday(t, pool, premier.ID)
+
+	// Championship: per-league override — 4 matchdays per week at 16:00/20:00.
+	if _, err := pool.Exec(ctx, `
+		UPDATE competition.competition_rules
+		SET scheduling_rules = '{"matchdays_per_week": 4, "kickoff_hours": [16, 20]}'
+		WHERE competition_id = $1`, champ.ID); err != nil {
+		t.Fatalf("override champ pacing: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, champ.ID); err != nil {
+		t.Fatalf("start champ: %v", err)
+	}
+	assertPacedDays(t, pool, champ.ID, worldID, []int{1, 2, 4, 6, 8, 9, 11, 13})
+	assertKickoffHours(t, pool, champ.ID, []int{16, 20})
+	assertSingleDayPerMatchday(t, pool, champ.ID)
+}
+
+// TestFixturePacingWorldCalendarFallback verifies days_per_week reads the
+// world's calendar.days_per_week config when the league sets none: with a
+// 5-game-day week and 3 matchdays the season plays days 1,2,4,6,7,9.
+func TestFixturePacingWorldCalendarFallback(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	worldSvc := internalworld.NewService(pool, nil)
+	if err := worldSvc.SetConfig(ctx, worldID, "calendar.days_per_week", 5); err != nil {
+		t.Fatalf("set calendar.days_per_week: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+	assertPacedDays(t, pool, premier.ID, worldID, []int{1, 2, 4, 6, 7, 9})
+}
+
+// TestSeasonCalendar verifies the IM03 read model: the week grouping matches
+// the paced fixtures, weeks carry the week's first day, and matchdays hold
+// their fixtures in matchday order.
+func TestSeasonCalendar(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	seg, err := svc.StartSeason(ctx, worldID, premier.ID)
+	if err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+
+	cal, err := svc.GetSeasonCalendar(ctx, worldID, premier.ID, nil)
+	if err != nil {
+		t.Fatalf("calendar: %v", err)
+	}
+	if cal.Season.ID != seg.ID || cal.Season.Number != 1 || cal.Season.Label != seg.SeasonLabel {
+		t.Fatalf("calendar season = %+v, want %+v", cal.Season, seg)
+	}
+
+	// Default 3/7 pacing: matchdays 1-3 sit in week 0 (days 1,3,5) and
+	// matchdays 4-6 in week 1 (days 8,10,12).
+	if len(cal.Weeks) != 2 {
+		t.Fatalf("calendar weeks = %d, want 2 (got %+v)", len(cal.Weeks), cal.Weeks)
+	}
+	if cal.Weeks[0].Week != 0 || cal.Weeks[1].Week != 1 {
+		t.Fatalf("week numbers = %d/%d, want 0/1", cal.Weeks[0].Week, cal.Weeks[1].Week)
+	}
+	var start time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT start_date FROM competition.seasons WHERE id = $1`, seg.ID).Scan(&start); err != nil {
+		t.Fatalf("season start: %v", err)
+	}
+	if !cal.Weeks[0].FirstDay.Equal(daysTruncate(start)) ||
+		!cal.Weeks[1].FirstDay.Equal(daysTruncate(start).AddDate(0, 0, 7)) {
+		t.Fatalf("week first days = %v/%v, want start / start+7", cal.Weeks[0].FirstDay, cal.Weeks[1].FirstDay)
+	}
+	wantPerWeek := []int{3, 3}
+	for i, w := range cal.Weeks {
+		if len(w.Matchdays) != wantPerWeek[i] {
+			t.Fatalf("week %d matchdays = %d, want %d", w.Week, len(w.Matchdays), wantPerWeek[i])
+		}
+		for j, md := range w.Matchdays {
+			mdNum := 1 + 3*i + j
+			if md.Matchday != mdNum {
+				t.Fatalf("week %d matchday %d = %d, want %d", w.Week, j+1, md.Matchday, mdNum)
+			}
+			if len(md.Fixtures) != 2 {
+				t.Fatalf("matchday %d fixtures = %d, want 2", md.Matchday, len(md.Fixtures))
+			}
+			wantDay := []int{1, 3, 5, 8, 10, 12}[mdNum-1]
+			if got := daysBetween(daysTruncate(start), daysTruncate(md.ScheduledAt)); got != wantDay {
+				t.Fatalf("matchday %d day = %d, want %d", md.Matchday, got, wantDay)
+			}
+		}
+	}
+
+	// The numbered-season form resolves season 1 explicitly and 404s on an
+	// unknown number. It must serve the same fixtures as the active-season read.
+	one := 1
+	filtered, err := svc.GetSeasonCalendar(ctx, worldID, premier.ID, &one)
+	if err != nil {
+		t.Fatalf("calendar season=1: %v", err)
+	}
+	if filtered.Season.ID != seg.ID {
+		t.Fatalf("season=1 calendar season = %+v, want %+v", filtered.Season, seg)
+	}
+	if len(filtered.Weeks) != len(cal.Weeks) {
+		t.Fatalf("season=1 weeks = %d, want %d", len(filtered.Weeks), len(cal.Weeks))
+	}
+	for i := range filtered.Weeks {
+		if len(filtered.Weeks[i].Matchdays) != len(cal.Weeks[i].Matchdays) {
+			t.Fatalf("season=1 week %d matchdays = %d, want %d",
+				i, len(filtered.Weeks[i].Matchdays), len(cal.Weeks[i].Matchdays))
+		}
+	}
+	missing := 42
+	if _, err := svc.GetSeasonCalendar(ctx, worldID, premier.ID, &missing); !errors.Is(err, ErrSeasonNotFound) {
+		t.Fatalf("calendar season=42 err = %v, want ErrSeasonNotFound", err)
+	}
+
+	// Simulate the post-rollover state (season 2 attached after season 1's last
+	// matchday, like the rollover does) and verify the window filter: the active
+	// calendar serves season 2's (empty) weeks — never season-1 fixtures — while
+	// season=1 stays bounded by season 2's start_date.
+	start13 := daysTruncate(start).AddDate(0, 0, 13)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competition.seasons (world_id, competition_id, season_label, season_number, start_date, status)
+		VALUES ($1, $2, 'sim/27', 2, $3, 'upcoming')`, worldID, premier.ID, start13); err != nil {
+		t.Fatalf("insert season 2: %v", err)
+	}
+	active2, err := svc.GetSeasonCalendar(ctx, worldID, premier.ID, nil)
+	if err != nil {
+		t.Fatalf("calendar with season 2: %v", err)
+	}
+	if active2.Season.Number != 2 {
+		t.Fatalf("active season with season-2 row = %d, want 2", active2.Season.Number)
+	}
+	if len(active2.Weeks) != 0 {
+		t.Fatalf("season-2 weeks = %d, want 0 (no season-1 leak): %+v", len(active2.Weeks), active2.Weeks)
+	}
+	two := 2
+	season2, err := svc.GetSeasonCalendar(ctx, worldID, premier.ID, &two)
+	if err != nil {
+		t.Fatalf("calendar season=2: %v", err)
+	}
+	if season2.Season.Number != 2 || len(season2.Weeks) != 0 {
+		t.Fatalf("season=2 = %s/%d weeks, want 2/0", season2.Season.Label, len(season2.Weeks))
+	}
+	season1, err := svc.GetSeasonCalendar(ctx, worldID, premier.ID, &one)
+	if err != nil {
+		t.Fatalf("calendar season=1 after season 2: %v", err)
+	}
+	if season1.Season.Number != 1 || len(season1.Weeks) != 2 {
+		t.Fatalf("season=1 after season 2 = %d/%d weeks, want 1/2",
+			season1.Season.Number, len(season1.Weeks))
+	}
+}
+
+// TestListClubFixtures verifies the IM03 club read: world-scoped, earliest
+// kickoff first, and cross-world clubs stay invisible.
+func TestListClubFixtures(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+
+	var clubID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM club.clubs WHERE world_id = $1 ORDER BY name LIMIT 1`, worldID).Scan(&clubID); err != nil {
+		t.Fatalf("pick club: %v", err)
+	}
+	fx, err := svc.ListClubFixtures(ctx, worldID, clubID, 0)
+	if err != nil {
+		t.Fatalf("list club fixtures: %v", err)
+	}
+	if len(fx) != 6 {
+		t.Fatalf("club fixtures = %d, want 6 (a 4-team round robin)", len(fx))
+	}
+	for i := 1; i < len(fx); i++ {
+		if fx[i].ScheduledAt.Before(fx[i-1].ScheduledAt) {
+			t.Fatalf("fixtures out of order: %v before %v", fx[i].ScheduledAt, fx[i-1].ScheduledAt)
+		}
+	}
+
+	// A club from another world is invisible: reading through another world's
+	// scope rejects it, and an unknown club id 404s.
+	if _, err := svc.ListClubFixtures(ctx, uuid.New(), clubID, 30); err != ErrClubWorldMismatch {
+		t.Fatalf("cross-world read err = %v, want ErrClubWorldMismatch", err)
+	}
+	if _, err := svc.ListClubFixtures(ctx, worldID, uuid.New(), 30); err != ErrClubNotFound {
+		t.Fatalf("unknown club err = %v, want ErrClubNotFound", err)
+	}
+}
+
+// assertPacedDays checks that the league's matchday days (relative to the
+// world's launch day) equal want exactly, proving the pacing formula.
+func assertPacedDays(t *testing.T, pool *pgxpool.Pool, leagueID, worldID uuid.UUID, want []int) {
+	t.Helper()
+	ctx := context.Background()
+	var dayZero time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT date_trunc('day', COALESCE(launched_at, created_at))
+		FROM world.worlds WHERE id = $1`, worldID).Scan(&dayZero); err != nil {
+		t.Fatalf("day zero: %v", err)
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT matchday, scheduled_at::date
+		FROM match.fixtures
+		WHERE competition_id = $1 AND world_id = $2
+		ORDER BY matchday`, leagueID, worldID)
+	if err != nil {
+		t.Fatalf("query paced matchdays: %v", err)
+	}
+	defer rows.Close()
+	got := []int{}
+	for rows.Next() {
+		var md int
+		var date time.Time
+		if err := rows.Scan(&md, &date); err != nil {
+			t.Fatalf("scan matchday: %v", err)
+		}
+		got = append(got, int(date.Sub(dayZero).Hours()/24))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate matchdays: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("matchday days = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("matchday days = %v, want %v", got, want)
+		}
+	}
+}
+
+// assertKickoffHours checks every scheduled kickoff hour lives in allowed and
+// that the rotation actually varies across the season's first matchdays.
+func assertKickoffHours(t *testing.T, pool *pgxpool.Pool, leagueID uuid.UUID, allowed []int) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := pool.Query(ctx, `
+		SELECT DISTINCT EXTRACT(HOUR FROM scheduled_at)::int
+		FROM match.fixtures WHERE competition_id = $1`, leagueID)
+	if err != nil {
+		t.Fatalf("query kickoff hours: %v", err)
+	}
+	defer rows.Close()
+	seen := map[int]bool{}
+	for rows.Next() {
+		var h int
+		if err := rows.Scan(&h); err != nil {
+			t.Fatalf("scan kickoff hour: %v", err)
+		}
+		seen[h] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate kickoff hours: %v", err)
+	}
+	for h := range seen {
+		ok := false
+		for _, a := range allowed {
+			if h == a {
+				ok = true
+			}
+		}
+		if !ok {
+			t.Fatalf("kickoff hour %d outside allowed %v", h, allowed)
+		}
+	}
+	if len(allowed) > 1 && len(seen) < 2 {
+		t.Fatalf("kickoff hours = %v, want rotation across %v", seen, allowed)
+	}
+}
+
+// assertSingleDayPerMatchday fails if any matchday spans more than one game-day
+// (every fixture of a matchday shares one scheduled day).
+func assertSingleDayPerMatchday(t *testing.T, pool *pgxpool.Pool, leagueID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	var multi int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT matchday FROM match.fixtures
+			WHERE competition_id = $1
+			GROUP BY matchday HAVING COUNT(DISTINCT scheduled_at::date) > 1) bad`, leagueID).
+		Scan(&multi); err != nil {
+		t.Fatalf("count multi-day matchdays: %v", err)
+	}
+	if multi != 0 {
+		t.Fatalf("%d matchday(s) span multiple days, want 0", multi)
+	}
+}
+
 // TestOffSeasonGapRolloverAndActivation verifies the IM01 off-season: a league
 // whose next season rolls over anchors its calendar after the configured gap
 // (world config, overridable per league), no fixtures fall inside the gap, and
@@ -357,7 +683,8 @@ func TestOffSeasonGapRolloverAndActivation(t *testing.T) {
 		t.Fatalf("day zero: %v", err)
 	}
 
-	// Season 2 anchored at last fixture (day 6) + gap: premier 5, champ 20.
+	// Season 2 anchored at last fixture (day 12 under IM03 pacing) + gap:
+	// premier 5, champ 20.
 	var premierStart, champStart time.Time
 	if err := pool.QueryRow(ctx, `
 		SELECT start_date FROM competition.seasons
@@ -369,11 +696,11 @@ func TestOffSeasonGapRolloverAndActivation(t *testing.T) {
 		WHERE competition_id = $1 AND season_number = 2`, champ.ID).Scan(&champStart); err != nil {
 		t.Fatalf("champ season 2 start: %v", err)
 	}
-	if got := int(premierStart.Sub(dayZero).Hours() / 24); got != 11 {
-		t.Fatalf("premier season 2 starts at day %d, want 11 (6 matchdays + 5 gap)", got)
+	if got := int(premierStart.Sub(dayZero).Hours() / 24); got != 17 {
+		t.Fatalf("premier season 2 starts at day %d, want 17 (last paced fixture day 12 + 5 gap)", got)
 	}
-	if got := int(champStart.Sub(dayZero).Hours() / 24); got != 26 {
-		t.Fatalf("champ season 2 starts at day %d, want 26 (6 matchdays + 20 gap)", got)
+	if got := int(champStart.Sub(dayZero).Hours() / 24); got != 32 {
+		t.Fatalf("champ season 2 starts at day %d, want 32 (last paced fixture day 12 + 20 gap)", got)
 	}
 
 	// No scheduled fixture falls inside either gap: nothing pending before its
@@ -391,7 +718,7 @@ func TestOffSeasonGapRolloverAndActivation(t *testing.T) {
 		t.Fatalf("scheduled fixtures inside the off-season gap = %d, want 0", inGap)
 	}
 
-	// Activation boundary for the premier league: first fixture at day 12.
+	// Activation boundary for the premier league: first fixture at day 18.
 	var firstOffset int
 	if err := pool.QueryRow(ctx, `
 		SELECT (MIN(f.scheduled_at)::date - (date_trunc('day', COALESCE(w.launched_at, w.created_at)))::date)
@@ -401,8 +728,8 @@ func TestOffSeasonGapRolloverAndActivation(t *testing.T) {
 		premier.ID, worldID).Scan(&firstOffset); err != nil {
 		t.Fatalf("first fixture offset: %v", err)
 	}
-	if firstOffset != 12 {
-		t.Fatalf("premier season 2 first fixture at day %d, want 12", firstOffset)
+	if firstOffset != 18 {
+		t.Fatalf("premier season 2 first fixture at day %d, want 18", firstOffset)
 	}
 
 	setDay := func(day int) {
@@ -444,8 +771,8 @@ func TestOffSeasonGapRolloverAndActivation(t *testing.T) {
 		t.Fatalf("statuses after premier = %s/%s, want in_progress/upcoming", statusOf(premier.ID), statusOf(champ.ID))
 	}
 
-	// Champ's first fixture day (27) activates the champ league.
-	setDay(27)
+	// Champ's first fixture day (33) activates the champ league.
+	setDay(33)
 	if n, err := svc.ActivateDueSeasons(ctx, worldID); err != nil {
 		t.Fatalf("activate champ: %v", err)
 	} else if n != 1 {

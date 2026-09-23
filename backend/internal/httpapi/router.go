@@ -57,6 +57,7 @@ func (s *server) router() *gin.Engine {
 		// Club reads (S03-01): the caller's own world only.
 		api.GET("/clubs", s.requireAuth, s.handleListClubs)
 		api.GET("/clubs/:id", s.requireAuth, s.handleGetClub)
+		api.GET("/clubs/:id/fixtures", s.requireAuth, s.handleListClubFixtures)
 		api.GET("/clubs/:id/lineup", s.requireAuth, s.handleGetLineup)
 		api.PUT("/clubs/:id/lineup", s.requireAuth, s.handleSetLineup)
 		api.GET("/clubs/:id/tactics", s.requireAuth, s.handleGetTactics)
@@ -185,6 +186,7 @@ func (s *server) router() *gin.Engine {
 		api.GET("/competitions", s.requireAuth, s.handleMyCompetitions)
 		api.GET("/competitions/:id", s.requireAuth, s.handleGetCompetition)
 		api.GET("/competitions/:id/fixtures", s.requireAuth, s.handleGetFixtures)
+		api.GET("/competitions/:id/calendar", s.requireAuth, s.handleGetSeasonCalendar)
 		api.GET("/competitions/:id/standings", s.requireAuth, s.handleGetStandings)
 
 		// Match feed (S04-03): the fixture header for the match screen and

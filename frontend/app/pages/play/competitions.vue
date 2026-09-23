@@ -1,24 +1,23 @@
 <script setup lang="ts">
 // S04-01 manager view: the competition folder for the caller's world. Pick a
-// league to see its fixture list (per matchday) and its live standings table.
-import { ref } from 'vue'
+// league to see its season fixture calendar (IM03, grouped by game-week with
+// kickoff times) and its live standings table.
+import { computed, onMounted, ref } from 'vue'
 
-import type { Fixture, League, Standings } from '~/composables/useCompetition'
+import type { Fixture, League, SeasonCalendar, Standings } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
 
 const comp = useCompetition()
 
 const leagues = ref<League[]>([])
 const selected = ref<string | null>(null)
-const matchday = ref<number | null>(null)
-const fixtures = ref<Fixture[]>([])
+const calendar = ref<SeasonCalendar | null>(null)
 const standings = ref<Standings | null>(null)
 const error = ref('')
 
-const matchdayOptions = computed(() => {
+const totalMatchdays = computed(() => {
   const teams = standings.value?.rows.length || 0
-  const n = teams > 0 ? 2 * (teams - 1) : 0
-  return Array.from({ length: n }, (_, i) => i + 1)
+  return teams > 0 ? 2 * (teams - 1) : 0
 })
 
 async function load() {
@@ -29,16 +28,10 @@ async function load() {
 
 async function selectLeague(id: string) {
   selected.value = id
-  matchday.value = null
-  fixtures.value = []
+  calendar.value = null
+  standings.value = null
   standings.value = await comp.getStandings(id)
-  await loadMatchday(1)
-}
-
-async function loadMatchday(md: number | null) {
-  if (!selected.value) return
-  matchday.value = md
-  fixtures.value = md ? await comp.getFixtures(selected.value, md) : []
+  calendar.value = await comp.getSeasonCalendar(id)
 }
 
 async function refresh() {
@@ -50,6 +43,17 @@ function score(f: Fixture): string {
   return f.status === 'completed' && f.home_score != null && f.away_score != null
     ? `${f.home_score}–${f.away_score}`
     : '-'
+}
+
+function kickoffTime(scheduledAt: string): string {
+  return new Date(scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function weekLabel(w: { week: number; first_day: string }): string {
+  const start = new Date(w.first_day).toLocaleDateString([], { day: 'numeric', month: 'short' })
+  const end = new Date(new Date(w.first_day).getTime() + 6 * 24 * 3600 * 1000)
+    .toLocaleDateString([], { day: 'numeric', month: 'short' })
+  return start === end ? start : `${start} – ${end}`
 }
 
 onMounted(() => { load().catch(() => { error.value = 'Could not load your competitions.' }) })
@@ -112,28 +116,38 @@ onMounted(() => { load().catch(() => { error.value = 'Could not load your compet
         </section>
 
         <section class="bg-slate-800 border border-slate-700 rounded-lg p-4">
-          <div class="flex flex-wrap items-center gap-3 mb-3">
-            <h2 class="text-lg font-semibold text-white">Fixtures</h2>
-            <select v-if="matchdayOptions.length" :value="matchday ?? ''"
-                    @change="loadMatchday(Number(($event.target as HTMLSelectElement).value))"
-                    class="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm">
-              <option v-for="m in matchdayOptions" :key="m" :value="m">Matchday {{ m }}</option>
-            </select>
-            <span class="text-slate-500 text-sm ml-auto">Kick-off 19:00 UTC</span>
+          <h2 class="text-lg font-semibold text-white mb-1">Fixtures — {{ calendar?.season?.label }}</h2>
+          <p class="text-slate-500 text-sm mb-3">
+            {{ totalMatchdays }} matchdays paced across the game-week, {{ calendar?.weeks.length ?? 0 }} week(s).
+          </p>
+
+          <div v-if="calendar?.weeks.length" class="space-y-5">
+            <div v-for="w in calendar.weeks" :key="w.week" class="space-y-3">
+              <h3 class="text-sm font-medium text-indigo-300 border-b border-slate-700 pb-1">
+                Week {{ w.week + 1 }} — {{ weekLabel(w) }}
+              </h3>
+              <div v-for="md in w.matchdays" :key="md.matchday" class="space-y-1">
+                <p class="text-xs text-slate-400">
+                  Matchday {{ md.matchday }} · kick-off
+                  {{ new Date(md.scheduled_at).toLocaleDateString([], { day: 'numeric', month: 'short' }) }}
+                  {{ kickoffTime(md.scheduled_at) }}
+                </p>
+                <ul class="divide-y divide-slate-700/60">
+                  <li v-for="f in md.fixtures" :key="f.id" class="py-2 flex items-center gap-3 text-sm">
+                    <NuxtLink :to="`/matches/${f.id}`" class="flex-1 flex items-center gap-3 group">
+                      <span class="text-right flex-1">{{ f.home_club.name ?? f.home_club.id.slice(0, 8) }}</span>
+                      <span class="bg-slate-900 border border-slate-600 rounded px-3 py-1 font-bold text-center w-20 group-hover:border-indigo-500">{{ score(f) }}</span>
+                      <span class="flex-1">{{ f.away_club.name ?? f.away_club.id.slice(0, 8) }}</span>
+                    </NuxtLink>
+                    <span class="w-24 text-right" :class="f.status === 'completed' ? 'text-emerald-400' : 'text-slate-500'">
+                      {{ f.status }}
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
-          <ul v-if="fixtures.length" class="divide-y divide-slate-700">
-            <li v-for="f in fixtures" :key="f.id" class="py-2 flex items-center gap-3 text-sm">
-              <NuxtLink :to="`/matches/${f.id}`" class="flex-1 flex items-center gap-3 group">
-                <span class="text-right flex-1">{{ f.home_club.name ?? f.home_club.id.slice(0, 8) }}</span>
-                <span class="bg-slate-900 border border-slate-600 rounded px-3 py-1 font-bold text-center w-20 group-hover:border-indigo-500">{{ score(f) }}</span>
-                <span class="flex-1">{{ f.away_club.name ?? f.away_club.id.slice(0, 8) }}</span>
-              </NuxtLink>
-              <span class="w-24 text-right" :class="f.status === 'completed' ? 'text-emerald-400' : 'text-slate-500'">
-                {{ f.status }}
-              </span>
-            </li>
-          </ul>
-          <p v-else class="text-slate-500 text-sm">Select a matchday to see fixtures.</p>
+          <p v-else class="text-slate-500 text-sm">No fixtures scheduled yet.</p>
         </section>
       </template>
     </div>

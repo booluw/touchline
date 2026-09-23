@@ -62,11 +62,37 @@ it does, in one transaction:
 4. Creates the season (`season_number = MAX + 1`, label like `2026/27`,
    status `in_progress`) with `competition_entries` from the current league
    memberships.
-5. Generates the **deterministic double round-robin** fixture list, one
-   matchday per game-day, anchored to the world's reference date
-   (`launched_at`/`created_at`); fixtures are spaced ≥2 game-days apart to
-   satisfy the phase-2 rest rule.
+5. Generates the **deterministic double round-robin** fixture list, paced
+   across the game-week (IM03): a league plays `matchdays_per_week` matchdays
+   (default 3) spread over its `days_per_week` game-days (default 7, from the
+   world calendar), anchored to the world's reference date
+   (`launched_at`/`created_at`). Matchday `k` lands on game-day
+   `floor((k-1) × days_per_week / matchdays_per_week) + 1` — with the defaults,
+   days 1,3,5,8,10,12,… (two playing days, one rest).
 6. Emits `SEASON_CREATED` (world event, carries the world replay seed).
+
+### Fixture pacing and kickoff times (IM03)
+
+- All three pacing knobs live on the league's rules row
+  (`competition_rules.scheduling_rules`, JSONB) and are **read at season
+  creation**, so the calendar is stamped onto the fixtures it produces:
+
+  - `matchdays_per_week` — matchdays packed into one game-week. Default `3`.
+  - `days_per_week` — the length of a game-week. Default: the world's
+    `calendar.days_per_week` config (IM02), else `7`.
+  - `kickoff_hours` — a JSONB array of UTC hours the season's matchdays rotate
+    through (default `[15, 18, 20]`). Matchday `k` kicks off at
+    `kickoff_hours[(k - 1 + base) % len]` where `base` derives from the world's
+    replay seed ⊕ the league id, so a season's kickoff times vary while replay
+    stays deterministic.
+- Every fixture of one matchday shares the same `scheduled_at` (a whole day at
+  a UTC kickoff hour). Kickoffs stay **date-gated** on the world clock —
+  `KickoffDue` simulates a matchday once `scheduled_at::date ≤ current_day` —
+  so kickoff hours are calendar display, never wall-clock logic.
+- The same parameters are re-read when the fixture calendar is served, so
+  `GET /api/competitions/:id/calendar` reproduces the exact week grouping a
+  season was built with: week = `game_day ÷ days_per_week` from the season's
+  `start_date`.
 
 Error mapping: `404` for unknown world/league; `409` for an archived world,
 a league from another world, an already-seeded league, or an unseeded league.

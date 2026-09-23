@@ -94,6 +94,23 @@ export interface Standings {
   rows: StandingRow[]
 }
 
+export interface FixtureMatchday {
+  matchday: number
+  scheduled_at: string
+  fixtures: Fixture[]
+}
+
+export interface FixtureWeek {
+  week: number
+  first_day: string
+  matchdays: FixtureMatchday[]
+}
+
+export interface SeasonCalendar {
+  season: SeasonRef
+  weeks: FixtureWeek[]
+}
+
 export interface ClubNamePools {
   stems: string[]
   suffixes: string[]
@@ -186,6 +203,19 @@ export function useCompetition() {
     return body.fixtures ?? []
   }
 
+  async function getSeasonCalendar(leagueId: string): Promise<SeasonCalendar | null> {
+    const res = await authedFetch(`/api/competitions/${leagueId}/calendar`)
+    if (!res.ok) return null
+    return res.json()
+  }
+
+  async function getClubFixtures(clubId: string): Promise<Fixture[]> {
+    const res = await authedFetch(`/api/clubs/${clubId}/fixtures`)
+    if (!res.ok) return []
+    const body = await res.json()
+    return body.fixtures ?? []
+  }
+
   async function getStandings(leagueId: string): Promise<Standings | null> {
     const res = await authedFetch(`/api/competitions/${leagueId}/standings`)
     if (!res.ok) return null
@@ -228,6 +258,8 @@ export function useCompetition() {
     seedCompetition,
     listMyCompetitions,
     getFixtures,
+    getSeasonCalendar,
+    getClubFixtures,
     getStandings,
     listClubNameParts,
     addClubNamePart,

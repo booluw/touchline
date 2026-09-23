@@ -29,8 +29,13 @@ func (s *Service) GetFixtures(ctx context.Context, leagueID uuid.UUID, worldID u
 	if err != nil {
 		return nil, fmt.Errorf("query fixtures: %w", err)
 	}
-	defer rows.Close()
+	return scanFixtures(rows)
+}
 
+// scanFixtures materializes the shared fixture projection (id, clubs with
+// names, competition, matchday, schedule, status, scoreline).
+func scanFixtures(rows pgx.Rows) ([]Fixture, error) {
+	defer rows.Close()
 	out := []Fixture{}
 	for rows.Next() {
 		var f Fixture

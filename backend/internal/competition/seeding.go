@@ -446,18 +446,33 @@ func (s *Service) createSeason(ctx context.Context, tx pgx.Tx, worldID, leagueID
 
 // createFixtures schedules the deterministic double round-robin for the given
 // entries (already in canonical order) and returns (fixture count, matchdays).
+// IM03 pacing: matchdays spread across the game-week per the league's
+// scheduling parameters (3 in a default 7-game-day week), each at a kickoff
+// hour from the league's rotation derived from the world seed — all
+// deterministic, so identical inputs reproduce identical calendars.
 func (s *Service) createFixtures(ctx context.Context, tx pgx.Tx, worldID, leagueID uuid.UUID, entries []uuid.UUID, bootRef time.Time) (int, int, error) {
 	rounds := roundRobin(len(entries))
+
+	p, err := s.scheduleParams(ctx, tx, leagueID, worldID)
+	if err != nil {
+		return 0, 0, err
+	}
+	var seed int64
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(world_seed, 0) FROM world.worlds WHERE id = $1`, worldID).Scan(&seed); err != nil {
+		return 0, 0, fmt.Errorf("load world seed: %w", err)
+	}
+
 	count := 0
 	for r, round := range rounds { // matchday is 1-based
-		day := daysTruncate(bootRef).AddDate(0, 0, r+1)
-		kickoff := time.Date(day.Year(), day.Month(), day.Day(), KickoffHourUTC, 0, 0, 0, time.UTC)
-		for _, p := range round {
+		kickoff := scheduledAtFromDay(bootRef, r+1, p.daysPerWeek, p.matchdaysPerWeek,
+			kickoffHour(seed, leagueID, p.kickoffHours, r+1))
+		for _, pair := range round {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO match.fixtures
 					(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
 				VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
-				worldID, leagueID, entries[p[0]], entries[p[1]], r+1, kickoff); err != nil {
+				worldID, leagueID, entries[pair[0]], entries[pair[1]], r+1, kickoff); err != nil {
 				return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", r+1, err)
 			}
 			count++

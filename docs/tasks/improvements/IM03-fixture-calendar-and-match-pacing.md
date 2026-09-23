@@ -1,10 +1,48 @@
 # IM03 — Fixture calendar and match pacing: 3 league games a week + season fixture calendar
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Improvements (competition scheduling)
 **Source:** Product decision (manual session)
 **Depends on:** S04-01 (fixture generation); S05-02 (finance); IM02 (single
 daily cadence — this task builds on the day-based pacing)
+
+## Delivery evidence
+
+- `internal/competition/pacing.go` — `scheduleParams` (per-league
+  `scheduling_rules` → world `calendar.days_per_week` → defaults), the pure day
+  map `scheduledAtFromDay`, and the deterministic `kickoffHour` rotation.
+- `internal/competition/seeding.go` `createFixtures` now paces matchdays and
+  rotates kickoffs; `calendar.go` adds `GetSeasonCalendar` + `ListClubFixtures`
+  (shared `scanFixtures` in `standings.go`).
+- Handlers: `GET /api/competitions/:id/calendar` (season calendar grouped by
+  game-week; optional `?season=N` serves that numbered season instead of the
+  active one) and `GET /api/clubs/:id/fixtures` (world-scoped club list);
+  handlers mirror `handleGetClub` / `handleGetFixtures` world-scoping.
+- Frontend: `competitions.vue` renders the calendar (week rows → matchdays →
+  kickoff day+time); the hardcoded "Kick-off 19:00 UTC" text is gone.
+- Tests: pacing unit tests (`pacing_test.go`), integration coverage in
+  `competition_integration_test.go` (`TestFixturePacing`,
+  `TestFixturePacingWorldCalendarFallback`, `TestSeasonCalendar`,
+  `TestListClubFixtures`), handler coverage in `cmd/api/calendar_integration_test.go`.
+- The IM01 rollover test was updated to the paced calendar: a 4-team season's
+  last fixture now lands on day 12 (not day 6), so season 2 of that test starts
+  at day 17 (+ champ 32) and its first fixture flips leagues at day 18 (+ champ 33).
+
+## Recorded decisions (implementation-era)
+
+- The day map is authoritative as written below
+  (`floor((k-1)·daysPerWeek/matchdaysPerWeek) + 1`), so a 4/7 override produces
+  days 1,2,4,6,8,9,11,13 (not the evenly-spaced 1,2,3,4,…).
+- Kickoff-hour base is folded through an **unsigned** modulo of
+  `hashMix(seed, league_id)`: Go's `%` keeps the dividend's sign, and
+  `hashMix` can xor negative, which intermittently produced negative indices.
+- `GET /api/clubs/:id/fixtures` is world-scoped like other club reads (any club
+  in the caller's world), matching the existing club-handler convention rather
+  than restricting to the caller's managed club.
+- The optional club-page panel was cut (no play/club page exists); the endpoint
+  and its tests ship regardless.
+- `KickoffHourUTC` stays only as the `kickoff_hours` fallback when a league's
+  rotation is empty; default rotation is `[15, 18, 20]` UTC.
 
 ## What to do
 

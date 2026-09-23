@@ -381,6 +381,43 @@ func (s *server) handleGetFixtures(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"fixtures": fixtures})
 }
 
+// handleGetSeasonCalendar returns the competition's fixture calendar grouped
+// by game-week (IM03), world-scoped to the caller. With an optional ?season=N
+// query it serves that numbered season; otherwise the active one.
+func (s *server) handleGetSeasonCalendar(c *gin.Context) {
+	leagueID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid competition id"})
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		return
+	}
+	var season *int
+	if raw := c.Query("season"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid season"})
+			return
+		}
+		season = &n
+	}
+	calendar, err := s.compSvc.GetSeasonCalendar(c.Request.Context(), worldID, leagueID, season)
+	switch {
+	case errors.Is(err, internalcompetition.ErrCompetitionNotFound),
+		errors.Is(err, internalcompetition.ErrNoSeason),
+		errors.Is(err, internalcompetition.ErrSeasonNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	case err != nil:
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, calendar)
+}
+
 func (s *server) handleGetStandings(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {

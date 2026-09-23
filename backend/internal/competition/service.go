@@ -20,8 +20,9 @@
 //     (e.g. leagues added after the initial seed).
 //  2. StartSeason consumes membership to create the league's season, its
 //     competition_entries, and a deterministic home-and-away round-robin
-//     fixture list scheduled one matchday per day from the world's season
-//     reference date.
+//     fixture list paced across the game-week from the world's season
+//     reference date (IM03: a league plays matchdays_per_week of its
+//     days_per_week by default; see scheduleParams).
 //
 // Determinism: SeedWorld draws everything from one world seed minted on the
 // first seed run and stored in world.worlds.world_seed (recorded on the
@@ -68,6 +69,9 @@ var (
 	ErrInvalidResult            = errors.New("result scores must be non-negative")
 	ErrManagerNotInMatch        = errors.New("manager does not own a club in this match")
 	ErrMatchNotInProgress       = errors.New("match is not in progress")
+	ErrClubNotFound             = errors.New("club not found")
+	ErrClubWorldMismatch        = errors.New("club does not belong to this world")
+	ErrSeasonNotFound           = errors.New("season not found")
 )
 
 var errInternalRollover = errors.New("competition: internal rollover error")
@@ -182,9 +186,10 @@ type SeedResult struct {
 	LeagueCount int           `json:"league_count"`
 }
 
-// KickoffHourUTC is the fixed, deterministic kickoff time (19:00 UTC) for
-// every fixture of a season. Product-owned pacing data, documented in the
-// S04-01 delivery evidence.
+// KickoffHourUTC is the fixed, deterministic kicked-off fallback hour (19:00
+// UTC) when a league declares no kickoff-hour rotation. It is what the legacy
+// S04-01 delivery evidence documented; IM03 replaced the constant usage with a
+// per-league rotation (see DefaultKickoffHours).
 const KickoffHourUTC = 19
 
 // DefaultOffSeasonTicks is the fallback off-season length in daily world ticks
@@ -194,6 +199,21 @@ const KickoffHourUTC = 19
 // competition_rules.scheduling_rules->>'off_season_ticks'. The precedence is
 // per-league override → world config → this constant.
 const DefaultOffSeasonTicks = 30
+
+// Fixture-pacing defaults (IM03): a season spreads its matchdays across the
+// game-week instead of scheduling one matchday per game-day. All three are
+// overridable per league via competition_rules.scheduling_rules; days_per_week
+// additionally falls back to the world's calendar.days_per_week config (IM02).
+const (
+	DefaultMatchdaysPerWeek = 3
+	DefaultDaysPerWeek      = 7
+)
+
+// DefaultKickoffHours is the fallback kickoff-hour rotation (UTC) when a
+// league declares none. Matchdays of one league cycle through the list
+// deterministically (indexed off the world seed), so kickoff times vary across
+// a season while staying stable for replay.
+var DefaultKickoffHours = []int{15, 18, 20}
 
 // Service orchestrates competition administration, seeding, standings, and
 // season rollover.

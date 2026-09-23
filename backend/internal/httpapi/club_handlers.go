@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	internalclub "github.com/touchline/backend/internal/club"
+	internalcompetition "github.com/touchline/backend/internal/competition"
 	pkgjwt "github.com/touchline/backend/pkg/auth"
 )
 
@@ -56,6 +57,33 @@ func (s *server) handleGetClub(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, detail)
+}
+
+// handleListClubFixtures returns one club's fixtures ordered by kickoff time,
+// world-scoped exactly like handleGetClub: any club in the caller's world is
+// readable; clubs never leak across worlds (IM03 season calendar).
+func (s *server) handleListClubFixtures(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid club id"})
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		return
+	}
+	fixtures, err := s.compSvc.ListClubFixtures(c.Request.Context(), worldID, id, 30)
+	switch {
+	case errors.Is(err, internalcompetition.ErrClubNotFound),
+		errors.Is(err, internalcompetition.ErrClubWorldMismatch):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	case err != nil:
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"fixtures": fixtures})
 }
 
 // callerWorld resolves the caller's world from their manager row. A JWT never
