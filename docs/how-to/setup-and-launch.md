@@ -377,6 +377,27 @@ after the off-season gap (`season.off_season_ticks`, default 30 daily ticks;
 per-league override via `competition_rules.scheduling_rules`) — see
 [seasons.md](seasons.md) §3.
 
+### 7a. Start a cup campaign (optional, IM04)
+
+After at least one league has been seeded (Step 6), a domestic cup can be
+declared and run alongside the league season:
+
+```bash
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/cups \
+  -d '{"world_id":"'$WORLD_ID'","country_id":"'$COUNTRY_ID'",
+       "name":"FA Cup","first_tier_bye":8,"survivor_threshold":14}'
+# 201 (cup id)
+curl -c /tmp/jar -b /tmp/jar -X POST \
+  localhost:8080/api/admin/worlds/$WORLD_ID/countries/$COUNTRY_ID/cups/$CUP_ID/campaign
+# 201 (Round-1 ties drawn)
+```
+
+Every country league club is eligible; the top `first_tier_bye` clubs of tier
+1 join late, when `survivor_threshold` bottom-tier survivors remain. Cup ties
+resolve by golden goal on a draw, bracket rounds reuse the IM03 pacing, and
+cup results never touch league standings or the rollover. See
+[cup-competitions.md](cup-competitions.md).
+
 ---
 
 ## 8. Launch the world and let the ticks run
@@ -560,4 +581,10 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/c
   -H 'Content-Type: application/json' -d '{"key":"tick.daily_cadence","value":"* * * * *"}'
 # then start season #1, per league (Step 7)
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season
+# optional: a domestic cup alongside it (Step 7a, IM04)
+CUP_ID=$(curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/cups \
+  -H 'Content-Type: application/json' \
+  -d '{"world_id":"'"$WORLD_ID"'","country_id":"'"$COUNTRY_ID"'","name":"FA Cup","first_tier_bye":2,"survivor_threshold":4}' | jq -r .id)
+curl -c /tmp/jar -b /tmp/jar -X POST \
+  localhost:8080/api/admin/worlds/$WORLD_ID/countries/$COUNTRY_ID/cups/$CUP_ID/campaign
 ```
