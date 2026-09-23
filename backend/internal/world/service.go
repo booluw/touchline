@@ -22,24 +22,33 @@ var (
 	ErrNameCollision     = errors.New("world name already taken")
 )
 
-// defaultConfigKeys are the runtime cadences + pacing defaults seeded at launch
-// (S02-03 reads the tick.* keys; the calendar/season keys are gameplay tuning
-// read by the competition and academy engines). Values are JSON-configurable
-// per world, never compiled-in — the scheduling contract lives in the DB, not
-// the code.
-// tick.daily_cadence defaults to every 8 hours (00/08/16 UTC), i.e. ~3 in-game
-// days per real day: each WORLD_TICK{daily} emission advances the calendar by
-// exactly one game day (world.worlds.current_day, OPD-24).
+// DaysPerWeekDefault / DaysPerMonthDefault are the compiled fallbacks for the
+// day-derived week and month steps (IM02) when a world has no
+// calendar.days_per_week / calendar.days_per_month config row. The seeded
+// defaults live in defaultConfigKeys; these only cover pre-launch or deleted
+// rows.
+const (
+	DaysPerWeekDefault  = 7
+	DaysPerMonthDefault = 30
+)
+
+// defaultConfigKeys are the runtime tuning defaults seeded at launch (IM02
+// single-daily clock: S02-03 reads tick.daily_cadence; the calendar/season keys
+// are gameplay steps read by the worker, competition, and academy engines).
+// Values are JSON-configurable per world, never compiled-in — the scheduling
+// contract lives in the DB, not the code.
+// tick.daily_cadence is the ONE world-clock cadence (default 00:00 UTC, i.e. 1
+// game-day per real day): each WORLD_TICK{daily} emission advances the calendar
+// by exactly one game day (world.worlds.current_day, OPD-24). Weeks and months
+// are derived from the day counter via calendar.days_per_week/days_per_month.
 // season.off_season_ticks is the IM01 off-season gap in daily ticks the next
 // rollover anchors the new season after (fallback default in the competition
 // service: DefaultOffSeasonTicks).
 var defaultConfigKeys = map[string]any{
 	"tick.match_cadence":      "20s",
-	"tick.hourly_cadence":     "0 * * * *",
-	"tick.daily_cadence":      "0 */8 * * *",
-	"tick.weekly_cadence":     "0 0 * * 0",
-	"tick.monthly_cadence":    "0 0 1 * *",
-	"tick.seasonal_cadence":   "0 0 1 1 *",
+	"tick.daily_cadence":      "0 0 * * *",
+	"calendar.days_per_week":  DaysPerWeekDefault,
+	"calendar.days_per_month": DaysPerMonthDefault,
 	"season.off_season_ticks": 30,
 }
 
@@ -162,6 +171,39 @@ func (s *Service) SetConfig(ctx context.Context, id uuid.UUID, key string, value
 		return fmt.Errorf("set config %s: %w", key, err)
 	}
 	return nil
+}
+
+// Calendar reads the world's day counter and the day-derived week/month steps
+// (IM02: calendar.days_per_week / calendar.days_per_month, JSONB ints). Missing
+// or non-numeric config rows fall back to DaysPerWeekDefault/DaysPerMonthDefault
+// rather than failing the tick pass.
+func (s *Service) Calendar(ctx context.Context, worldID uuid.UUID) (day int64, daysPerWeek, daysPerMonth int, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT w.current_day,
+		       COALESCE(CASE WHEN (dw.config_value #>> '{}') ~ '^-?[0-9]+$'
+		                     THEN (dw.config_value #>> '{}')::int END, $2),
+		       COALESCE(CASE WHEN (dm.config_value #>> '{}') ~ '^-?[0-9]+$'
+		                     THEN (dm.config_value #>> '{}')::int END, $3)
+		FROM world.worlds w
+		LEFT JOIN world.world_config dw
+		  ON dw.world_id = w.id AND dw.config_key = 'calendar.days_per_week'
+		LEFT JOIN world.world_config dm
+		  ON dm.world_id = w.id AND dm.config_key = 'calendar.days_per_month'
+		WHERE w.id = $1`,
+		worldID, DaysPerWeekDefault, DaysPerMonthDefault).Scan(&day, &daysPerWeek, &daysPerMonth)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, 0, ErrWorldNotFound
+	}
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("calendar config: %w", err)
+	}
+	if daysPerWeek < 1 {
+		daysPerWeek = DaysPerWeekDefault
+	}
+	if daysPerMonth < 1 {
+		daysPerMonth = DaysPerMonthDefault
+	}
+	return day, daysPerWeek, daysPerMonth, nil
 }
 
 // SetStatus applies a lifecycle transition.

@@ -122,8 +122,17 @@ type App struct {
 	Academy   *internalacademy.Service
 	Admin     *internaladmin.Service
 	Lifecycle *internallifecycle.Service
+	World     *internalworld.Service
 	Runner    *matchday.Runner
-	http      *httpapi.Server
+
+	// runnerEnabled mirrors the acquired match-runner advisory lock in
+	// RunWorker: the live-match subsystem runs only in the leader pod, while
+	// the (non-live) daily/weekly/monthly passes run in every worker. Kept on
+	// the struct so the extracted per-tick dispatch handler is testable without
+	// running the full bus loop.
+	runnerEnabled bool
+
+	http *httpapi.Server
 }
 
 // Build constructs the process: pool, event bus, realtime transport, and every
@@ -198,12 +207,13 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	academySvc := internalacademy.NewService(pool, bus)
 	adminSvc := internaladmin.NewService(pool, bus)
 	lifecycleSvc := internallifecycle.NewService(pool, bus, academySvc)
+	worldSvc := internalworld.NewService(pool, bus)
 	runner := matchday.NewRunner(pool, matches, compSvc)
 	runner.WithRealtime(broker)
 
 	httpSrv := httpapi.New(httpapi.Options{
 		Auth:        internalauth.NewService(pool, jwt),
-		World:       internalworld.NewService(pool, bus),
+		World:       worldSvc,
 		Manager:     managerSvc,
 		Club:        internalclub.NewService(pool),
 		Bootstrap:   internalbootstrap.NewService(pool, bus),
@@ -255,6 +265,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Academy:    academySvc,
 		Admin:      adminSvc,
 		Lifecycle:  lifecycleSvc,
+		World:      worldSvc,
 		Runner:     runner,
 		http:       httpSrv,
 	}, nil
@@ -314,9 +325,9 @@ func (a *App) RunScheduler(ctx context.Context) error {
 	return nil
 }
 
-// RunWorker consumes the event bus: realtime world-tick fan-out, daily
-// kickoffs + live match pacing, weekly training, monthly wages, the outbox
-// repair sweep, and the live-match startup rehydration.
+// RunWorker consumes the event bus: realtime world-tick fan-out, the daily
+// kickoffs + live match pacing, the day-derived weekly/monthly passes, the
+// outbox repair sweep, and the live-match startup rehydration.
 func (a *App) RunWorker(ctx context.Context) error {
 	bus := a.Bus
 
@@ -324,6 +335,7 @@ func (a *App) RunWorker(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	a.runnerEnabled = runnerEnabled
 	if !runnerEnabled {
 		log.Printf("another worker holds the match-runner lock; live subsystem disabled in this pod")
 	} else {
@@ -349,89 +361,7 @@ func (a *App) RunWorker(ctx context.Context) error {
 			return nil
 		}
 
-		if payload.Granularity == "daily" && runnerEnabled {
-			// IM01: a rollover-created 'upcoming' season flips to 'in_progress'
-			// (and emits SEASON_STARTED) the moment its first fixture is due,
-			// before the kickoff pass so the season reads in_progress as its
-			// first matchday simulates.
-			if activated, err := a.CompSvc.ActivateDueSeasons(ctx, ev.WorldID); err != nil {
-				return fmt.Errorf("world %s daily tick: activate seasons: %w", ev.WorldID, err)
-			} else if activated > 0 {
-				log.Printf("world %s daily tick: activated %d season(s)", ev.WorldID, activated)
-			}
-			sum, err := a.Runner.KickoffDue(ctx, ev.WorldID)
-			if err != nil {
-				log.Printf("world %s daily tick: kickoff: %v", ev.WorldID, err)
-				return err
-			}
-			if sum != nil && sum.Kicked > 0 {
-				log.Printf("world %s daily tick: kicked %d matchday(s), %d fixture(s)",
-					ev.WorldID, sum.Matchdays, sum.Kicked)
-			}
-			go func() {
-				if err := a.Runner.RunLive(ctx, ev.WorldID); err != nil {
-					log.Printf("world %s live runner: %v", ev.WorldID, err)
-				}
-			}()
-		}
-		if payload.Granularity == "daily" {
-			if err := a.Policy.RespondToBidsForAbsent(ctx, ev.WorldID); err != nil {
-				return fmt.Errorf("world %s daily policy bids: %w", ev.WorldID, err)
-			}
-			if err := a.Transfers.DailyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
-				return fmt.Errorf("world %s daily transfer market: %w", ev.WorldID, err)
-			}
-		}
-		if payload.Granularity == "weekly" {
-			if err := a.Policy.EnsureTraining(ctx, ev.WorldID); err != nil {
-				return fmt.Errorf("world %s weekly policy training: %w", ev.WorldID, err)
-			}
-			if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
-				return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
-			}
-			if err := a.Players.WeeklyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
-				return fmt.Errorf("world %s weekly player pass: %w", ev.WorldID, err)
-			}
-			if reconciled, err := a.Social.ReconcileRivalries(ctx, ev.WorldID); err != nil {
-				return fmt.Errorf("world %s rivalries reconcile: %w", ev.WorldID, err)
-			} else if reconciled > 0 {
-				log.Printf("world %s rivalries reconciled: %d fixtures backfilled", ev.WorldID, reconciled)
-			}
-			if reviewed, sacked, err := a.Board.WeeklyReview(ctx, ev.WorldID, ev.WorldTick); err != nil {
-				return fmt.Errorf("world %s weekly board review: %w", ev.WorldID, err)
-			} else {
-				log.Printf("world %s weekly board review: %d reviewed, %d sacked", ev.WorldID, reviewed, sacked)
-			}
-		}
-		if payload.Granularity == "monthly" {
-			if _, err := a.Finance.ApplyMonthlyWages(ctx, ev.WorldID, ev.WorldTick); err != nil {
-				return fmt.Errorf("world %s monthly wages: %w", ev.WorldID, err)
-			}
-			if _, err := a.Academy.Maintenance(ctx, ev.WorldID, ev.WorldTick); err != nil {
-				return fmt.Errorf("world %s academy maintenance: %w", ev.WorldID, err)
-			}
-		}
-		// Seasonal fallback (S08-01): a world without leagues never emits
-		// SEASON_COMPLETED, so the seasonal tick drives the full lifecycle
-		// once per season — intake, retirement, pool replenish (A06). The
-		// hooks dedup per season.
-		if payload.Granularity == "seasonal" {
-			season, ref, err := a.worldSeason(ctx, ev.WorldID)
-			if err != nil {
-				return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
-			}
-			if _, err := a.Lifecycle.OnSeasonCompleted(ctx, ev.WorldID, nil, season, ref); err != nil {
-				return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
-			}
-		}
-		// Home dashboard realtime sweep (S07-01): after the cadence passes have
-		// run, re-snapshot every managed club and push newly surfaced items to
-		// the affected managers' socket feeds. Best-effort; the GET read stays
-		// authoritative.
-		if err := a.Dashboard.PushWorldDelta(ctx, ev.WorldID); err != nil {
-			return fmt.Errorf("world %s dashboard sweep: %w", ev.WorldID, err)
-		}
-		return nil
+		return a.handleWorldTick(ctx, ev, payload.Granularity)
 	}); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
 	}
@@ -515,6 +445,122 @@ func (a *App) RunWorker(ctx context.Context) error {
 		log.Printf("stop: %v", err)
 	}
 	log.Printf("worker stopped")
+	return nil
+}
+
+// handleWorldTick is the single daily WORLD_TICK dispatch (IM02):
+// only the 'daily' granularity does gameplay work; every other periodic system
+// is derived from the world's day counter (world.worlds.current_day, read with
+// the calendar.days_per_week/days_per_month steps). Order is stable so a day
+// that is both a week and a month boundary runs weekly before monthly, and the
+// board review lands after wages/market exactly once per month.
+//
+// Legacy note: WORLD_TICK events of other granularities (hourly/weekly/monthly/
+// seasonal) that were still in flight at deploy are ignored — the passes they
+// used to drive now run off the new day gates, so replaying them would double-
+// post wages/reviews.
+func (a *App) handleWorldTick(ctx context.Context, ev eventbus.Event, granularity string) error {
+	if granularity != "daily" {
+		log.Printf("world %s tick %d: ignoring legacy %s granularity (single-daily clock)", ev.WorldID, ev.WorldTick, granularity)
+		return nil
+	}
+
+	day, week, month, err := a.World.Calendar(ctx, ev.WorldID)
+	if err != nil {
+		return fmt.Errorf("world %s daily tick: calendar config: %w", ev.WorldID, err)
+	}
+
+	if a.runnerEnabled {
+		// IM01: a rollover-created 'upcoming' season flips to 'in_progress'
+		// (and emits SEASON_STARTED) the moment its first fixture is due,
+		// before the kickoff pass so the season reads in_progress as its
+		// first matchday simulates.
+		if activated, err := a.CompSvc.ActivateDueSeasons(ctx, ev.WorldID); err != nil {
+			return fmt.Errorf("world %s daily tick: activate seasons: %w", ev.WorldID, err)
+		} else if activated > 0 {
+			log.Printf("world %s daily tick: activated %d season(s)", ev.WorldID, activated)
+		}
+		sum, err := a.Runner.KickoffDue(ctx, ev.WorldID)
+		if err != nil {
+			log.Printf("world %s daily tick: kickoff: %v", ev.WorldID, err)
+			return err
+		}
+		if sum != nil && sum.Kicked > 0 {
+			log.Printf("world %s daily tick: kicked %d matchday(s), %d fixture(s)",
+				ev.WorldID, sum.Matchdays, sum.Kicked)
+		}
+		go func() {
+			if err := a.Runner.RunLive(ctx, ev.WorldID); err != nil {
+				log.Printf("world %s live runner: %v", ev.WorldID, err)
+			}
+		}()
+	}
+
+	if err := a.Policy.RespondToBidsForAbsent(ctx, ev.WorldID); err != nil {
+		return fmt.Errorf("world %s daily policy bids: %w", ev.WorldID, err)
+	}
+	if err := a.Transfers.DailyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
+		return fmt.Errorf("world %s daily transfer market: %w", ev.WorldID, err)
+	}
+
+	// Weekly work (training, player pass, rivalry reconciliation) once per
+	// days_per_week days: days 7/14/21/28 with the default 7-day week.
+	if week > 0 && day%int64(week) == 0 {
+		if err := a.Policy.EnsureTraining(ctx, ev.WorldID); err != nil {
+			return fmt.Errorf("world %s weekly policy training (day %d): %w", ev.WorldID, day, err)
+		}
+		if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
+			return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
+		}
+		if err := a.Players.WeeklyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
+			return fmt.Errorf("world %s weekly player pass: %w", ev.WorldID, err)
+		}
+		if reconciled, err := a.Social.ReconcileRivalries(ctx, ev.WorldID); err != nil {
+			return fmt.Errorf("world %s rivalries reconcile: %w", ev.WorldID, err)
+		} else if reconciled > 0 {
+			log.Printf("world %s rivalries reconciled: %d fixtures backfilled", ev.WorldID, reconciled)
+		}
+	}
+
+	// Monthly work (wages, academy maintenance, the board review — re-purposed
+	// from weekly to monthly, IM02) once per days_per_month days: day 30 with
+	// the default 30-day month. Board runs last so it grades post-wage books.
+	if month > 0 && day%int64(month) == 0 {
+		if _, err := a.Finance.ApplyMonthlyWages(ctx, ev.WorldID, ev.WorldTick); err != nil {
+			return fmt.Errorf("world %s monthly wages: %w", ev.WorldID, err)
+		}
+		if _, err := a.Academy.Maintenance(ctx, ev.WorldID, ev.WorldTick); err != nil {
+			return fmt.Errorf("world %s academy maintenance: %w", ev.WorldID, err)
+		}
+		if reviewed, sacked, err := a.Board.Review(ctx, ev.WorldID, ev.WorldTick); err != nil {
+			return fmt.Errorf("world %s monthly board review: %w", ev.WorldID, err)
+		} else {
+			log.Printf("world %s monthly board review: %d reviewed, %d sacked", ev.WorldID, reviewed, sacked)
+		}
+	}
+
+	// Seasonal fallback (S08-01): a world without leagues never emits
+	// SEASON_COMPLETED, so reaching a season boundary drives the full lifecycle
+	// once per academy.DaysPerSeason days — intake, retirement, pool replenish
+	// (A06). The hooks dedup per season. Leagues worlds are driven by their own
+	// SEASON_COMPLETED subscription instead.
+	if day%int64(internalacademy.DaysPerSeason) == 0 {
+		season, ref, err := a.worldSeason(ctx, ev.WorldID)
+		if err != nil {
+			return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
+		}
+		if _, err := a.Lifecycle.OnSeasonCompleted(ctx, ev.WorldID, nil, season, ref); err != nil {
+			return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
+		}
+	}
+
+	// Home dashboard realtime sweep (S07-01): after the cadence passes have
+	// run, re-snapshot every managed club and push newly surfaced items to the
+	// affected managers' socket feeds. Best-effort; the GET read stays
+	// authoritative.
+	if err := a.Dashboard.PushWorldDelta(ctx, ev.WorldID); err != nil {
+		return fmt.Errorf("world %s dashboard sweep: %w", ev.WorldID, err)
+	}
 	return nil
 }
 

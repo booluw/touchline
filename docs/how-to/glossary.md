@@ -22,10 +22,10 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | **World status** | `provisioning` (created) / `active` or `open_beta` (playable, ticks fire) / `paused` (halted) / `archived` (terminal). | Admin `POST /api/admin/worlds/:id/status`. |
 | **world_seed** | The world's replay seed, a crypto-random `int64` minted on first successful seed. Per-league name scrambling uses `seed ⊕ leagueID`. | `world.worlds.random_seed`. |
 | **current_day** | The world's calendar counter; `worldDate = launched_at (or created_at) + current_day days`. | Only `WORLD_TICK{daily}` advances it (`OPD-24`). |
-| **Cadence** | A per-world cron schedule (`tick.<name>_cadence`) that fires `WORLD_TICK` events. Granularities: hourly, daily, weekly, monthly, seasonal (+ match pacing, excluded from the clock). See [cadences-and-time.md](cadences-and-time.md). | Defaults in `internal/world/service.go`. |
+| **Cadence** | The per-world cron schedule that fires `WORLD_TICK` events. Since IM02 there is exactly one registered granularity — `tick.daily_cadence` (default `0 0 * * *`); the weekly/monthly/hourly/seasonal cadences were retired, and a `WORLD_TICK` carrying a legacy granularity is logged and dropped. `tick.match_cadence` paces live matches and is excluded from the clock. See [cadences-and-time.md](cadences-and-time.md). | Defaults in `internal/world/service.go`. |
 | **Daily tick** | Kicks off due matchdays (`KickoffDue`), paces live matches, then PolicyBot bid responses + the transfer-market sweep (`Transfers.DailyTick`). |
-| **Weekly tick** | Training archetype deltas + condition, player weekly pass (morale/recovery/share/transfer-request assessment), rivalry reconcile, board weekly review (confidence + sackings). |
-| **Monthly tick** | Wage posting (`4 × weekly_wage` per active commitment) + academy facility maintenance (`annual_cost / 12`). |
+| **Week boundary** | Every `calendar.days_per_week` days (`day % days_per_week == 0`; default 7 — days 7/14/21/28…): training archetype deltas + condition, player weekly pass (morale/recovery/share/transfer-request assessment), rivalry reconcile. |
+| **Month boundary** | Every `calendar.days_per_month` days (`day % days_per_month == 0`; default 30): wage posting (`4 × weekly_wage` per active commitment) + academy facility maintenance (`annual_cost / 12`) + board review (confidence + sackings). |
 | **Hourly / seasonal tick** | Registered + recorded in `world.events`; **no gameplay hook today** (reserved). |
 
 ## 2. Competitions, seasons, standings
@@ -69,7 +69,7 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | **Budgets (per season)** | Transfer `$10M`, wage `$25M`, allocated on `finance.budgets`; `available = allocated − committed`. |
 | **Weekly wage** | `positionBase[position] + bump(attrMean)`, `bump = (attrMean−50)²/20` only when `attrMean > 50` (max `125`, so an 100-mean striker ≈ `$9,625/wk`). Bases ~`$7.5–9.5k/wk` by position. |
 | **Contract length** | `ContractSeasons(age)`: 4 (≤22), 3 (22–28), 2 (>28); startup deals run from the nearest 1 July a full season ahead. |
-| **Wage posting** | Monthly tick, `4 × weekly_wage` per active commitment; dedup key `wage:<tick>:<contract>` → idempotent under redelivery. `WeeksPerSeason = 52`. |
+| **Wage posting** | Month boundary (default day 30), `4 × weekly_wage` per active commitment; dedup key `wage:<tick>:<contract>` → idempotent under redelivery. `WeeksPerSeason = 52`. |
 | **cash** | `SUM(credit) − SUM(debit)` over the club's account (ledger, not a column). |
 | **operating_profit** | Same sum for the current season (≥ 1 Jan), **excluding** `genesis:opening_capital`. |
 | **Committed spending** | `annualWage + TransferBudget.committed + WageBudget.committed + future_installments` (installments 0 today). |
@@ -84,7 +84,7 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | **DNA** | `competitive_ambition`, `patience` (…). Archetypes (giant, academy_club, moneyball_club, community_club, fallen_giant, investor_club, survival_club) set base ranges, jittered. |
 | **Expected finish** | `clamp(round((110 − ambition)/8 [+ 1.5 if patience ≥ 70]), 1, 24)`. |
 | **Expected points** | `clamp(round(88 − 3.5 × finish), 10, 95)`. |
-| **Mandates** | Four per (club, manager, season): `league_finish` (primary), `points_target` (secondary), `operating_balance` (strategic, break-even 0), `wage_structure` (financial, budget 0). Graded each weekly review with slacks/allowances (e.g. finish slack `3→0` as the season progresses; points window `−10`; wage tolerance `budget×(1+target+5%)`). |
+| **Mandates** | Four per (club, manager, season): `league_finish` (primary), `points_target` (secondary), `operating_balance` (strategic, break-even 0), `wage_structure` (financial, budget 0). Graded each month-boundary board review (IM02; default day 30) with slacks/allowances (e.g. finish slack `3→0` as the season progresses; points window `−10`; wage tolerance `budget×(1+target+5%)`). |
 | **Seven factor scores** | Each 0–100: `performance`, `expectations`, `financial`, `board_relationship`, `club_dna_alignment`, `supporter_sentiment`, `alternatives`. Formulas in the design doc (e.g. `performance = clamp(50 + 8·(expectedFinish − position), 0, 100)`). |
 | **Confidence (weighted total)** | `Σ round(wᵢ·factorᵢ)` with persona weights, clamped `[0,100]`; factor deltas **sum exactly** to the total (tested). |
 | **Sack threshold** | Weekly weighted total ≤ `SackThresholdTotal = 25` and the club is human-managed → sacked (AI-managed clubs are scored but never sacked). |
@@ -127,7 +127,7 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | **Training archetypes** | `technical`, `physical`, `defensive`, `attacking`, `recovery` — weekly per-player attribute deltas (e.g. attacking: `finishing +0.4`, `off_the_ball +0.3`, `pace +0.2`, `anticipation +0.2`, decay `marking −0.1`, `positioning −0.1`) with fatigue step, injury multiplier, and sharpness bonuses. |
 | **Age scaling** | 16–21: positive deltas ×1.8; 22–29: ×1.0; 30+: mental ×1.2 + `pace`/`stamina −0.05`/wk unless physical plan. All attributes clamp `[1,100]`. |
 | **Matchday coupling** | Team fitness = mean XI fitness (stamina tank seed); per-player factor `×= (0.9 + 0.4·sharpness) × (1 − 0.3·fatigue)`; familiarity → efficacy. |
-| **Deadlines** | Lineup/tactics rejected `409` if the club's next fixture is live or world paused; training plans take effect from the **next weekly tick** (`effective_from_tick`). |
+| **Deadlines** | Lineup/tactics rejected `409` if the club's next fixture is live or world paused; training plans take effect from the **next week boundary** (`day % days_per_week == 0`; `effective_from_tick`). |
 
 ## 10. Transfers
 
@@ -175,7 +175,7 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | Term | Definition / derivation | Source |
 | --- | --- | --- |
 | **Item priority** | `urgent | important | interesting`, aggregated read-only after each tick. | [dashboard-numerics.md](../design/dashboard-numerics.md). |
-| **Thresholds** | contract expiry 30d; fixture 48h; board total ≤ 25 (urgent) / −15 weekly drop (important); morale ≤ 0.35; newest 5 market events; 12 items/section cap. |
+| **Thresholds** | contract expiry 30d; fixture 48h; board total ≤ 25 (urgent) / −15 drop since the last board review (important); morale ≤ 0.35; newest 5 market events; 12 items/section cap. |
 
 ## 15. Events & invariants
 

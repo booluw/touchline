@@ -392,30 +392,37 @@ compose:
    world's `current_day` also advances +1 per daily tick (OPD-24).
 3. **The season reference date** is the world's `launched_at`/`created_at`;
    matchday *n* plays on day *n* — so to see football soon, accelerate the
-   cadence (default daily is `0 */8 * * *`).
+   daily cadence (default `0 0 * * *`, one game day per real day).
 
 ```bash
 # 1. launch
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/status \
   -H 'Content-Type: application/json' -d '{"status":"active"}'
 
-# 2. accelerate the cadences (takes effect on the next scheduler poll, ~15s)
+# 2. accelerate the cadence (takes effect on the next scheduler poll, ~15s)
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
   -H 'Content-Type: application/json' -d '{"key":"tick.daily_cadence","value":"* * * * *"}'
+
+# 3. retune the day-derived week/month boundaries, if desired (both optional)
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
-  -H 'Content-Type: application/json' -d '{"key":"tick.weekly_cadence","value":"* * * * *"}'
+  -H 'Content-Type: application/json' -d '{"key":"calendar.days_per_week","value":7}'
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
-  -H 'Content-Type: application/json' -d '{"key":"tick.monthly_cadence","value":"* * * * *"}'
+  -H 'Content-Type: application/json' -d '{"key":"calendar.days_per_month","value":30}'
 ```
 
-The weekly tick drives S05-01 training (plan archetypes take effect from the next
-weekly tick) and the player weekly pass (morale/playing-time/transfer-request
-assessment), rivalry reconciliation, and the board's weekly confidence review.
-The monthly tick drives S05-02 wage posting (`4 × weekly_wage` per active
-contract, idempotent ledger write + `WAGE_POSTED` event) **and** academy
-facility maintenance (`annual_cost / 12`). See
-[cadences-and-time.md](cadences-and-time.md) for the full per-tick map and how
-the granularities relate.
+Since IM02 the world clock is a **single daily cadence**: every daily tick
+advances `current_day` by one, and the weekly/monthly passes fire on the day
+counter's boundaries, not their own cron jobs.
+
+- **Weekly** (every `calendar.days_per_week` days, default 7): S05-01 training
+  (plan archetypes take effect from the next week boundary) and the player
+  weekly pass (morale/playing-time/transfer-request assessment), rivalry
+  reconciliation.
+- **Monthly** (every `calendar.days_per_month` days, default 30): S05-02 wage
+  posting (`4 × weekly_wage` per active contract, idempotent ledger write +
+  `WAGE_POSTED` event), academy facility maintenance (`annual_cost / 12`), and
+  the board's confidence review — re-purposed from weekly to this month
+  boundary (IM02).
 
 Watch it happen in the worker logs (`daily tick: kicked X matchday(s), Y
 fixture(s)`), or poll the match feed (manager-scoped session):

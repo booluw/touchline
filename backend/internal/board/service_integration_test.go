@@ -30,16 +30,16 @@ func newTestService(t *testing.T, pool *pgxpool.Pool) *internalboard.Service {
 	return internalboard.NewService(pool, nil, manager.NewService(pool, nil))
 }
 
-func TestWeeklyReviewWritesSnapshotsAndEvents(t *testing.T) {
+func TestReviewWritesSnapshotsAndEvents(t *testing.T) {
 	pool := newTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()
 	w := transfertest.Provision(t, pool, "Board Weekly", "weekly@example.com")
 	svc := newTestService(t, pool)
 
-	reviewed, sacked, err := svc.WeeklyReview(ctx, w.WorldID, 7)
+	reviewed, sacked, err := svc.Review(ctx, w.WorldID, 7)
 	if err != nil {
-		t.Fatalf("weekly review: %v", err)
+		t.Fatalf("review: %v", err)
 	}
 	if reviewed != 3 {
 		t.Errorf("reviewed = %d, want 3", reviewed)
@@ -125,8 +125,8 @@ func TestWeeklyReviewWritesSnapshotsAndEvents(t *testing.T) {
 	}
 
 	// Idempotent for the same tick: a re-run writes nothing new.
-	if _, _, err := svc.WeeklyReview(ctx, w.WorldID, 7); err != nil {
-		t.Fatalf("weekly review replay: %v", err)
+	if _, _, err := svc.Review(ctx, w.WorldID, 7); err != nil {
+		t.Fatalf("review replay: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM manager.job_security_snapshots`).
 		Scan(&snapshotCount); err != nil {
@@ -249,8 +249,8 @@ func TestNegotiateMandateLifecycle(t *testing.T) {
 	}
 
 	// Another manager's mandate is not negotiable by this caller.
-	if _, _, err := svc.WeeklyReview(ctx, w.WorldID, 8); err != nil {
-		t.Fatalf("weekly review: %v", err)
+	if _, _, err := svc.Review(ctx, w.WorldID, 8); err != nil {
+		t.Fatalf("review: %v", err)
 	}
 	var otherMandate uuid.UUID
 	var otherMgr uuid.UUID
@@ -266,7 +266,7 @@ func TestNegotiateMandateLifecycle(t *testing.T) {
 	}
 }
 
-func TestWeeklyReviewSacksUnderperformingHumanManager(t *testing.T) {
+func TestReviewSacksUnderperformingHumanManager(t *testing.T) {
 	pool := newTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -275,9 +275,9 @@ func TestWeeklyReviewSacksUnderperformingHumanManager(t *testing.T) {
 
 	forceLowConfidence(t, pool, w)
 
-	reviewed, sacked, err := svc.WeeklyReview(ctx, w.WorldID, 9)
+	reviewed, sacked, err := svc.Review(ctx, w.WorldID, 9)
 	if err != nil {
-		t.Fatalf("weekly review: %v", err)
+		t.Fatalf("review: %v", err)
 	}
 	if reviewed != 3 {
 		t.Errorf("reviewed = %d, want 3", reviewed)

@@ -10,7 +10,7 @@ data until PM tuning sign-off. Recalibration means editing the constants in
 | --- | --- | --- |
 | `ContractExpiryWindowDays` | 30 | Active contract with `end_date` inside the next 30 days surfaces under **Urgent → contracts**. |
 | `FixtureUrgencyWindow` | 48h | A still-`scheduled` fixture inside the next 48 hours surfaces under **Urgent → match**. |
-| `BoardCriticalTotal` | 25 | Latest weekly `total_score` at or below 25 surfaces under **Urgent → board**. Mirrors `board.SackThresholdTotal`. |
+| `BoardCriticalTotal` | 25 | Latest board `total_score` at or below 25 surfaces under **Urgent → board**. Mirrors `board.SackThresholdTotal`. |
 | `BoardDropAttention` | −15 | Week-over-week `total_score` drop of 15+ points surfaces under **Important → board**. |
 | `MoraleUnhappyThreshold` | 0.35 | Player morale at or below 0.35 surfaces under **Important → morale**. Mirrors `player.UnhappyMoraleThreshold`. |
 | `MarketNewest` | 5 | Newest listing / withdrawn / completed-transfer world events surfaced under **Interesting → market**. |
@@ -43,7 +43,7 @@ client can merge `dashboard_update` pushes with GET results without refetching:
   Removals are not pushed — the client reconciles on the next GET, which stays
   authoritative. A skipped push only delays an update.
 - **Push cadence:** the world-tick worker calls `PushWorldDelta` once per tick
-  (after daily/weekly/monthly passes), and the transfer bid-event subscriber
+  (after the daily/weekly/monthly passes), and the transfer bid-event subscriber
   calls `PushCategory` for the selling club's manager on `BID_PLACED`,
   `BID_COUNTERED`, `BID_ACCEPTED`, `BID_REJECTED`.
 - **No migration:** every source table already exists; the aggregator reads

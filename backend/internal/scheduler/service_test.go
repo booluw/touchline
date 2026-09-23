@@ -15,11 +15,11 @@ func TestGranularityFromKey(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		{"tick.hourly_cadence", "hourly", true},
-		{"tick.daily_cadence", "daily", true},
-		{"tick.weekly_cadence", "weekly", true},
-		{"tick.monthly_cadence", "monthly", true},
-		{"tick.seasonal_cadence", "seasonal", true},
+		{"tick.daily_cadence", "daily", true}, // the only world-clock granularity (IM02)
+		{"tick.hourly_cadence", "", false},    // removed granularities are inert
+		{"tick.weekly_cadence", "", false},
+		{"tick.monthly_cadence", "", false},
+		{"tick.seasonal_cadence", "", false},
 		{"tick.match_cadence", "", false}, // live match ticks belong to the match engine
 		{"tick.daily", "", false},
 		{"daily_cadence", "", false},
@@ -103,17 +103,16 @@ func TestReconcileRegistersUpdatesAndRemoves(t *testing.T) {
 	svc := newServiceWith(nil, nil, fake)
 
 	desired := map[ref]string{
-		{worldID: worldA, granularity: "daily"}:  "0 0 * * *",
-		{worldID: worldA, granularity: "weekly"}: "0 0 * * 0",
-		{worldID: worldB, granularity: "hourly"}: "0 * * * *",
+		{worldID: worldA, granularity: "daily"}: "0 0 * * *",
+		{worldID: worldB, granularity: "daily"}: "0 */8 * * *",
 	}
 	if err := svc.reconcile(desired); err != nil {
 		t.Fatalf("reconcile add: %v", err)
 	}
-	if got, want := len(fake.specs()), 3; got != want {
+	if got, want := len(fake.specs()), 2; got != want {
 		t.Fatalf("registered %d entries, want %d", got, want)
 	}
-	if len(svc.entries) != 3 || len(svc.specs) != 3 {
+	if len(svc.entries) != 2 || len(svc.specs) != 2 {
 		t.Fatalf("service registry not populated after reconcile: entries=%d specs=%d", len(svc.entries), len(svc.specs))
 	}
 
@@ -121,20 +120,19 @@ func TestReconcileRegistersUpdatesAndRemoves(t *testing.T) {
 	if err := svc.reconcile(desired); err != nil {
 		t.Fatalf("reconcile no-op: %v", err)
 	}
-	if got, want := len(fake.specs()), 3; got != want {
+	if got, want := len(fake.specs()), 2; got != want {
 		t.Fatalf("idempotent reconcile re-registered entries: got %d want %d", got, want)
 	}
 
 	// A changed spec replaces the entry.
 	desired = map[ref]string{
-		{worldID: worldA, granularity: "daily"}:  "30 0 * * *",
-		{worldID: worldA, granularity: "weekly"}: "0 0 * * 0",
-		{worldID: worldB, granularity: "hourly"}: "0 * * * *",
+		{worldID: worldA, granularity: "daily"}: "30 0 * * *",
+		{worldID: worldB, granularity: "daily"}: "0 */8 * * *",
 	}
 	if err := svc.reconcile(desired); err != nil {
 		t.Fatalf("reconcile update: %v", err)
 	}
-	if got := len(fake.specs()); got != 3 {
+	if got := len(fake.specs()); got != 2 {
 		t.Fatalf("spec update leaked entries: got %d entries %v", got, fake.specs())
 	}
 	if v, ok := svc.specs[ref{worldID: worldA, granularity: "daily"}]; !ok || v != "30 0 * * *" {
@@ -143,16 +141,15 @@ func TestReconcileRegistersUpdatesAndRemoves(t *testing.T) {
 
 	// A removed cadence unregisters its entry.
 	desired = map[ref]string{
-		{worldID: worldA, granularity: "weekly"}: "0 0 * * 0",
-		{worldID: worldB, granularity: "hourly"}: "0 * * * *",
+		{worldID: worldB, granularity: "daily"}: "0 */8 * * *",
 	}
 	if err := svc.reconcile(desired); err != nil {
 		t.Fatalf("reconcile remove: %v", err)
 	}
-	if got, want := len(fake.specs()), 2; got != want {
+	if got, want := len(fake.specs()), 1; got != want {
 		t.Fatalf("expected %d entries after removal, got %d (%v)", want, got, fake.specs())
 	}
-	if len(svc.entries) != 2 || len(svc.specs) != 2 {
+	if len(svc.entries) != 1 || len(svc.specs) != 1 {
 		t.Fatalf("service registry not pruned after reconcile: entries=%d specs=%d", len(svc.entries), len(svc.specs))
 	}
 }

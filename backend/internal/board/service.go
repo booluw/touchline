@@ -37,10 +37,11 @@ var (
 	ErrNegotiationRejected      = errors.New("board rejected the proposal")
 )
 
-// Service is the board engine. WeeklyReview runs on the scheduler's weekly
-// cadence; BoardView and NegotiateMandate serve the human manager. All writes
-// ride the transactional outbox via eventbus.WriteTx inside a caller-scoped or
-// local transaction; bus may be nil in tests (falls back to RecordTx).
+// Service is the board engine. Review runs on the monthly day step of the
+// world clock (IM02; once per calendar.days_per_month days); BoardView and
+// NegotiateMandate serve the human manager. All writes ride the transactional
+// outbox via eventbus.WriteTx inside a caller-scoped or local transaction; bus
+// may be nil in tests (falls back to RecordTx).
 type Service struct {
 	pool     *pgxpool.Pool
 	bus      eventbus.Publisher
@@ -54,30 +55,32 @@ func NewService(pool *pgxpool.Pool, bus eventbus.Publisher, managers *manager.Se
 	return &Service{pool: pool, bus: bus, store: NewStore(pool), managers: managers}
 }
 
-// WeeklyReview scores every active manager with a club in the world and applies
-// the sacking guard to human-managed clubs. The per-manager transaction is
-// idempotent on (manager_id, world_tick) so a mid-week retry never double-writes.
-func (s *Service) WeeklyReview(ctx context.Context, worldID uuid.UUID, tick int64) (reviewed, sacked int, err error) {
+// Review scores every active manager with a club in the world and applies the
+// sacking guard to human-managed clubs. It is the monthly board review (IM02)
+// but its formulas are unchanged — it grades by season progress, not elapsed
+// days. The per-manager transaction is idempotent on (manager_id, world_tick)
+// so a mid-month retry never double-writes.
+func (s *Service) Review(ctx context.Context, worldID uuid.UUID, tick int64) (reviewed, sacked int, err error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.id
 		FROM manager.managers m
 		WHERE m.world_id = $1 AND m.status = 'active' AND m.current_club_id IS NOT NULL
 		ORDER BY m.id`, worldID)
 	if err != nil {
-		return 0, 0, fmt.Errorf("weekly managers: %w", err)
+		return 0, 0, fmt.Errorf("review managers: %w", err)
 	}
 	var managerIDs []uuid.UUID
 	for rows.Next() {
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return 0, 0, fmt.Errorf("scan weekly manager: %w", err)
+			return 0, 0, fmt.Errorf("scan review manager: %w", err)
 		}
 		managerIDs = append(managerIDs, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("weekly managers: %w", err)
+		return 0, 0, fmt.Errorf("review managers: %w", err)
 	}
 
 	for _, mid := range managerIDs {
@@ -165,8 +168,8 @@ func (s *Service) reviewManager(ctx context.Context, worldID, managerID uuid.UUI
 
 // BoardView returns the manager-facing board read model for their club.
 // It lazily ensures the current season's mandate set and refreshes the current
-// tick's snapshot (idempotent) so a manager mid-week always sees a fresh
-// confidence number without waiting for the next weekly cadence.
+// tick's snapshot (idempotent) so a manager mid-month always sees a fresh
+// confidence number without waiting for the next board review.
 func (s *Service) BoardView(ctx context.Context, worldID, managerID uuid.UUID) (*View, error) {
 	tick, err := s.store.currentTick(ctx, s.pool, worldID)
 	if err != nil {

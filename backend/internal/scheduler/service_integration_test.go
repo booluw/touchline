@@ -319,10 +319,10 @@ func TestFireTickSkipsNonPlayableWorlds(t *testing.T) {
 	}
 }
 
-// TestFireTickAdvancesCalendarOnlyOnDaily is the OPD-24 granularity-neutrality
-// gate: with the full default granularity set enabled, only the daily emission
-// moves current_day (and therefore the fixture calendar). hourly/weekly/monthly/
-// seasonal raise current_tick for ordering but never change matches-due.
+// TestFireTickAdvancesCalendarOnlyOnDaily is the OPD-24/IM02 calendar gate:
+// only the daily emission moves current_day (and therefore the fixture
+// calendar). The legacy granularities raise current_tick for ordering but never
+// change matches-due.
 func TestFireTickAdvancesCalendarOnlyOnDaily(t *testing.T) {
 	ctx := context.Background()
 	pool := testdb.New(t)

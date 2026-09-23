@@ -2472,10 +2472,14 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorldID"
       description: |
-        Sets one world_config key, e.g. a tick cadence (`tick.hourly_cadence`,
-        `tick.daily_cadence`, `tick.weekly_cadence`, `tick.monthly_cadence`,
-        `tick.seasonal_cadence`; `tick.match_cadence` is seeded but ignored by
-        the world clock — see OPD-17(2)). Re-read every `SCHEDULER_POLL_INTERVAL`,
+        Sets one world_config key. The clock-side keys since IM02:
+        `tick.daily_cadence` (the only granularity that advances the day counter;
+        default `0 0 * * *`) and `tick.match_cadence` (seeded, paces live
+        matches, ignored by the world clock — OPD-17(2)). The week/month
+        boundaries come from `calendar.days_per_week` / `calendar.days_per_month`
+        (JSON numbers, default 7 / 30). Legacy `tick.hourly_cadence`,
+        `tick.weekly_cadence`, `tick.monthly_cadence`, `tick.seasonal_cadence`
+        keys are retired. Re-read every `SCHEDULER_POLL_INTERVAL`,
         so a change takes effect without a redeploy.
       requestBody:
         required: true

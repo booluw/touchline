@@ -193,8 +193,9 @@ world-wide via `POST /api/admin/worlds/:id/config`, or set a per-league
 override in the league's `competition_rules.scheduling_rules` JSON. The value
 is read at rollover, so set it before the final matchday lands.
 
-**What still runs during the off-season?** The daily clock, wages
-(monthly), academy maintenance, and the transfer market — there is no season
+**What still runs during the off-season?** The daily clock, wages (each
+`calendar.days_per_month` day boundary), academy maintenance, and the transfer
+market — there is no season
 gating on them, so managers can prepare (and trade) during the break.
 
 **How do the standings decide the champion?** Points, then goal difference,

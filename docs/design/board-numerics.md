@@ -15,8 +15,9 @@ pounds in `finance.*` columns.
 
 ## 1. Why the engine reviews a club
 
-On every **weekly** world tick (`WorldTick{weekly}` handler in
-`internal/app`), `board.Service.WeeklyReview` scores every club that has an
+On every **month-boundary** world tick (`handleWorldTick` in `internal/app`,
+day `current_day % calendar.days_per_month == 0` — default day 30, IM02),
+`board.Service.Review` scores every club that has an
 active manager in the world:
 
 1. **Scores** the manager against the club's open mandates (see §3).
@@ -82,7 +83,7 @@ Mandate states: `pending → agreed` (negotiation) `→ met | broken`; broken or
 met closes the row (`resolved_at`), and only open (`pending`/`agreed`) rows are
 scored.
 
-### Grading rules (per open mandate, every weekly review)
+### Grading rules (per open mandate, every month-boundary review)
 
 Progress = played / total fixtures (clamped 0–1); season-complete = all
 league fixtures played.
@@ -110,11 +111,11 @@ Each lens is a 0–100 score:
 | Factor | Formula | Notes |
 | --- | --- | --- |
 | `performance_score` | `clamp(50 + 8·(expectedFinish − position), 0, 100)` | neutral 50 with no league standings |
-| `expectations_score` | `clamp(50 + 10·met − 15·broken, 0, 100)` | resolved mandates this/previous reviews this season |
+| `expectations_score` | `clamp(50 + 10·met − 15·broken, 0, 100)` | resolved mandates this/previous reviews this season (month boundaries) |
 | `financial_score` | `50 + round(40·(1 − wageRatio)) ± 10` profit signal | wageRatio = committedAnnual/budget capped at 1; `+10` operating profit / `−10` loss; `60` (or `50` with committed wages) when no budget |
 | `board_relationship_score` | `clamp(50 + (patience − 50)/5 + 25·(met − broken)/resolved, 0, 100)` | patience softens; kept-mandate ratio pressures |
 | `club_dna_alignment_score` | `clamp(50 + 15·met_strategic + 15·met_financial − 25·broken_strategic − 25·broken_financial, 0, 100)` | deeper DNA adherence deferred to S10-03 |
-| `supporter_sentiment_score` | stored `club.supporter_groups.sentiment` | EWMA-updated each review: `sentiment += 0.20·(performance − sentiment)`, clamped [15, 95] |
+| `supporter_sentiment_score` | stored `club.supporter_groups.sentiment` | EWMA-updated each month-boundary review: `sentiment += 0.20·(performance − sentiment)`, clamped [15, 95] |
 | `alternatives_score` | `clamp(50 + 5·worldReputation, 10, 90)` | manager career-log reputation; replacement-pressure proxy |
 
 **Weighted total** = Σ `round(wᵢ × factorScoreᵢ)` with the persona's seven
@@ -142,7 +143,7 @@ same rounded contribution, the factor deltas **sum exactly to the total**
 
 ## 6. Events
 
-Actor types: `system` (weekly review) / `manager` (negotiation).
+Actor types: `system` (board review) / `manager` (negotiation).
 
 | Event | Actor | Notes |
 | --- | --- | --- |
@@ -182,5 +183,5 @@ manager_id, season, category) WHERE status IN ('pending','agreed')`, so a
   social sentiment lands with S06-04).
 - **Alternatives** uses world reputation only; candidate pool modelling (past
   success, wage expectations) lands with the S07 hiring flow (OPD-09).
-- The confidence number is recalculated on the weekly review only; a live
-  pipe to the frontend follows the S07-01 realtime replay work.
+- The confidence number is recalculated on the month-boundary review only; a
+  live pipe to the frontend follows the S07-01 realtime replay work.

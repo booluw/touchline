@@ -22,10 +22,12 @@ import (
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
-// WorldClockGranularities are the cadences driven by the world clock (technical
-// plan §5). Match ticks are owned by the per-live-match goroutines of the match
-// engine, not by this scheduler, so they are absent here.
-var WorldClockGranularities = []string{"hourly", "daily", "weekly", "monthly", "seasonal"}
+// WorldClockGranularities are the cadences driven by the world clock (IM02
+// single-daily: the only WORLD_TICK granularity the scheduler registers is
+// daily; weeks/months/seasons derive from the day counter in the worker).
+// Match ticks are owned by the per-live-match goroutines of the match engine,
+// not by this scheduler, so they are absent here.
+var WorldClockGranularities = []string{"daily"}
 
 // Publishable is the event sink used to fan ticks out to subscribers. May be
 // nil: the authoritative log (world.events) is always written regardless. Only
@@ -234,11 +236,12 @@ func (s *Service) fireScheduledTick(worldID uuid.UUID, granularity string) {
 // longer playable (paused/archived) are a no-op, so a stale cron entry can
 // never tick a world changed underneath the scheduler.
 //
-// Calendar semantics (OPD-24): the monotonic current_tick advances on every
-// granularity for event ordering/audit, but only WORLD_TICK{daily} advances
-// world.worlds.current_day — the canonical in-game day counter the matchday
-// runner derives fixture due-dates from. hourly/weekly/monthly/seasonal never
-// change the calendar.
+// Calendar semantics (OPD-24, IM02): the monotonic current_tick advances on
+// every emission for event ordering/audit; the world calendar
+// (world.worlds.current_day) is advanced by exactly one per WORLD_TICK{daily}
+// — the only registered granularity — so current_tick and current_day move in
+// lockstep. Periodic work (weekly/monthly/seasonal) is day-derived by the
+// worker from current_day, never from cron time.
 func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
