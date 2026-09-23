@@ -15,6 +15,13 @@ starting a season.
 Terminology note: **"seed the world"** and **"start a season"** are two separate
 steps. Phases 1–5 encode a two-step launch model:
 
+**Related how-tos (same directory):** calendars, tick granularities, and the
+season/rollover lifecycle are [cadences-and-time.md](cadences-and-time.md) +
+[seasons.md](seasons.md); the (always-open) transfer market is
+[transfer-market.md](transfer-market.md); offers, accepting, and declining are
+[job-offers-and-decisions.md](job-offers-and-decisions.md); every term and
+derivation is indexed in [glossary.md](glossary.md).
+
 1. **Declare** the world, its countries, and its leagues — pure metadata, no
    clubs yet.
 2. **Seed** the whole world in one admin call — every league is filled up to its
@@ -102,11 +109,11 @@ cd backend
 migrate -database "$DATABASE_URL" -path migrations up
 ```
 
-Confirm you are on the latest migration (0037 as of the launch restructure):
+Confirm you are on the latest migration (0048 as of the launch restructure):
 
 ```bash
 psql "$DATABASE_URL" -tAc "SELECT version, dirty FROM schema_migrations ORDER BY version DESC LIMIT 1;"
-# 37 | f
+# 48 | f
 ```
 
 Then seed the curated reference data. **This is mandatory** — seeding generates
@@ -398,8 +405,13 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/c
 ```
 
 The weekly tick drives S05-01 training (plan archetypes take effect from the next
-weekly tick), the monthly tick drives S05-02 wage posting (`4 × weekly_wage` per
-active contract, idempotent ledger write + `WAGE_POSTED` event).
+weekly tick) and the player weekly pass (morale/playing-time/transfer-request
+assessment), rivalry reconciliation, and the board's weekly confidence review.
+The monthly tick drives S05-02 wage posting (`4 × weekly_wage` per active
+contract, idempotent ledger write + `WAGE_POSTED` event) **and** academy
+facility maintenance (`annual_cost / 12`). See
+[cadences-and-time.md](cadences-and-time.md) for the full per-tick map and how
+the granularities relate.
 
 Watch it happen in the worker logs (`daily tick: kicked X matchday(s), Y
 fixture(s)`), or poll the match feed (manager-scoped session):
@@ -455,29 +467,24 @@ Notes:
 
 ---
 
-## 9. Open the transfer window
+## 9. The transfer market (always open)
 
-**Not yet implemented** — the transfer market is the S06 slice.
+**There is no transfer window.** As soon as the world is playable, the market
+runs continuously: club-owning managers can list players
+(`POST /api/transfers/listings`), bid on others (`POST /api/transfers/bids`),
+and answer inbound bids (`POST /api/transfers/bids/:id/respond`). AI clubs
+participate deterministically via the policy engine, and the daily tick
+sweeps stale bids (`BidTTLWorldDays = 3`) and recomputes valuations. Full
+model, wire format, and examples: [transfer-market.md](transfer-market.md).
 
-What exists *today* is only the financial edge: wage commitments, the ledger,
-and contract reads (S05-02) all derive from server-side posting, and
-`finance.RegisterContract` (contract + wage-commitment rows + `CONTRACT_COMMITTED`
-event in one transaction) is implemented as service code. There is **no** HTTP
-surface for it and no listable/biddable market, so there is nothing to run here.
-
-The `internal/transfer` package currently holds the planned domain shapes only
-(an interface stub — no implementation, no routes):
-
-- `TransferListing` (`status`: active/accepted/rejected/expired), `Bid`
-  (pending/accepted/rejected/countered/withdrawn), `Negotiation`
-  (active/completed/collapsed), `Clause` (sell_on/buy_back/release), `Loan`.
-- Planned service seam: `GetActiveListings`, `PlaceBid`, `RespondToBid`.
-
-When S06 lands, this Step 9 will begin with an admin-action or season-gated
-window toggle (to be specified), after which `GET /api/.../listings` and the bid
-flow become callable — and transfer fee installments will start feeding the
-finance summary's `future_installments` / `committed_spending` (currently 0;
-see `docs/design/finance-numerics.md`).
+```bash
+curl -c /tmp/jar -b /tmp/jar localhost:8080/api/transfers/listings                       # browse
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/transfers/bids \
+  -H 'Content-Type: application/json' \
+  -d '{"listing_id":"<id>","fee":7000000,"terms":{"weekly_wage":15000,"contract_length_months":36}}'
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/transfers/bids/<bid-id>/respond \
+  -H 'Content-Type: application/json' -d '{"action":"accept"}'
+```
 
 ---
 
