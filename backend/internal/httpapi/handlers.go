@@ -94,6 +94,7 @@ func (s *server) handleLogin(c *gin.Context) {
 		"created_at":   res.CreatedAt,
 		"is_admin":     res.IsAdmin,
 		"id":           res.ID,
+		"club":         res.Club,
 	})
 }
 
@@ -113,7 +114,7 @@ func (s *server) handleRefresh(c *gin.Context) {
 	}
 
 	s.setAuthCookies(c, res.TokenPair)
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "club": res.Club})
 }
 
 type registerRequest struct {

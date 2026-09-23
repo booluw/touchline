@@ -177,6 +177,10 @@ paths:
                       created_at: { type: string, format: date-time }
                       is_admin: { type: boolean, example: false }
                       id: { type: string, format: uuid }
+                      club:
+                        description: "The manager's current club, or null when the account is unemployed or an admin."
+                        allOf: [{ $ref: "#/components/schemas/ClubRef" }]
+                        nullable: true
                   - title: worldPicker
                     type: object
                     required: [status, worlds]
@@ -314,8 +318,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Status"
-              example: { status: ok }
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, example: ok }
+                  club:
+                    description: "The manager's current club, or null when the account is unemployed or an admin."
+                    allOf: [{ $ref: "#/components/schemas/ClubRef" }]
+                    nullable: true
+              example: { status: ok, club: null }
         "401":
           description: Missing/invalid refresh token.
           content:

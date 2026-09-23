@@ -49,6 +49,10 @@ func TestLogin_AdminSession(t *testing.T) {
 	if !res.IsAdmin {
 		t.Error("admin login must report is_admin=true")
 	}
+	// An admin runs the global console; there is no manager club to surface.
+	if res.Club != nil {
+		t.Errorf("admin login must carry no club, got %+v", res.Club)
+	}
 
 	var n int
 	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM auth.sessions`).Scan(&n); err != nil {
@@ -122,6 +126,10 @@ func TestLogin_ManagerSingleWorld(t *testing.T) {
 	if res.Worlds != nil {
 		t.Errorf("single-world login returned a picker: %+v", res.Worlds)
 	}
+	// A jobless manager (no current club) surfaces a nil club on login.
+	if res.Club != nil {
+		t.Errorf("unemployed login must carry no club, got %+v", res.Club)
+	}
 }
 
 func TestLogin_ManagerJobWins(t *testing.T) {
@@ -136,10 +144,14 @@ func TestLogin_ManagerJobWins(t *testing.T) {
 	})
 
 	var managerID, worldID uuid.UUID
+	var clubID *uuid.UUID
 	if err := pool.QueryRow(context.Background(),
-		`SELECT id, world_id FROM manager.managers WHERE user_id = (SELECT id FROM auth.users WHERE email = 'job@example.com') AND status = 'active'`,
-	).Scan(&managerID, &worldID); err != nil {
+		`SELECT id, world_id, current_club_id FROM manager.managers WHERE user_id = (SELECT id FROM auth.users WHERE email = 'job@example.com') AND status = 'active'`,
+	).Scan(&managerID, &worldID, &clubID); err != nil {
 		t.Fatalf("read employed manager: %v", err)
+	}
+	if clubID == nil {
+		t.Fatal("test fixture must employ the manager (current_club_id set)")
 	}
 
 	// OPD-15(4)(a): the world where the account has a job always wins.
@@ -149,6 +161,25 @@ func TestLogin_ManagerJobWins(t *testing.T) {
 	}
 	if res.Identity == nil || res.Identity.ManagerID != managerID || res.Identity.WorldID != worldID {
 		t.Errorf("job world must win, got %+v (want manager %s in %s)", res.Identity, managerID, worldID)
+	}
+	// The login response carries the manager's current club.
+	if res.Club == nil {
+		t.Fatal("employed login must carry the current club")
+	}
+	if res.Club.ID != *clubID {
+		t.Errorf("login club.ID = %v, want %v", res.Club.ID, *clubID)
+	}
+	if res.Club.Name == "" {
+		t.Error("login club missing name")
+	}
+
+	// The rotation path must re-derive the same club for the same manager.
+	refreshed, err := svc.Refresh(context.Background(), res.TokenPair.RefreshToken, nil, "")
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if refreshed.Club == nil || refreshed.Club.ID != *clubID {
+		t.Errorf("refresh club = %+v, want id %v", refreshed.Club, *clubID)
 	}
 }
 
@@ -357,6 +388,28 @@ func TestRefresh_ManagerSession(t *testing.T) {
 	if refreshed.Identity.ManagerID != first.Identity.ManagerID ||
 		refreshed.Identity.WorldID != first.Identity.WorldID {
 		t.Errorf("refresh changed identity: %+v -> %+v", first.Identity, refreshed.Identity)
+	}
+	// Unemployed at first login: no club on either response.
+	if first.Club != nil {
+		t.Errorf("unemployed login club = %+v, want nil", first.Club)
+	}
+	if refreshed.Club != nil {
+		t.Errorf("unemployed refresh club = %+v, want nil", refreshed.Club)
+	}
+
+	// Accepting a job mid-session must surface the new club on the next refresh.
+	clubID := testdb.CreateClub(t, pool, w)
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE manager.managers SET status = 'active', current_club_id = $1 WHERE id = $2`,
+		clubID, first.Identity.ManagerID); err != nil {
+		t.Fatalf("employ manager: %v", err)
+	}
+	mid, err := svc.Refresh(context.Background(), refreshed.TokenPair.RefreshToken, nil, "")
+	if err != nil {
+		t.Fatalf("refresh after employment: %v", err)
+	}
+	if mid.Club == nil || mid.Club.ID != clubID {
+		t.Errorf("refresh after employment club = %+v, want id %v", mid.Club, clubID)
 	}
 }
 

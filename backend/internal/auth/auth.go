@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	pkgauth "github.com/touchline/backend/pkg/auth"
+	"github.com/touchline/backend/pkg/apiref"
 )
 
 // Sentinel errors. Handlers map these to HTTP status codes; all other errors
@@ -64,6 +65,7 @@ type LoginResult struct {
 	IsAdmin     bool
 	CreatedAt   time.Time
 	ID          uuid.UUID
+	Club        *apiref.ClubRef // the manager's current club, or nil when unemployed/admin
 }
 
 // Service resolves credentials and manages rotating sessions.
@@ -209,7 +211,38 @@ func (s *Service) mintManagerSession(ctx context.Context, userID uuid.UUID, mana
 		WorldID:   worldID,
 		UserID:    userID,
 	}
-	return s.completeLogin(ctx, userID, identity, name, createdAt, false, params.IP, params.DeviceFingerprint)
+	res, err := s.completeLogin(ctx, userID, identity, name, createdAt, false, params.IP, params.DeviceFingerprint)
+	if err != nil {
+		return nil, err
+	}
+	res.Club, err = s.managerClub(ctx, managerID)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// managerClub resolves the club an employed manager currently manages, or nil
+// when they hold no club (unemployed, sacked, or resigned). The FK on
+// current_club_id guarantees the club row exists when the id is set.
+func (s *Service) managerClub(ctx context.Context, managerID uuid.UUID) (*apiref.ClubRef, error) {
+	var (
+		clubID    *uuid.UUID
+		name      string
+		shortName string
+	)
+	err := s.pool.QueryRow(ctx, `
+		SELECT m.current_club_id, c.name, c.short_name
+		FROM manager.managers m
+		LEFT JOIN club.clubs c ON c.id = m.current_club_id
+		WHERE m.id = $1`, managerID).Scan(&clubID, &name, &shortName)
+	if err != nil {
+		return nil, fmt.Errorf("load manager club: %w", err)
+	}
+	if clubID == nil {
+		return nil, nil
+	}
+	return &apiref.ClubRef{ID: *clubID, Name: name, Short: shortName}, nil
 }
 
 // completeLogin mints the token pair, records the hashed refresh session in one
@@ -314,6 +347,13 @@ func (s *Service) Refresh(ctx context.Context, rawRefresh string, ip *netip.Addr
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}
 
+	var club *apiref.ClubRef
+	if managerID != uuid.Nil {
+		if club, err = s.managerClub(ctx, managerID); err != nil {
+			return nil, err
+		}
+	}
+
 	if _, err := tx.Exec(ctx, `UPDATE auth.sessions SET revoked_at = now() WHERE id = $1`, sessionID); err != nil {
 		return nil, fmt.Errorf("revoke session: %w", err)
 	}
@@ -324,7 +364,7 @@ func (s *Service) Refresh(ctx context.Context, rawRefresh string, ip *netip.Addr
 		return nil, fmt.Errorf("commit refresh: %w", err)
 	}
 
-	return &LoginResult{TokenPair: pair, Identity: identity, DisplayName: ""}, nil
+	return &LoginResult{TokenPair: pair, Identity: identity, Club: club}, nil
 }
 
 // insertSession records a rotating refresh session. The plaintext token is
