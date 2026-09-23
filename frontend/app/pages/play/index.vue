@@ -6,6 +6,7 @@ import { useManagerDashboard } from '~/composables/manager/dashboard';
 
 const { getOffers } = useManagerOffer()
 const { getDashboardData } = useManagerDashboard()
+// const { getFinance } = useClub()
 
 const loading = reactive<Record<string, "loading" | "loaded" | "error">>({})
 const offers = ref<Offer[]>([])
@@ -30,6 +31,16 @@ async function getManagerDashboardData() {
     loading.dashboard = "loaded"
   } catch {
     loading.dashboard = "error"
+  }
+}
+
+async function getClubFinance() {
+  try {
+    loading.finance = "loading"
+
+    loading.finance = "loaded"
+  } catch {
+    loading.finance = "error"
   }
 }
 
