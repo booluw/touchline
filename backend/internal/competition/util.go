@@ -63,7 +63,7 @@ func scanLeagues(rows pgx.Rows) ([]League, error) {
 		var l League
 		var ptID, rtID *uuid.UUID
 		var ptName, rtName, countryName, countryCode string
-		if err := rows.Scan(&l.ID, &l.WorldID, &l.Country.ID, &l.Name, &l.Tier, &l.TeamCount, &l.Status,
+		if err := rows.Scan(&l.ID, &l.WorldID, &l.Country.ID, &l.Name, &l.Tier, &l.TeamCount, &l.Reputation, &l.Status,
 			&l.Promotions, &l.Relegations, &ptID, &rtID, &ptName, &rtName, &countryName, &countryCode); err != nil {
 			return nil, fmt.Errorf("scan league: %w", err)
 		}

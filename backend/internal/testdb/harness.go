@@ -77,12 +77,13 @@ func New(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE TABLE river.river_job, world.events, world.worlds, world.countries,
+		`TRUNCATE TABLE river.river_job, world.events, world.worlds, world.countries, world.regions,
 		 manager.managers, manager.manager_history, manager.job_security_snapshots,
 		 manager.manager_reputation_events, manager.job_offers, club.clubs, club.club_dna,
 		 club.form_state,
 		 competition.competitions, competition.competition_rules, competition.club_competitions,
 		 competition.seasons, competition.standings,
+		 competition.cup_qualification, competition.manager_cup_choices,
 		 match.fixtures, match.matches, match.match_events, match.match_inputs,
 		 auth.sessions, auth.users,
 		 person.people, player.players, player.player_attributes, player.player_hidden_traits,

@@ -72,6 +72,10 @@ var (
 	ErrClubNotFound             = errors.New("club not found")
 	ErrClubWorldMismatch        = errors.New("club does not belong to this world")
 	ErrSeasonNotFound           = errors.New("season not found")
+	ErrRegionNotFound           = errors.New("region not found")
+	ErrRegionNameCollision      = errors.New("a region with this name already exists in this world")
+	ErrRegionWorldMismatch      = errors.New("region does not belong to this country's world")
+	ErrReputationOutOfRange     = errors.New("reputation must be between 0 and 100")
 	ErrCupLimit                 = errors.New("a club may hold at most 3 cup memberships")
 	ErrCupCampaignExists        = errors.New("this cup already has a live campaign")
 	ErrStagingInvalid           = errors.New("cup staging does not form a valid knockout")
@@ -80,11 +84,22 @@ var (
 
 var errInternalRollover = errors.New("competition: internal rollover error")
 
-// Country is a world-scoped country that owns its leagues.
+// Country is a world-scoped country that owns its leagues. RegionID is nil
+// when the country is not assigned to a world region (regions are the IM06
+// grouping later milestone cups scope to).
 type Country struct {
+	ID       uuid.UUID  `json:"id"`
+	WorldID  uuid.UUID  `json:"world_id"`
+	Code     string     `json:"code"`
+	Name     string     `json:"name"`
+	RegionID *uuid.UUID `json:"region_id,omitempty"`
+}
+
+// Region is a world-scoped administrative grouping of countries. A region
+// belongs to exactly one world; its name is unique within that world.
+type Region struct {
 	ID      uuid.UUID `json:"id"`
 	WorldID uuid.UUID `json:"world_id"`
-	Code    string    `json:"code"`
 	Name    string    `json:"name"`
 }
 
@@ -109,6 +124,7 @@ type League struct {
 	Name        string            `json:"name"`
 	Tier        int               `json:"tier"`
 	TeamCount   int               `json:"team_count"`
+	Reputation  int               `json:"reputation"`
 	Status      string            `json:"status"`
 	Promotions  int               `json:"promotions"`
 	Relegations int               `json:"relegations"`
@@ -257,9 +273,9 @@ func (s *Service) CreateCountry(ctx context.Context, worldID uuid.UUID, code, na
 	var c Country
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO world.countries (world_id, code, name)
-		VALUES ($1, $2, $3) RETURNING id, world_id, code, name`,
+		VALUES ($1, $2, $3) RETURNING id, world_id, code, name, region_id`,
 		worldID, code, name,
-	).Scan(&c.ID, &c.WorldID, &c.Code, &c.Name)
+	).Scan(&c.ID, &c.WorldID, &c.Code, &c.Name, &c.RegionID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, errors.New("a country with this code already exists in this world")
@@ -272,7 +288,7 @@ func (s *Service) CreateCountry(ctx context.Context, worldID uuid.UUID, code, na
 // ListCountries returns a world's countries in name order.
 func (s *Service) ListCountries(ctx context.Context, worldID uuid.UUID) ([]Country, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, world_id, code, name FROM world.countries
+		SELECT id, world_id, code, name, region_id FROM world.countries
 		WHERE world_id = $1 ORDER BY name`, worldID)
 	if err != nil {
 		return nil, fmt.Errorf("list countries: %w", err)
@@ -281,7 +297,7 @@ func (s *Service) ListCountries(ctx context.Context, worldID uuid.UUID) ([]Count
 	out := []Country{}
 	for rows.Next() {
 		var c Country
-		if err := rows.Scan(&c.ID, &c.WorldID, &c.Code, &c.Name); err != nil {
+		if err := rows.Scan(&c.ID, &c.WorldID, &c.Code, &c.Name, &c.RegionID); err != nil {
 			return nil, fmt.Errorf("scan country: %w", err)
 		}
 		out = append(out, c)
@@ -395,7 +411,7 @@ func (s *Service) CreateLeague(ctx context.Context, p LeagueParams) (*League, er
 // ListLeagues returns the world's leagues ordered by country, then tier.
 func (s *Service) ListLeagues(ctx context.Context, worldID uuid.UUID) ([]League, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
+		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.reputation, c.status,
 		       r.promotions, r.relegations,
 		       r.promotes_to_competition_id, r.relegates_to_competition_id,
 		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),
@@ -416,7 +432,7 @@ func (s *Service) ListLeagues(ctx context.Context, worldID uuid.UUID) ([]League,
 // ListCountryLeagues returns a country's leagues ordered by tier, then name.
 func (s *Service) ListCountryLeagues(ctx context.Context, countryID uuid.UUID) ([]League, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
+		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.reputation, c.status,
 		       r.promotions, r.relegations,
 		       r.promotes_to_competition_id, r.relegates_to_competition_id,
 		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),
@@ -480,7 +496,7 @@ func (s *Service) getLeague(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, id uuid.UUID) (*League, error) {
 	row := q.QueryRow(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
+		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.reputation, c.status,
 		       r.promotions, r.relegations,
 		       r.promotes_to_competition_id, r.relegates_to_competition_id,
 		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),
@@ -494,7 +510,7 @@ func (s *Service) getLeague(ctx context.Context, q interface {
 	var l League
 	var ptID, rtID *uuid.UUID
 	var ptName, rtName, countryName, countryCode string
-	err := row.Scan(&l.ID, &l.WorldID, &l.Country.ID, &l.Name, &l.Tier, &l.TeamCount, &l.Status,
+	err := row.Scan(&l.ID, &l.WorldID, &l.Country.ID, &l.Name, &l.Tier, &l.TeamCount, &l.Reputation, &l.Status,
 		&l.Promotions, &l.Relegations, &ptID, &rtID, &ptName, &rtName, &countryName, &countryCode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrCompetitionNotFound

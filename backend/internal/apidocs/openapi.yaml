@@ -3126,6 +3126,207 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/regions:
+    post:
+      tags: [admin]
+      summary: Declare a world region
+      operationId: createRegion
+      description: |
+        Declares a world-scoped administrative region (IM06). A region groups
+        a world's countries; its name is unique within the world. Metadata only
+        — no events or news are published, matching the declare-country
+        precedent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [world_id, name]
+              properties:
+                world_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+                name: { type: string, example: "Western Europe" }
+      responses:
+        "201":
+          description: The created region.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Region" }
+        "400":
+          description: Missing world_id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: World not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: A region with this name already exists in the world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Empty region name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [admin]
+      summary: List a world's regions
+      operationId: listRegions
+      parameters:
+        - name: world_id
+          in: query
+          required: true
+          description: World id.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+      responses:
+        "200":
+          description: The world's regions in name order.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  regions:
+                    type: array
+                    items: { $ref: "#/components/schemas/Region" }
+        "400":
+          description: Missing world_id query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/regions/{id}:
+    patch:
+      tags: [admin]
+      summary: Rename a world region
+      operationId: renameRegion
+      parameters:
+        - $ref: "#/components/parameters/RegionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: "Iberia" }
+      responses:
+        "200":
+          description: The renamed region.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Region" }
+        "404":
+          description: Region not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: A region with this name already exists in the world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Empty region name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [admin]
+      summary: Delete a world region
+      operationId: deleteRegion
+      description: |
+        Removes the region; its countries fall back to unassigned
+        (world.countries.region_id is nulled, countries are never deleted).
+      parameters:
+        - $ref: "#/components/parameters/RegionID"
+      responses:
+        "204":
+          description: Region deleted.
+        "404":
+          description: Region not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/countries/{id}/region:
+    patch:
+      tags: [admin]
+      summary: Assign a country to a region
+      operationId: setCountryRegion
+      description: |
+        Assigns a country to one of its world's regions, or clears the
+        assignment when region_id is null. The region must belong to the
+        country's world.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Country id.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                region_id: { type: string, format: uuid, nullable: true, example: "00000000-0000-4000-8000-00000000000c" }
+      responses:
+        "200":
+          description: The updated country with its region assignment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Country" }
+        "404":
+          description: Country or region not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Region belongs to a different world than the country.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/leagues/{id}/reputation:
+    patch:
+      tags: [admin]
+      summary: Set a league's reputation
+      operationId: setLeagueReputation
+      description: |
+        Sets the league's admin-managed reputation (0..100, IM06). The value
+        feeds the default continental-cup qualification band calculator; it is
+        metadata and does not affect the match engine.
+      parameters:
+        - $ref: "#/components/parameters/LeagueID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reputation]
+              properties:
+                reputation: { type: integer, minimum: 0, maximum: 100, example: 78 }
+      responses:
+        "200":
+          description: The updated league.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/League" }
+        "400":
+          description: Reputation out of the 0..100 range.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: League not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/admin/cups:
     post:
       tags: [admin]
@@ -3673,6 +3874,12 @@ components:
       required: true
       description: Job offer id.
       schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000009" }
+    RegionID:
+      name: id
+      in: path
+      required: true
+      description: World region id.
+      schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000c" }
     AdminCountryID:
       name: countryID
       in: path
@@ -3908,6 +4115,11 @@ components:
         world_id: { type: string, format: uuid }
         code: { type: string }
         name: { type: string }
+        region_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: World region the country is assigned to (IM06), null when unassigned.
     Club:
       type: object
       properties:
@@ -4633,11 +4845,24 @@ components:
         name: { type: string }
         tier: { type: integer }
         team_count: { type: integer }
+        reputation:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 63
+          description: Admin-managed league standing (IM06); drives default continental-cup qualification bands.
         status: { type: string }
         promotions: { type: integer }
         relegations: { type: integer }
         promotes_to: { $ref: "#/components/schemas/NestedLeague" }
         relegates_to: { $ref: "#/components/schemas/NestedLeague" }
+    Region:
+      type: object
+      description: A world-scoped administrative region grouping countries (IM06).
+      properties:
+        id: { type: string, format: uuid }
+        world_id: { type: string, format: uuid }
+        name: { type: string }
     SeedResult:
       type: object
       properties:

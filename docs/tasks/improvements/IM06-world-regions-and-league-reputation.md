@@ -1,12 +1,41 @@
 # IM06 — World regions, country-to-region assignment, and editable league reputation
 
-**Status:** Not started
+**Status:** Implemented
+**Owner:** opencode agent
 **Sprint:** Improvements (competition scheduling)
 **Source:** Product decision (manual session)
 **Depends on:** S04-01 (country/league admin seam, migration `0025`); IM05
 (scheduling seams); migration `0037` (cup membership hooks). Lays the schema
 + admin surface that IM07 (qualification engine) and IM08/IM09 (regional cup
 campaigns + resolution) build on.
+
+## Delivery evidence
+
+- Migration `0052_regions_and_cup_qualification.{up,down}.sql` — `world.regions`
+  (world-unique names), `world.countries.region_id` (FK `ON DELETE SET NULL` +
+  index), `competition.competitions.region_id` (+ index), and the dormant
+  `competition.cup_qualification` / `competition.manager_cup_choices` tables
+  (schema-only until IM07/IM09 consume them).
+- `internal/competition/regions.go` — `CreateRegion` / `ListRegions` /
+  `RenameRegion` / `DeleteRegion` / `SetCountryRegion` / `SetLeagueReputation`
+  with sentinels `ErrRegionNotFound`, `ErrRegionNameCollision`,
+  `ErrRegionWorldMismatch`, `ErrReputationOutOfRange` (reuses package
+  `isUniqueViolation`); `SetCountryRegion` validates before writing.
+- `internal/competition/service.go` — `Region` type, `Country.RegionID`
+  (nullable, `omitempty`), `League.Reputation`, `reputation`/`region_id`
+  columns on all four league/country query shapes and `scanLeagues`.
+- `internal/httpapi/region_handlers.go` + `router.go` — the six admin routes:
+  `POST/GET /api/admin/regions`, `PATCH/DELETE /api/admin/regions/:id`,
+  `PATCH /api/admin/countries/:id/region`, `PATCH /api/admin/leagues/:id/reputation`
+  (all behind `requireAuth` + `requireAdmin`; no events/news, per decision).
+- `openapi.yaml` — `Region` schema, `Country.region_id` + `League.reputation`
+  extensions, `RegionID` parameter, six `tags: [admin]` paths.
+- Tests: `regions_test.go` (reputation clamp unit), `regions_integration_test.go`
+  (cross-world isolation, collision per-world, SET-NULL on region delete,
+  reputation round-trip via `ListLeagues`/`ListCountryLeagues`/`GetLeague`,
+  bounds 0/100 vs −1/101); harness truncate list extended with the new tables.
+- Docs: migration README 0049–0052 row; glossary terms `region`, `league
+  reputation`, `position band`, `cup qualification`; product decision **OPD-30**.
 
 ## What to do
 
