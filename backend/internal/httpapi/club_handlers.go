@@ -122,3 +122,21 @@ func (s *server) callerCountry(c *gin.Context) (*uuid.UUID, error) {
 	}
 	return countryID, nil
 }
+
+// callerClubID resolves the caller's current club (manager.managers
+// current_club_id). An unemployed manager yields a nil club — callers decide
+// whether that is an empty result or an error.
+func (s *server) callerClubID(c *gin.Context) (*uuid.UUID, error) {
+	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
+	var clubID *uuid.UUID
+	err := s.pool.QueryRow(c.Request.Context(),
+		`SELECT current_club_id FROM manager.managers WHERE id = $1`, ident.ManagerID,
+	).Scan(&clubID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New("no manager row")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return clubID, nil
+}

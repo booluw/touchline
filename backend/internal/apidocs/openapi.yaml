@@ -1833,6 +1833,99 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AbsenceSummary" }
+  /api/managers/me/competitions:
+    get:
+      tags: [competition]
+      summary: My club's competitions
+      operationId: myClubCompetitions
+      description: |
+        The competitions the caller's club belongs to (competition.club_competitions),
+        each with a rich manager dossier in a single call. The league membership
+        embeds the full league base, the current season with its started flag,
+        the league table, and the club's next scheduled fixture; each cup
+        membership embeds the full cup base, the campaign season, the club's
+        stage and current round, its next fixture in the cup, and the champion
+        once decided. An unemployed manager (or a club with no memberships)
+        receives an empty array.
+      responses:
+        "200":
+          description: The club's competition dossier.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  competitions:
+                    type: array
+                    items: { $ref: "#/components/schemas/ClubCompetitionItem" }
+              examples:
+                sample:
+                  value:
+                    competitions:
+                      - competition_type: league
+                        role: league
+                        joined_at: "2026-01-01T00:00:00Z"
+                        league:
+                          competition:
+                            id: 00000000-0000-4000-8000-00000000000a
+                            world_id: 00000000-0000-4000-8000-000000000001
+                            country: { id: 00000000-0000-4000-8000-000000000002, name: England, code: eng }
+                            name: Premier League
+                            tier: 1
+                            team_count: 18
+                            status: active
+                            promotions: 1
+                            relegations: 3
+                          season: { id: 00000000-0000-4000-8000-000000000011, label: "2031/32", number: 1, status: in_progress }
+                          started: true
+                          standings:
+                            season: { id: 00000000-0000-4000-8000-000000000011, label: "2031/32", number: 1, status: in_progress }
+                            rows:
+                              - { club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }, played: 12, won: 8, drawn: 3, lost: 1, goals_for: 27, goals_against: 9, points: 27 }
+                          next_fixture:
+                            id: 00000000-0000-4000-8000-000000000007
+                            world_id: 00000000-0000-4000-8000-000000000001
+                            competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                            home_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                            away_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                            matchday: 13
+                            scheduled_at: "2026-06-02T18:00:00Z"
+                            status: scheduled
+                      - competition_type: domestic_cup
+                        role: cup
+                        joined_at: "2026-01-01T00:00:00Z"
+                        cup:
+                          competition:
+                            id: 00000000-0000-4000-8000-00000000001a
+                            world_id: 00000000-0000-4000-8000-000000000001
+                            country: { id: 00000000-0000-4000-8000-000000000002, name: England, code: eng }
+                            name: FA Cup
+                            competition_type: domestic_cup
+                            status: active
+                            prize_pool: 1200000
+                            format: knockout
+                            is_home_and_away: false
+                            first_tier_bye: 20
+                            survivor_threshold: 44
+                          season: { id: 00000000-0000-4000-8000-00000000001b, label: "2031/32", number: 1, status: in_progress }
+                          started: true
+                          stage: playing
+                          current_round: 3
+                          total_rounds: 7
+                          next_fixture:
+                            id: 00000000-0000-4000-8000-000000000021
+                            world_id: 00000000-0000-4000-8000-000000000001
+                            competition: { id: 00000000-0000-4000-8000-00000000001a, name: FA Cup }
+                            home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                            away_club: { id: 00000000-0000-4000-8000-000000000020, name: Eastfield Athletic, short: EFA }
+                            matchday: 3
+                            scheduled_at: "2026-06-09T18:00:00Z"
+                            status: scheduled
+        "403":
+          description: No world context for the caller.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/players:
     get:
       tags: [player]
@@ -4602,17 +4695,50 @@ components:
         goals_for: { type: integer }
         goals_against: { type: integer }
         points: { type: integer }
-    SeasonCalendar:
+    ClubCompetitionItem:
       type: object
-      description: |
-        The current season grouped into game-weeks (IM03). week = game-day /
-        days_per_week (default 7, world config); a league plays
-        matchdays_per_week of them (default 3).
+      description: "One of the manager's club's competitions (competition.club_competitions membership), as returned by /managers/me/competitions. Exactly one of league | cup is set, discriminated by competition_type."
       properties:
+        competition_type: { type: string, enum: [league, domestic_cup] }
+        role: { type: string, enum: [league, cup] }
+        joined_at: { type: string, format: date-time }
+        league: { $ref: "#/components/schemas/ClubLeagueView" }
+        cup: { $ref: "#/components/schemas/ClubCupView" }
+    ClubLeagueView:
+      type: object
+      description: "The club's league dossier: full league base, current season, the season's table, and the club's next fixture. season/standings are absent until the league's season starts."
+      properties:
+        competition: { $ref: "#/components/schemas/League" }
         season: { $ref: "#/components/schemas/NestedSeason" }
-        weeks:
-          type: array
-          items: { $ref: "#/components/schemas/FixtureWeek" }
+        started: { type: boolean, description: True when the league has a current (non-completed) season. }
+        standings: { $ref: "#/components/schemas/Standings" }
+        next_fixture: { $ref: "#/components/schemas/Fixture" }
+    ClubCupView:
+      type: object
+      description: "The club's cup dossier: full cup base, campaign season, the club's stage and current round, its next fixture in the cup, and the champion once decided."
+      properties:
+        competition: { $ref: "#/components/schemas/Cup" }
+        season: { $ref: "#/components/schemas/NestedSeason" }
+        started: { type: boolean, description: True when a campaign season exists. }
+        stage:
+          type: string
+          enum: [not_started, playing, waiting, eliminated]
+          description: "not_started: no campaign season yet; playing: next fixture scheduled; waiting: alive but round unmaterialized (e.g. bye); eliminated: out of the cup."
+        current_round: { type: integer, description: The round of the club's next fixture, or its highest drawn bracket round when waiting/eliminated. }
+        total_rounds: { type: integer }
+        next_fixture: { $ref: "#/components/schemas/Fixture" }
+        champion: { $ref: "#/components/schemas/ClubRef" }
+    SeasonCalendar:
+     type: object
+     description: |
+       The current season grouped into game-weeks (IM03). week = game-day /
+       days_per_week (default 7, world config); a league plays
+       matchdays_per_week of them (default 3).
+     properties:
+       season: { $ref: "#/components/schemas/NestedSeason" }
+       weeks:
+         type: array
+         items: { $ref: "#/components/schemas/FixtureWeek" }
     FixtureWeek:
       type: object
       properties:

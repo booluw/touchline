@@ -332,6 +332,33 @@ func (s *server) handleMyCompetitions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"competitions": leagues})
 }
 
+// handleMyClubCompetitions returns the competitions the caller's club belongs
+// to, each with a rich manager dossier — the league table for the (single)
+// league and the current round + next fixture for each cup (OPD-01/OPD-20).
+// An unemployed manager sees an empty list.
+func (s *server) handleMyClubCompetitions(c *gin.Context) {
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		return
+	}
+	clubID, err := s.callerClubID(c)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	if clubID == nil {
+		c.JSON(http.StatusOK, gin.H{"competitions": []internalcompetition.ClubCompetitionItem{}})
+		return
+	}
+	competitions, err := s.compSvc.MyClubCompetitions(c.Request.Context(), worldID, *clubID)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"competitions": competitions})
+}
+
 func (s *server) handleGetCompetition(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

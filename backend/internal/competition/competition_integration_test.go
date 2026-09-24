@@ -1016,3 +1016,190 @@ func TestCupCalendarAnchoredToLeagueEnd(t *testing.T) {
 		}
 	}
 }
+
+// TestMyClubCompetitions verifies the manager club-overview read: the league
+// dossier carries the full base, started flag and league table; the cup
+// dossier carries the campaign season, stage, round and next fixture; both
+// report "not started" before a season/campaign exists.
+func TestMyClubCompetitions(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var clubID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT club_id FROM competition.club_competitions
+		WHERE competition_id = $1 AND role = 'league'
+		ORDER BY club_id LIMIT 1`, premier.ID).Scan(&clubID); err != nil {
+		t.Fatalf("pick premier member: %v", err)
+	}
+
+	// Pre-season: exactly the league dossier, not started, no standings.
+	items, err := svc.MyClubCompetitions(ctx, worldID, clubID)
+	if err != nil {
+		t.Fatalf("overview pre-season: %v", err)
+	}
+	if len(items) != 1 || items[0].League == nil || items[0].Cup != nil {
+		t.Fatalf("pre-season items = %+v, want exactly one league dossier", items)
+	}
+	lg := items[0].League
+	if lg.Competition.ID != premier.ID || lg.Competition.Tier != 1 || lg.Competition.TeamCount != 4 {
+		t.Fatalf("league base = %+v, want premier tier 1 with 4 teams", lg.Competition)
+	}
+	if lg.Started || lg.Season != nil || lg.Standings != nil || lg.NextFixture != nil {
+		t.Fatalf("pre-season dossier = started %v season %v standings %v next %v, want all empty",
+			lg.Started, lg.Season, lg.Standings, lg.NextFixture)
+	}
+
+	// A club with no memberships yields an empty list.
+	loner, err := svc.MyClubCompetitions(ctx, worldID, uuid.New())
+	if err != nil {
+		t.Fatalf("overview no memberships: %v", err)
+	}
+	if len(loner) != 0 {
+		t.Fatalf("no-membership overview = %+v, want empty", loner)
+	}
+
+	// In season: started flips, standings rows appear once a result is in.
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start season: %v", err)
+	}
+	items, err = svc.MyClubCompetitions(ctx, worldID, clubID)
+	if err != nil {
+		t.Fatalf("overview in-season: %v", err)
+	}
+	lg = items[0].League
+	if !lg.Started || lg.Season == nil || lg.Season.Number != 1 {
+		t.Fatalf("in-season started=%v season=%+v, want started + season 1", lg.Started, lg.Season)
+	}
+	if lg.Standings == nil || len(lg.Standings.Rows) != 0 {
+		t.Fatalf("standings before results = %+v, want empty rows", lg.Standings)
+	}
+	if lg.NextFixture == nil {
+		t.Fatal("in-season league next fixture must be scheduled")
+	}
+
+	var clubTie uuid.UUID
+	fx1, err := svc.GetFixtures(ctx, premier.ID, worldID, newInt(1))
+	if err != nil {
+		t.Fatalf("matchday 1 fixtures: %v", err)
+	}
+	for _, f := range fx1 {
+		if f.HomeClub.ID == clubID || f.AwayClub.ID == clubID {
+			clubTie = f.ID
+		}
+	}
+	if clubTie == uuid.Nil {
+		t.Fatal("club has no matchday-1 fixture")
+	}
+	if err := svc.ApplyResult(ctx, clubTie, 2, 1); err != nil {
+		t.Fatalf("apply result: %v", err)
+	}
+	items, err = svc.MyClubCompetitions(ctx, worldID, clubID)
+	if err != nil {
+		t.Fatalf("overview after result: %v", err)
+	}
+	lg = items[0].League
+	if lg.Standings == nil || len(lg.Standings.Rows) != 1 {
+		t.Fatalf("standings after one result = %+v, want one row", lg.Standings)
+	}
+	found := false
+	for _, r := range lg.Standings.Rows {
+		if r.Club.ID == clubID {
+			found = true
+			if r.Points != 3 {
+				t.Fatalf("club points = %d, want 3 (win)", r.Points)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("standings rows %+v do not include the club", lg.Standings.Rows)
+	}
+
+	// Cup campaign: joining the cup adds a second dossier.
+	cup, err := svc.CreateCup(ctx, CupParams{
+		WorldID:           worldID,
+		CountryID:         countryID,
+		Name:              "FA Cup",
+		FirstTierBye:      0,
+		SurvivorThreshold: 2,
+	})
+	if err != nil {
+		t.Fatalf("create cup: %v", err)
+	}
+	if _, err := svc.StartCupCampaign(ctx, worldID, countryID, cup.ID); err != nil {
+		t.Fatalf("start campaign: %v", err)
+	}
+	items, err = svc.MyClubCompetitions(ctx, worldID, clubID)
+	if err != nil {
+		t.Fatalf("overview with cup: %v", err)
+	}
+	var cupItem *ClubCupView
+	for i := range items {
+		if items[i].Cup != nil {
+			cupItem = items[i].Cup
+		}
+	}
+	if cupItem == nil {
+		t.Fatalf("items %+v have no cup dossier", items)
+	}
+	if !cupItem.Started || cupItem.Season == nil {
+		t.Fatalf("cup started=%v season=%v, want started with campaign", cupItem.Started, cupItem.Season)
+	}
+	if cupItem.Stage != "playing" || cupItem.CurrentRound != 1 {
+		t.Fatalf("cup stage=%s round=%d, want playing/1 right after campaign", cupItem.Stage, cupItem.CurrentRound)
+	}
+	if cupItem.TotalRounds == 0 {
+		t.Fatal("cup total_rounds must be > 0")
+	}
+	if cupItem.NextFixture == nil || cupItem.NextFixture.Competition.Name != cup.Name {
+		t.Fatalf("cup next fixture = %+v, want a FA Cup tie", cupItem.NextFixture)
+	}
+
+	// Club loses its cup tie: stage flips to eliminated, no next fixture.
+	cupFx, err := svc.GetFixtures(ctx, cup.ID, worldID, nil)
+	if err != nil {
+		t.Fatalf("cup fixtures: %v", err)
+	}
+	var tieID uuid.UUID
+	var clubIsHome bool
+	for _, f := range cupFx {
+		switch {
+		case f.HomeClub.ID == clubID:
+			tieID, clubIsHome = f.ID, true
+		case f.AwayClub.ID == clubID:
+			tieID, clubIsHome = f.ID, false
+		}
+	}
+	if tieID == uuid.Nil {
+		t.Fatal("club has no round-1 cup tie")
+	}
+	if err := svc.ApplyResult(ctx, tieID, boolInt(!clubIsHome), boolInt(clubIsHome)); err != nil {
+		t.Fatalf("apply losing cup result: %v", err)
+	}
+	items, err = svc.MyClubCompetitions(ctx, worldID, clubID)
+	if err != nil {
+		t.Fatalf("overview after cup loss: %v", err)
+	}
+	for i := range items {
+		if items[i].Cup != nil {
+			cupItem = items[i].Cup
+		}
+	}
+	if cupItem.Stage != "eliminated" || cupItem.NextFixture != nil {
+		t.Fatalf("after elimination stage=%s next=%v, want eliminated with no fixture",
+			cupItem.Stage, cupItem.NextFixture)
+	}
+}
+
+// boolInt maps a flag to a 1/0 score (aim one goal at the winning side).
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}

@@ -132,6 +132,10 @@ func (s *server) router() *gin.Engine {
 		api.DELETE("/managers/me/absence", s.requireAuth, s.handleClearAway)
 		api.GET("/managers/me/absence-summary", s.requireAuth, s.handleGetAbsenceSummary)
 
+		// My club's competitions (S04-01): the league table and each cup's
+		// round + next fixture in one call. Empty when the caller is unemployed.
+		api.GET("/managers/me/competitions", s.requireAuth, s.handleMyClubCompetitions)
+
 		// Player morale + playing time (S06-03): per-club squad overview and
 		// individual detail with the 'why'; manager-facing promise and
 		// transfer-request actions. World-scoped to the caller's manager.
