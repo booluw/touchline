@@ -419,6 +419,9 @@ body {
     &.pill--loss {
       --variant: var(--color-loss-500);
     }
+    &.pill--live {
+      --variant: var(--color-live-500);
+    }
   }
 
   .heading {

@@ -5,7 +5,7 @@ import { formatMoneyCompact } from '../../utils/helpers';
 import { useManagerDashboard } from '~/composables/manager/dashboard';
 
 const { getOffers } = useManagerOffer()
-const { getDashboardData } = useManagerDashboard()
+const { getDashboardData, getBoardStatus } = useManagerDashboard()
 const { getFinance, getCompetitions, getFixtures, getNextFixture, getDynamics } = useClub()
 
 const financeStore = useFinanceStore()
@@ -15,7 +15,8 @@ const club = {
   competitions: computed(() => clubStore.competitions).value,
   club: computed(() => clubStore.club).value,
   game: ref<NextFixture>().value,
-  dynamics: ref().value
+  dynamics: ref().value,
+  board: computed(() => clubStore.board).value
 }
 
 const finance = {
@@ -88,6 +89,16 @@ async function getClubDynamics() {
   }
 }
 
+async function getBoardManagerStatus() {
+  try {
+    loading.board = "loading"
+    await getBoardStatus()
+    loading.board = "loaded"
+  } catch (error) {
+    loading.board = "error"
+  }
+}
+
 async function init() {
   await Promise.all([
     getManagerDashboardData(),
@@ -95,7 +106,8 @@ async function init() {
     getClubFinance(),
     getClubCompetitions(),
     getClubNextFixtures(),
-    getClubDynamics()
+    getClubDynamics(),
+    getBoardManagerStatus(),
     // getClubFixtures()
   ])
 }
@@ -111,19 +123,85 @@ onMounted(() => init())
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Overview</h3>
         </div>
-        <div class="mt-5">
-          <div v-if="club.game" class="">
-            Next Game Goes Here
+        <div class="mt-5 space-y-10">
+          <div class="flex items-center gap-3">
+            <div class="flex items-end">
+              <h3 class="heading text-sm text-void-300 w-15">{{ club.club?.name }}</h3>
+              <h2 class="heading text-7xl">3</h2>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="heading heading--big text-void-400">-</span>
+              <div class="pill pill--live flex items-center gap-2">
+                <div class="h-2 w-2 bg-live-500 rounded-full" />
+                78'
+              </div>
+            </div>
+            <div class="flex items-end gap-2">
+              <h2 class="heading text-7xl">3</h2>
+              <h3 class="heading text-sm text-void-300 w-15">{{ club.club?.short }}</h3>
+            </div>
           </div>
-          {{ club.game }}
-          Current Match / Last Match Report / Next Match Report
+          <div class="pt-5 border-t border-void-800 grid grid-cols-2 gap-5">
+            <div class="">
+              <h3 class="heading heading--small">board & fans</h3>
+
+              <div class="">
+                <div class="" v-if="loading.board === 'loading'">Please wait</div>
+                <div class="mt-5 flex gap-5" v-else-if="loading.board === 'loaded'">
+                  <div class="flex flex-col gap-1">
+                    <div class="flex gap-2 items-center">
+                      <h4 class="heading heading--medium">{{ club.board?.confidence }}</h4>
+                      <IconsHappy class="w-10" v-if="club.board?.confidence! > 50" />
+                      <IconsNeutral class="w-10" v-else-if="club.board?.confidence! === 50" />
+                      <IconsSad class="w-10" v-else-if="club.board?.confidence! < 45" />
+                      <IconsBlanked class="w-10" v-else />
+                    </div>
+                    <h5 class="heading heading--small">confidence</h5>
+                  </div>
+
+                  <div class="flex flex-col gap-1">
+                    <div class="flex gap-2 items-center">
+                      <h4 class="heading heading--medium">{{ club.board?.snapshot.scores.performance_score }}</h4>
+                      <IconsHappy class="w-10" v-if="club.board?.snapshot.scores.performance_score! > 50" />
+                      <IconsNeutral class="w-10" v-else-if="club.board?.snapshot.scores.performance_score! === 50" />
+                      <IconsSad class="w-10" v-else-if="club.board?.snapshot.scores.performance_score! < 45" />
+                      <IconsBlanked class="w-10" v-else />
+                    </div>
+                    <h5 class="heading heading--small">performance rating</h5>
+                  </div>
+
+                  <div class="flex flex-col gap-1">
+                    <div class="flex gap-2 items-center">
+                      <h4 class="heading heading--medium">{{ club.board?.snapshot.scores.supporter_sentiment_score }}
+                      </h4>
+                      <IconsHappy class="w-10" v-if="club.board?.snapshot.scores.supporter_sentiment_score! > 50" />
+                      <IconsNeutral class="w-10"
+                        v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! === 50" />
+                      <IconsSad class="w-10" v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! < 45" />
+                      <IconsBlanked class="w-10" v-else />
+                    </div>
+                    <h5 class="heading heading--small">fans score</h5>
+                  </div>
+                </div>
+                <div v-else class="uppercase text-xs flex gap-3 mt-3">
+                  <div class="text-loss-500">
+                    An Error Occurred
+                  </div>
+                  <button class="uppercase text-cyan-300" @click="getClubFinance()">Retry</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+          <!-- Current Match / Last Match Report / Next Match Report
           <br /><br />
           // cyan if there's a current match
-          // normal for past or next match
+          // normal for past or next match -->
         </div>
       </div>
       <div class="border-brutal border-void-500 p-5">
-        <div v-if="loading.competitions !== 'loaded'" class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
+        <div v-if="loading.competitions !== 'loaded'"
+          class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Competitions</h3>
           <nuxt-link to="/play/competitions" class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
             all
@@ -133,19 +211,14 @@ onMounted(() => init())
         <UiLoader v-if="loading.competitions === 'loading'" />
         <template v-else-if="loading.competitions === 'loaded'">
           <div class="carousel h-50 p-0 m-0">
-            <div
-              v-for="(competition, key) in club.competitions"
-              :key
-              class="carousel__item w-full h-full font-mono"
-            >
+            <div v-for="(competition, key) in club.competitions" :key class="carousel__item w-full h-full font-mono">
               <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
                 <h3 class="uppercase heading heading--small">
                   {{ competition[competition.competition_type as 'league']?.competition.name }}
                 </h3>
 
                 <nuxt-link to="/play/competitions"
-                  class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase"
-                >
+                  class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
                   {{ competition.competition_type.split("_").join(" ") }}
                 </nuxt-link>
               </div>
@@ -177,7 +250,8 @@ onMounted(() => init())
           {{ dashboard }}
         </div>
       </div>
-      <div class="border-brutal p-5 space-y-5" :class="[finance.summary.value?.cash <= 0 ? 'border-loss-500' : 'border-void-500']">
+      <div class="border-brutal p-5 space-y-5"
+        :class="[finance.summary.value?.cash <= 0 ? 'border-loss-500' : 'border-void-500']">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Finance</h3>
         </div>
@@ -192,7 +266,8 @@ onMounted(() => init())
               <h4 class="heading heading--small">available cash</h4>
             </div>
             <div class="">
-              <h3 class="font-semibold text-2xl">{{ formatMoneyCompact(finance.summary.value!.transfer_budget.available!) }}</h3>
+              <h3 class="font-semibold text-2xl">{{
+                formatMoneyCompact(finance.summary.value!.transfer_budget.available!) }}</h3>
               <h4 class="heading heading--small">transfer budget</h4>
             </div>
             <div class="">
@@ -274,7 +349,7 @@ onMounted(() => init())
                   <h4 class="heading heading--small">competition</h4>
                   <div class="flex justify-between">
                     <nuxt-link :to="`/play/league/${offer.league.id}`" class="text-cyan-700">{{ offer.league.name
-                    }}:</nuxt-link>
+                      }}:</nuxt-link>
                     <p class="font-semibold capitalize">{{ offer.league.position ?? "-" }}</p>
                   </div>
                   <div class="flex justify-between">

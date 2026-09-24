@@ -8,10 +8,9 @@ export function useClub() {
   const { notify } = useToast()
 
   const store = useFinanceStore()
-  const authStore = useAuthStore()
   const clubStore = useClubStore()
 
-  const clubId = computed(() => authStore.club?.id).value
+  const clubId = clubStore.club?.id
 
   async function getFinance(): Promise<void> {
     try {
@@ -97,6 +96,8 @@ export function useClub() {
       throw error
     }
   }
+
+  // async
 
   return {
     getFinance,

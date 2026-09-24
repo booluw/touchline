@@ -5,6 +5,8 @@ export function useManagerDashboard() {
   const { $api } = useNuxtApp()
   const { notify } = useToast()
 
+  const clubStore = useClubStore()
+
   async function getDashboardData() {
     try {
       return $api.get(`${apiBase}/api/dashboard`)
@@ -20,7 +22,24 @@ export function useManagerDashboard() {
     }
   }
 
+  async function getBoardStatus() {
+    try {
+      const resp = await $api.get(`${apiBase}/api/managers/me/board`)
+      clubStore.setBoard(resp)
+    } catch (error) {
+      console.error(error)
+      notify({
+        title: "Error",
+        description: "An Error Occurred",
+        type: "danger"
+      })
+
+      throw error
+    }
+  }
+
   return {
-    getDashboardData
+    getDashboardData,
+    getBoardStatus
   }
 }
