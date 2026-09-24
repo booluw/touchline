@@ -40,6 +40,7 @@ import (
 	internalplayer "github.com/touchline/backend/internal/player"
 	"github.com/touchline/backend/internal/policybot"
 	"github.com/touchline/backend/internal/scheduler"
+	internalscout "github.com/touchline/backend/internal/scout"
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
 	internaltactics "github.com/touchline/backend/internal/tactics"
@@ -204,6 +205,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	matches.WithPolicyBot(policySvc)
 	dashSvc := internaldashboard.NewService(pool, bus)
 	dashSvc.WithRealtime(broker)
+	scoutSvc := internalscout.NewService(pool, compSvc)
 	academySvc := internalacademy.NewService(pool, bus)
 	adminSvc := internaladmin.NewService(pool, bus)
 	lifecycleSvc := internallifecycle.NewService(pool, bus, academySvc)
@@ -231,6 +233,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Academy:     academySvc,
 		Faction:     factionSvc,
 		Admin:       adminSvc,
+		Scout:       scoutSvc,
 		SeedJobs: func(ctx context.Context, worldID uuid.UUID) (int64, error) {
 			return bus.InsertJob(ctx, &internalcompetition.SeedWorldJobArgs{WorldID: worldID}, nil)
 		},

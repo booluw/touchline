@@ -121,6 +121,21 @@ var balancedWeights = CategoryWeights{
 	Technical: .5, Physical: .5, Mental: .5, Tactical: .5, Goalkeeping: .1, Positional: .5,
 }
 
+// PlayerOverall is one player's blended single rating for scouting read-models
+// (internal/scout): the rounded mean of the position's attack and defense
+// sides, clamped to [1,100]. A position missing from the weights table falls
+// back to the balanced recipe exactly like BuildSquadRatings. The recipe is
+// the PM-open-item proposal data — scouting inherits those numbers.
+func PlayerOverall(a AttributeSnapshot, position string) int {
+	prof, ok := DefaultPositionWeights[position]
+	if !ok {
+		prof = PositionProfile{Attack: balancedWeights, Defense: balancedWeights}
+	}
+	att := weightedScore(a, prof.Attack)
+	def := weightedScore(a, prof.Defense)
+	return int(mathRound(clamp((att+def)/2, 1, 100)))
+}
+
 // StyleProfile is the per-style category-weight multiplier table layered over
 // DefaultPositionWeights when a side kicks off in that style (S05-01,
 // docs/design/tactics-training-numerics.md §1.4). A 0 in a scale slot means

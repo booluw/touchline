@@ -291,6 +291,7 @@ func loadFixture(ctx context.Context, tx pgx.Tx, id uuid.UUID, forUpdate bool) (
 	err := tx.QueryRow(ctx, sql, id).Scan(
 		&f.ID, &f.WorldID, &f.Competition.ID, &f.HomeClub.ID, &f.AwayClub.ID,
 		&f.Matchday, &f.ScheduledAt, &f.Status)
+	f.Gameweek = f.Matchday
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("fixture %s not found", id)
 	}
@@ -1011,6 +1012,7 @@ func (s *Service) GetFixture(ctx context.Context, id uuid.UUID) (*Fixture, error
 	if err != nil {
 		return nil, err
 	}
+	f.Gameweek = f.Matchday
 	f.Competition.Name = compName
 	f.HomeClub.Name = hcName
 	f.HomeClub.Short = hcShort

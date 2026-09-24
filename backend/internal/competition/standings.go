@@ -45,6 +45,7 @@ func scanFixtures(rows pgx.Rows) ([]Fixture, error) {
 			&hName, &hShort, &aName, &aShort, &compName); err != nil {
 			return nil, fmt.Errorf("scan fixture: %w", err)
 		}
+		f.Gameweek = f.Matchday
 		f.Competition.Name = compName
 		f.HomeClub.Name = hName
 		f.HomeClub.Short = hShort

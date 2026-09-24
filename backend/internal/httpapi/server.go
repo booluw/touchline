@@ -22,6 +22,7 @@ import (
 	internalmatch "github.com/touchline/backend/internal/match"
 	internalplayer "github.com/touchline/backend/internal/player"
 	"github.com/touchline/backend/internal/policybot"
+	internalscout "github.com/touchline/backend/internal/scout"
 	internalsocial "github.com/touchline/backend/internal/social"
 	internaltactics "github.com/touchline/backend/internal/tactics"
 	internaltraining "github.com/touchline/backend/internal/training"
@@ -55,6 +56,7 @@ type server struct {
 	academySvc    *internalacademy.Service
 	factionSvc    *internalfaction.Service
 	adminSvc      *internaladmin.Service
+	scoutSvc      *internalscout.Service
 	seedJobs      func(ctx context.Context, worldID uuid.UUID) (int64, error)
 	jwtCfg        pkgjwt.JWTConfig
 	pool          *pgxpool.Pool
@@ -87,6 +89,7 @@ type Options struct {
 	Academy     *internalacademy.Service
 	Faction     *internalfaction.Service
 	Admin       *internaladmin.Service
+	Scout       *internalscout.Service
 	// SeedJobs enqueues an async world-seed job and returns the river job id.
 	// The caller supplies it (wired over eventbus.InsertJob) so the HTTP layer
 	// never depends on the river client directly.
@@ -121,6 +124,7 @@ func New(opts Options) *Server {
 		academySvc:    opts.Academy,
 		factionSvc:    opts.Faction,
 		adminSvc:      opts.Admin,
+		scoutSvc:      opts.Scout,
 		jwtCfg:        opts.JWT,
 		pool:          opts.Pool,
 		cookiesSecure: opts.CookiesSecure,

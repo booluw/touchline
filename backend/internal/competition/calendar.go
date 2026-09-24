@@ -14,8 +14,10 @@ import (
 
 // FixtureMatchday is one fixture date of a season calendar, holding that
 // matchday's fixtures. Every fixture of a matchday shares one scheduled day.
+// Gameweek is the round (== matchday), the PL-style label for "this gameweek".
 type FixtureMatchday struct {
 	Matchday    int       `json:"matchday"`
+	Gameweek    int       `json:"gameweek"`
 	ScheduledAt time.Time `json:"scheduled_at"`
 	Fixtures    []Fixture `json:"fixtures"`
 }
@@ -123,7 +125,9 @@ func (s *Service) GetSeasonCalendar(ctx context.Context, worldID, leagueID uuid.
 		}
 		w := &cal.Weeks[wi]
 		if n := len(w.Matchdays); n == 0 || w.Matchdays[n-1].Matchday != f.Matchday {
-			w.Matchdays = append(w.Matchdays, FixtureMatchday{Matchday: f.Matchday, ScheduledAt: f.ScheduledAt})
+			w.Matchdays = append(w.Matchdays, FixtureMatchday{
+				Matchday: f.Matchday, Gameweek: f.Matchday, ScheduledAt: f.ScheduledAt,
+			})
 		}
 		last := &w.Matchdays[len(w.Matchdays)-1]
 		last.Fixtures = append(last.Fixtures, f)
@@ -199,6 +203,47 @@ func (s *Service) ListClubFixtures(ctx context.Context, worldID, clubID uuid.UUI
 		return nil, fmt.Errorf("query club fixtures: %w", err)
 	}
 	return scanFixtures(rows)
+}
+
+// NextClubFixture returns the club's earliest upcoming fixture (real kickoff
+// order) across all of its competitions, or nil when it has none (off-season).
+// The world/ownership checks mirror ListClubFixtures exactly: ErrClubNotFound
+// for a missing club, ErrClubWorldMismatch for a cross-world read.
+func (s *Service) NextClubFixture(ctx context.Context, worldID, clubID uuid.UUID) (*Fixture, error) {
+	var clubWorld uuid.UUID
+	err := s.pool.QueryRow(ctx, `SELECT world_id FROM club.clubs WHERE id = $1`, clubID).Scan(&clubWorld)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrClubNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("club world: %w", err)
+	}
+	if clubWorld != worldID {
+		return nil, ErrClubWorldMismatch
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT f.id, f.world_id, f.competition_id, f.home_club_id, f.away_club_id, f.matchday,
+		       f.scheduled_at, f.status, f.ht_score, f.at_score,
+		       h.name, COALESCE(h.short_name, ''), a.name, COALESCE(a.short_name, ''), c.name
+		FROM match.fixtures f
+		JOIN club.clubs h ON h.id = f.home_club_id
+		JOIN club.clubs a ON a.id = f.away_club_id
+		JOIN competition.competitions c ON c.id = f.competition_id
+		WHERE f.world_id = $1 AND (f.home_club_id = $2 OR f.away_club_id = $2)
+		  AND f.status NOT IN ('completed', 'cancelled')
+		ORDER BY f.scheduled_at, f.matchday, f.home_club_id
+		LIMIT 1`, worldID, clubID)
+	if err != nil {
+		return nil, fmt.Errorf("query next club fixture: %w", err)
+	}
+	list, err := scanFixtures(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) == 0 {
+		return nil, nil
+	}
+	return &list[0], nil
 }
 
 // daysBetween is the whole-day count between two truncated UTC dates (exact,

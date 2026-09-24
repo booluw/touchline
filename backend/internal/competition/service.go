@@ -126,6 +126,10 @@ type Season struct {
 }
 
 // Fixture is one scheduled matchday fixture (nested per the wave-2 wire rule).
+// Gameweek is the fixture's round (== matchday): one gameweek is one round in
+// which each team plays once, mirroring the real premier-league gameweek.
+// Matchday and Gameweek are the same value — the field is duplicated so
+// clients can present the PL-style "gameweek" label without ambiguity.
 type Fixture struct {
 	ID          uuid.UUID             `json:"id"`
 	WorldID     uuid.UUID             `json:"world_id"`
@@ -133,6 +137,7 @@ type Fixture struct {
 	HomeClub    apiref.ClubRef        `json:"home_club"`
 	AwayClub    apiref.ClubRef        `json:"away_club"`
 	Matchday    int                   `json:"matchday"`
+	Gameweek    int                   `json:"gameweek"`
 	ScheduledAt time.Time             `json:"scheduled_at"`
 	Status      string                `json:"status"`
 	HomeScore   *int                  `json:"home_score,omitempty"`

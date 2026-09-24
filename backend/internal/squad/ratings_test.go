@@ -65,6 +65,30 @@ func TestBuildSquadRatingsUnknownPositionFallsBack(t *testing.T) {
 	}
 }
 
+func TestPlayerOverallRanges(t *testing.T) {
+	a := AttributeSnapshot{Technical: 80, Physical: 70, Mental: 60, Tactical: 50, Positional: 60}
+	if got := PlayerOverall(a, "ST"); got < 1 || got > 100 {
+		t.Fatalf("ST overall %d out of range", got)
+	}
+	if known, missing := PlayerOverall(a, "ST"), PlayerOverall(a, "Sweeper"); missing < 1 || missing > 100 {
+		t.Fatalf("unknown-position overall %d out of range", missing)
+	} else if mathAbs(float64(known)-float64(missing)) > 100 {
+		t.Fatalf("positions must both rate within [1,100], got %d/%d", known, missing)
+	}
+}
+
+func TestPlayerOverallWithinSquadRatingBand(t *testing.T) {
+	m := SquadMember{
+		PlayerID: mustID(1), Position: "ST",
+		Attributes: AttributeSnapshot{Technical: 90, Physical: 80, Mental: 60, Tactical: 40, Positional: 50},
+	}
+	att, def := BuildSquadRatings([]SquadMember{m}, DefaultPositionWeights, nil)
+	overall := PlayerOverall(m.Attributes, m.Position)
+	if overall > att || overall < def {
+		t.Fatalf("overall %d should sit between the ST defence %d and attack %d", overall, def, att)
+	}
+}
+
 func TestTakerPenaltyConversionRateBaseline(t *testing.T) {
 	c := TakerPenaltyConversionRate(PlayerHiddenTraitsSnapshot{PressureHandling: 50, Consistency: 50}, 0)
 	if !approx(c, 0.78) {

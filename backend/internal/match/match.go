@@ -18,6 +18,7 @@ import (
 )
 
 // Fixture mirrors match.fixtures for the read/feed path (nested refs).
+// Gameweek is the round (== matchday), duplicated for PL-style presentation.
 type Fixture struct {
 	ID          uuid.UUID             `json:"id"`
 	WorldID     uuid.UUID             `json:"world_id"`
@@ -25,6 +26,7 @@ type Fixture struct {
 	HomeClub    apiref.ClubRef        `json:"home_club"`
 	AwayClub    apiref.ClubRef        `json:"away_club"`
 	Matchday    int                   `json:"matchday,omitempty"`
+	Gameweek    int                   `json:"gameweek,omitempty"`
 	ScheduledAt time.Time             `json:"scheduled_at"`
 	Status      string                `json:"status"`
 }

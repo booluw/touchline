@@ -530,6 +530,68 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/next-fixture:
+    get:
+      tags: [clubs]
+      summary: Next fixture with opponent scout report
+      operationId: getNextClubFixture
+      description: |
+        The club's earliest upcoming fixture across all its competitions (by
+        real-world kickoff, in fixture.scheduled_at), its gameweek, and a scout
+        report on the opponent. World-scoped like the other club reads. A club
+        with no upcoming fixture (off-season) returns a 200 with a null payload.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The next fixture and opponent dossier, or null when off-season.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  next_fixture: { $ref: "#/components/schemas/NextFixtureView", nullable: true }
+              examples:
+                sample:
+                  value:
+                    next_fixture:
+                      fixture:
+                        id: 00000000-0000-4000-8000-000000000013
+                        world_id: 00000000-0000-4000-8000-000000000001
+                        competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                        home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                        away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                        matchday: 4
+                        gameweek: 4
+                        scheduled_at: "2026-06-11T15:00:00Z"
+                        status: scheduled
+                      gameweek: 4
+                      home_or_away: home
+                      derby: false
+                      golden_goal: false
+                      opponent:
+                        club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                        country: { id: 00000000-0000-4000-8000-00000000000c, name: England, code: ENG }
+                        is_ai_controlled: true
+                        manager: { id: 00000000-0000-4000-8000-00000000000f, is_policy_bot: true }
+                        reputation: 15
+                        tier: 2
+                        league_position: 2
+                        form: { form_string: "W-D-L-W", current_rating: 1.04 }
+                        squad_count: 22
+                        top_players:
+                          - id: 00000000-0000-4000-8000-000000000020
+                            person_id: 00000000-0000-4000-8000-000000000022
+                            first_name: Marcus
+                            last_name: Webb
+                            display_name: Marcus Webb
+                            primary_position: ST
+                            rating: 82
+        "404":
+          description: Club not found, or not in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/lineup:
     get:
       tags: [clubs]
@@ -4673,6 +4735,7 @@ components:
         home_club: { $ref: "#/components/schemas/NestedClub" }
         away_club: { $ref: "#/components/schemas/NestedClub" }
         matchday: { type: integer }
+        gameweek: { type: integer, description: "The fixture's round == matchday. One gameweek is one round, in which each team plays once, mirroring the premier-league gameweek. A club can face several gameweeks within one calendar week (accelerated pacing)." }
         scheduled_at: { type: string, format: date-time }
         status: { type: string, enum: [scheduled, running, finished] }
         home_score: { type: integer, nullable: true }
@@ -4728,6 +4791,55 @@ components:
         total_rounds: { type: integer }
         next_fixture: { $ref: "#/components/schemas/Fixture" }
         champion: { $ref: "#/components/schemas/ClubRef" }
+    NextFixtureView:
+      type: object
+      description: "GET /clubs/{id}/next-fixture payload: the club's next match across all its competitions (real-world kickoff in fixture.scheduled_at), its gameweek, and a scout report on the opponent."
+      properties:
+        fixture: { $ref: "#/components/schemas/Fixture" }
+        gameweek: { type: integer, description: "The fixture's round (== fixture.matchday): a gameweek is one round, each team plays once." }
+        home_or_away: { type: string, enum: [home, away], description: "Whether the scouted club plays at home in this fixture." }
+        derby: { type: boolean, description: "True when a club rivalry links the two sides at the derby threshold." }
+        derby_intensity: { type: integer }
+        golden_goal: { type: boolean, description: "True for knockout ties (golden-goal wins), false for league fixtures." }
+        opponent: { $ref: "#/components/schemas/ScoutReport" }
+    ScoutReport:
+      type: object
+      description: "An opponent dossier served to the manager facing them: identity, form, standing, and headline players, all drawn from persisted state."
+      properties:
+        club: { $ref: "#/components/schemas/ClubRef" }
+        country: { $ref: "#/components/schemas/NestedCountry" }
+        is_ai_controlled: { type: boolean }
+        manager: { $ref: "#/components/schemas/ScoutManagerRef" }
+        reputation: { type: integer }
+        tier: { type: integer }
+        league_position: { type: integer, nullable: true, description: "Opponent's current league-table position; absent when off-season, in no league, or ahead of their first result." }
+        form: { $ref: "#/components/schemas/ScoutFormSummary" }
+        squad_count: { type: integer }
+        top_players:
+          type: array
+          items: { $ref: "#/components/schemas/ScoutKeyPlayer" }
+    ScoutManagerRef:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        is_policy_bot: { type: boolean }
+    ScoutFormSummary:
+      type: object
+      description: "The opponent's rolling form: trailing-5 results (oldest first, '-'-padded) plus the persisted EWMA rating around 1.0 (neutral)."
+      properties:
+        form_string: { type: string }
+        current_rating: { type: number }
+    ScoutKeyPlayer:
+      type: object
+      description: "One headline opponent player: a position-weighted attribute rating over the position's attack/defence recipe."
+      properties:
+        id: { type: string, format: uuid }
+        person_id: { type: string, format: uuid }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        primary_position: { type: string }
+        rating: { type: integer }
     SeasonCalendar:
      type: object
      description: |
@@ -4752,9 +4864,10 @@ components:
           items: { $ref: "#/components/schemas/FixtureMatchday" }
     FixtureMatchday:
       type: object
-      description: One matchday's fixtures — every fixture shares this scheduled_at.
+      description: One matchday's fixtures — every fixture shares this scheduled_at. Gameweek is the round (== matchday), the PL-style label for this gameweek.
       properties:
         matchday: { type: integer }
+        gameweek: { type: integer, description: "The matchday's round; a team plays once per gameweek." }
         scheduled_at: { type: string, format: date-time, description: Kickoff of the matchday (UTC, from the league's kickoff_hours rotation). }
         fixtures:
           type: array

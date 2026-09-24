@@ -58,6 +58,7 @@ func (s *server) router() *gin.Engine {
 		api.GET("/clubs", s.requireAuth, s.handleListClubs)
 		api.GET("/clubs/:id", s.requireAuth, s.handleGetClub)
 		api.GET("/clubs/:id/fixtures", s.requireAuth, s.handleListClubFixtures)
+		api.GET("/clubs/:id/next-fixture", s.requireAuth, s.handleNextClubFixture)
 		api.GET("/clubs/:id/lineup", s.requireAuth, s.handleGetLineup)
 		api.PUT("/clubs/:id/lineup", s.requireAuth, s.handleSetLineup)
 		api.GET("/clubs/:id/tactics", s.requireAuth, s.handleGetTactics)
