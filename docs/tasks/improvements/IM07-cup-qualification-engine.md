@@ -1,12 +1,36 @@
 # IM07 — Cup qualification engine: position bands, last-season standings, champion entitlement
 
-**Status:** Not started
+**Status:** Implemented
+**Owner:** opencode agent
 **Sprint:** Improvements (competition scheduling)
 **Source:** Product decision (manual session)
 **Depends on:** IM06 (the `cup_qualification` / `manager_cup_choices` tables and
 region foundation); S04-01 (season lifecycle — completed seasons with final
 standings and a `champion` entry); IM03 (tie-break ordering reused for ranks).
 Feeds IM08 (regional cup campaigns) and IM09 (double-book resolution).
+
+## Delivery evidence
+
+- `internal/competition/qualify.go` (`ComputeField`) — the pure, deterministic
+  engine: position-band union over each league's last **completed** season,
+  reigning-champion +1 (direct / next-best / out-of-band), per-club conflict
+  flags against sibling continental cups, and the `Unavailable` league list.
+  Provider seams (`StandingsProvider`, `ReigningChampionProvider`,
+  `SiblingCupProvider`) with real-pool implementations
+  (`LastCompletedStandings`, `ReigningChampion`, `SiblingCups`) and the
+  `Service.ComputeCupField` convenience wrapper.
+- `internal/competition/service.go` — sentinels `ErrQualificationField` and
+  `ErrQualificationUnavailable` (the latter reserved for IM08's campaign start).
+- `internal/competition/qualify_test.go` — DB-free case matrix (band cuts,
+  champion in-band/out-of-band/direct, full-table band, next-best skipping
+  already-entered clubs, unavailable leagues incl. a champion's league,
+  conflicts incl. a sibling champion, determinism, provider-error propagation,
+  band validation, empty-field error).
+- `internal/competition/qualify_integration_test.go` — real-pool replay:
+  finished 2-tier league, regioned continental cup, computed twice (identical),
+  unavailable league, the three champion cases against live standings, and
+  mutual conflict flags between two continental cups. CI-only (`-tags integration`).
+- `docs/how-to/glossary.md` — expanded `cup qualification` row + new `reigning champion` / `next-best` rows.
 
 ## What to do
 
@@ -54,9 +78,10 @@ type QualifyField struct {
 - `Table = { Ranks []ClubID, SeasonNumber }` — the final ordering using
   existing tie-break order (`points DESC, GD DESC, GF DESC, name`), already
   produced by `competition.standings` for a completed season.
-- Providers injected: `QualifyField` gets a `StandingsProvider`/`SeasonProvider`
-  interface over the pool so unit tests run without a database; the campaign
-  entry points (IM08) wire the real queries.
+- Providers injected: `ComputeField` gets `StandingsProvider` /
+  `ReigningChampionProvider` / `SiblingCupProvider` interfaces over the pool so
+  unit tests run without a database; the campaign entry points (IM08) wire the
+  real queries through the same service.
 
 ### Position bands
 
@@ -104,10 +129,13 @@ type QualifyField struct {
 
 ### Errors
 
-- `ErrQualificationUnavailable` — campaign start with a banded league lacking a
-  completed season.
 - `ErrQualificationField` (422) — final field `len < 2` (a knockout needs two
-  clubs); the preview surfaces this before the admin commits.
+  clubs); the preview surfaces this before the admin commits. This is the
+  engine's only error.
+- Unavailable banded leagues are **not** errors here: `ComputeField` returns
+  them in `Field.Unavailable`, and IM08's campaign start promotes any of those
+  to `ErrQualificationUnavailable` (422) instead of running on an invented
+  table.
 - There is **no 404 from the engine** — identity/scope errors happen in the
   HTTP layer (IM08); the engine only computes.
 
@@ -117,11 +145,13 @@ type QualifyField struct {
 
 - `qualify.go` (new): `QualifyField` struct + `ComputeField(ctx, cup, providers)`
   entry, band expansion, champion cases, origin tagging, conflict flags, and
-  the `StandingsProvider`/`SeasonProvider` interfaces (with the pool-backed
-  implementation returning the last completed standings via the S04-01
-  completed-season query, and a `hist/`-style previous-campaign champion query).
-- `service.go`: `ErrQualificationUnavailable`; validation glue for band rows
-  (`from >= 1`, `to == nil || to >= from`) — mirrored in IM06's test matrix.
+  the `StandingsProvider`/`ReigningChampionProvider`/`SiblingCupProvider`
+  interfaces (with the pool-backed implementations returning the last completed
+  standings, the previous campaign's champion + current league, and the world's
+  other continental cups).
+- `service.go`: `ErrQualificationField` (engine) and `ErrQualificationUnavailable`
+  (reserved for IM08); validation glue for band rows (`from >= 1`,
+  `to == nil || to >= from`) — mirrored in the migration's CHECKs.
 
 ### Tests (this task is engine-first; most coverage lands here, not in the HTTP layer)
 
@@ -133,12 +163,14 @@ type QualifyField struct {
   empty-field (`len < 2`) error; determinism (two identical inputs ⇒ equal
   fields); conflict flags populated when a champion is shared across two cups'
   fields.
-- Provider unit: a fake `SeasonProvider` answering "completed season N-1" vs
-  "no completed season" drives both the happy band path and the
-  `ErrQualificationUnavailable` path without a DB.
+- Provider unit: a fake standings provider answering "last completed season"
+  vs "no completed season" drives both the happy band path and the unavailable
+  path — an unavailable banded league lands in `Field.Unavailable` (a list,
+  never an error; only a field of fewer than 2 clubs hard-errors).
 - Integration (CI-only): a small finished league through the real pool, then
-  `ComputeField` twice — identical results (replay determinism), correct origin
-  labels, field counts, and conflict flags against a second regional cup.
+  `ComputeCupField` twice — identical results (replay determinism), correct origin
+  labels, field counts, unavailable-league reporting, and conflict flags against
+  a second continental cup.
 
 ## Docs
 

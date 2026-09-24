@@ -80,6 +80,8 @@ var (
 	ErrCupCampaignExists        = errors.New("this cup already has a live campaign")
 	ErrStagingInvalid           = errors.New("cup staging does not form a valid knockout")
 	ErrCupDraw                  = errors.New("knockout ties cannot finish level; the golden goal must decide")
+	ErrQualificationUnavailable = errors.New("a banded league has no completed season to qualify from")
+	ErrQualificationField       = errors.New("cup qualification field must contain at least two clubs")
 )
 
 var errInternalRollover = errors.New("competition: internal rollover error")
