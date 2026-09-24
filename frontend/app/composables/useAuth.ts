@@ -6,7 +6,7 @@
 // multiple worlds triggers a world-picker round-trip: login returns
 // { status: 'worlds', worlds: [...] } without cookies, the user picks a world,
 
-import type { User, Offer } from "~/types"
+import type { User, Offer, Club } from "~/types"
 import { useToast } from '../components/ui/Toast';
 
 // and login is re-posted with world_id.
@@ -25,7 +25,9 @@ export interface LoginWorldPicker {
   worlds: WorldOption[]
 }
 
-export type LoginResponse = User | LoginWorldPicker
+export interface LoginResponse extends User {
+  club: Club
+}
 export interface UserOffer extends User {
   offer: Offer
 }
@@ -46,8 +48,11 @@ export function useAuth() {
     needsWorldSelection.value = false
 
     try {
-      const resp = await $api.post<User>(`${apiBase}/api/auth/login`, payload, { auth: false })
+      const { club, ...resp} = await $api.post<User>(`${apiBase}/api/auth/login`, payload, { auth: false })
+      
       store.setUser(resp)
+      store.setClub(club)
+
       notify({
         title: 'Welcome back',
         description: 'Your team awaits',

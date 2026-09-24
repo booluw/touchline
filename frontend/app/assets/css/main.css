@@ -429,6 +429,10 @@ body {
       @apply text-xs uppercase;
     }
 
+    &.heading--medium {
+      @apply text-3xl uppercase font-bold;
+    }
+
     &.heading--big {
       @apply text-5xl uppercase font-bold;
     }

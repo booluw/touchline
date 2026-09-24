@@ -2,12 +2,37 @@
 import { defu } from 'defu'
 import type { RequestInterceptor, ResponseInterceptor, ErrorInterceptor, CustomFetchOptions } from "../types"
 
+// Internal-only flags layered onto CustomFetchOptions so a request can be
+// marked "already went through the refresh-retry cycle" and "this IS the
+// refresh call itself" — keeps both out of the shared types file since
+// nothing outside this class needs to set them.
+type InternalFetchOptions<T = any> = CustomFetchOptions<T> & {
+  _retriedAfterRefresh?: boolean
+  _isAuthRefreshCall?: boolean
+}
+
 class ApiClient {
   private baseURL: string
   private defaultHeaders: HeadersInit
   private requestInterceptors: RequestInterceptor[] = []
   private responseInterceptors: ResponseInterceptor<any>[] = []
   private errorInterceptors: ErrorInterceptor[] = []
+
+  // Route(s) that should never themselves trigger a refresh-on-401 — refreshing
+  // in response to the refresh endpoint's own 401 would recurse forever.
+  private authRefreshUrl = '/api/auth/refresh'
+  private authLoginUrl = '/api/auth/login'
+
+  // Dedupes concurrent refreshes: every 401 that lands while a refresh is
+  // already in flight awaits this same promise instead of firing its own
+  // POST /api/auth/refresh.
+  private refreshPromise: Promise<void> | null = null
+
+  // Optional hook for "the refresh itself failed" — the session is genuinely
+  // over (expired/invalid refresh cookie), not just a request-level error.
+  // Wire this to your auth store / router in app startup, e.g.:
+  //   useApi().onSessionExpired(() => { authStore.clear(); navigateTo('/login') })
+  private sessionExpiredHandler: (() => void) | null = null
 
   constructor() {
     const { public: { apiBase } } = useRuntimeConfig()
@@ -33,19 +58,12 @@ class ApiClient {
     this.errorInterceptors.push(interceptor)
   }
 
-  // private getAuthToken(): string | null {
-  //   const authStore = useAuthStore()
-
-  //   // if (import.meta.server) {
-  //   //   const authCookie = useCookie('auth_token')
-  //   //   return authCookie.value || null
-  //   // } else {
-  //   //   const authCookie = useCookie('auth_token')
-  //   //   return authCookie.value || localStorage.getItem('auth_token')
-  //   // }
-
-  //   return authStore.auth!.token || ""
-  // }
+  // Called when a refresh attempt itself fails — the refresh token is dead,
+  // not just the access token expired. Typical usage: clear auth state and
+  // redirect to login.
+  onSessionExpired(handler: () => void) {
+    this.sessionExpiredHandler = handler
+  }
 
   private buildHeaders(options?: CustomFetchOptions): HeadersInit {
     const headers: HeadersInit = { ...this.defaultHeaders }
@@ -53,15 +71,6 @@ class ApiClient {
     if (options?.headers) {
       Object.assign(headers, options.headers)
     }
-
-    // if (options?.auth !== false) {
-    //   const token = this.getAuthToken()
-    //   if (token) {
-    //     Object.assign(headers, {
-    //       'Authorization': `Bearer ${token}`
-    //     })
-    //   }
-    // }
 
     return headers
   }
@@ -90,11 +99,41 @@ class ApiClient {
     throw processedError
   }
 
+  /**
+   * Auth is cookie-based (httpOnly access_token/refresh_token, credentials:
+   * "include"), so "refreshing" just means calling the refresh endpoint —
+   * it rotates the cookies via Set-Cookie, and the retried request picks
+   * them up automatically. Uses raw $fetch, never fetchWithRetry, so a
+   * 401 on the refresh call itself can't recurse back into this method.
+   */
+  private refreshAccessToken(): Promise<void> {
+    if (this.refreshPromise) {
+      return this.refreshPromise
+    }
+
+    this.refreshPromise = $fetch(this.authRefreshUrl, {
+      baseURL: this.baseURL,
+      method: 'POST',
+      credentials: 'include',
+      headers: this.defaultHeaders,
+    })
+      .then(() => undefined)
+      .catch((err) => {
+        this.sessionExpiredHandler?.()
+        throw err
+      })
+      .finally(() => {
+        this.refreshPromise = null
+      })
+
+    return this.refreshPromise
+  }
+
   private async fetchWithRetry<T>(
     url: string,
-    options: CustomFetchOptions<T> = {}
+    options: InternalFetchOptions<T> = {}
   ): Promise<T> {
-    const { retry = 0, retryDelay = 1000, timeout, ...fetchOptions } = options
+    const { retry = 0, retryDelay = 1000, timeout, _retriedAfterRefresh, _isAuthRefreshCall, ...fetchOptions } = options
 
     let processedUrl = url
     let processedOptions = fetchOptions
@@ -134,7 +173,27 @@ class ApiClient {
       } catch (error: any) {
         lastError = error
 
-        if (error?.response?.status >= 400 && error?.response?.status < 500) {
+        const status = error?.response?.status
+        const isUnauthorized = status === 401
+        const isAuthRoute = processedUrl === this.authRefreshUrl || processedUrl === this.authLoginUrl
+
+        // 401, not from the auth routes themselves, and not already retried
+        // once after a refresh → refresh, then retry this exact request one
+        // time. Any 401 that happens AFTER that retry falls through to the
+        // normal error path instead of looping forever.
+        if (isUnauthorized && !isAuthRoute && !_retriedAfterRefresh) {
+          try {
+            await this.refreshAccessToken()
+            return await this.fetchWithRetry<T>(url, {
+              ...options,
+              _retriedAfterRefresh: true,
+            })
+          } catch (refreshError) {
+            return this.handleError(refreshError)
+          }
+        }
+
+        if (status >= 400 && status < 500) {
           break
         }
 

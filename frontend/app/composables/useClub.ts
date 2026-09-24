@@ -2,18 +2,22 @@ import { useToast } from "~/components/ui/Toast"
 import type { ContractView, FinanceSummary, LedgerEntry } from "~/types"
 
 
-export function useClub({ clubId }: { clubId: string }) {
+export function useClub() {
   const { public: { apiBase } } = useRuntimeConfig()
-  const store = useFinanceStore()
   const { $api } = useNuxtApp()
   const { notify } = useToast()
+
+  const store = useFinanceStore()
+  const authStore = useAuthStore()
+
+  const clubId = computed(() => authStore.club?.id).value
 
   async function getFinance(): Promise<void> {
     try {
       const [summary, ledger, contract] = await Promise.all([
         $api.get<FinanceSummary>(`${apiBase}/api/clubs/${clubId}/finances`),
         $api.get<LedgerEntry>(`${apiBase}/api/clubs/${clubId}/ledger`),
-        $api.get<ContractView>(`${apiBase}/api/clubs/${clubId}/contracts`)
+        $api.get<ContractView[]>(`${apiBase}/api/clubs/${clubId}/contracts`)
       ])
 
       store.setContracts(contract)

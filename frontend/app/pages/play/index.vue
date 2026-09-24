@@ -6,7 +6,13 @@ import { useManagerDashboard } from '~/composables/manager/dashboard';
 
 const { getOffers } = useManagerOffer()
 const { getDashboardData } = useManagerDashboard()
-// const { getFinance } = useClub()
+const { getFinance } = useClub()
+
+const financeStore = useFinanceStore()
+
+const finance = {
+  summary: computed(() => financeStore.summary)
+}
 
 const loading = reactive<Record<string, "loading" | "loaded" | "error">>({})
 const offers = ref<Offer[]>([])
@@ -37,7 +43,7 @@ async function getManagerDashboardData() {
 async function getClubFinance() {
   try {
     loading.finance = "loading"
-
+    await getFinance()
     loading.finance = "loaded"
   } catch {
     loading.finance = "error"
@@ -47,7 +53,8 @@ async function getClubFinance() {
 async function init() {
   await Promise.all([
     getManagerDashboardData(),
-    getManagerOffers()
+    getManagerOffers(),
+    getClubFinance()
   ])
 }
 
@@ -55,7 +62,7 @@ onMounted(() => init())
 </script>
 
 <template>
-  <section class="space-y-5">
+  <section class="space-y-5 font-mono">
     <h2 class="page__header"></h2>
     <div class="grid gap-5 grid-cols-4 grid-rows-2">
       <div class="col-span-2 bg-void-900 border-brutal border-cyan-300 p-5 overflow-x-auto">
@@ -88,13 +95,41 @@ onMounted(() => init())
           {{ dashboard }}
         </div>
       </div>
-      <div class="border-brutal border-void-500 p-5">
+      <div class="border-brutal p-5 space-y-5" :class="[finance.summary.value!.cash <= 0 ? 'border-loss-500' : 'border-void-500']">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Finance</h3>
         </div>
 
-        <div class="mt-5">
-          // Red border if finance is in crisis
+        <UiLoader v-if="loading.finance === 'loading'" />
+        <template v-else-if="loading.finance === 'loaded'">
+          <div class="grid gap-y-2 grid-cols-2 grid-rows-2">
+            <div class="flex flex-col justify-center">
+              <h3 class="heading heading--medium">
+                {{ formatMoneyCompact(finance.summary.value!.cash) }}
+              </h3>
+              <h4 class="heading heading--small">available cash</h4>
+            </div>
+            <div class="">
+              <h3 class="font-semibold text-2xl">{{ formatMoneyCompact(finance.summary.value!.transfer_budget.available!) }}</h3>
+              <h4 class="heading heading--small">transfer budget</h4>
+            </div>
+            <div class="">
+              <h3 class="font-semibold text-2xl">{{
+                formatMoneyCompact(finance.summary.value!.wage_budget.available!) }}</h3>
+              <h4 class="heading heading--small">wage budget</h4>
+            </div>
+            <div class="">
+              <h3 class="font-semibold text-2xl">{{
+                formatMoneyCompact(finance.summary.value!.projected_year_end_balance) }}</h3>
+              <h4 class="heading heading--small">projected year balance</h4>
+            </div>
+          </div>
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="getClubFinance()">Retry</button>
         </div>
       </div>
       <div class="col-span-2 row-span-2 border-brutal border-void-700 p-5">
