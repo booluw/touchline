@@ -63,13 +63,16 @@ type ClubCupView struct {
 func (s *Service) MyClubCompetitions(ctx context.Context, worldID, clubID uuid.UUID) ([]ClubCompetitionItem, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT cc.role, cc.joined_at,
-		       cm.competition_type, cm.id, cm.name, cm.status, cm.tier, cm.team_count, cm.prize_pool,
+		       cm.competition_type, cm.id, cm.name, cm.status, cm.tier, cm.team_count, COALESCE(cm.prize_pool, 0),
 		       wc.id, wc.name, wc.code,
 		       r.format, r.is_home_and_away,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'teams', '0')::int,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'enter_when_survivors', '0')::int,
 		       COALESCE(r.qualification_rules->'campaign'->>'total_rounds', '0')::int,
-		       s.id, s.season_label, s.season_number, s.status
+		       s.id,
+		       COALESCE(s.season_label, ''),
+		       COALESCE(s.season_number, 0),
+		       COALESCE(s.status, '')
 		FROM competition.club_competitions cc
 		JOIN competition.competitions cm ON cm.id = cc.competition_id
 		JOIN world.countries wc ON wc.id = cm.country_id

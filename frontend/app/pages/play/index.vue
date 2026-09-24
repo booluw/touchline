@@ -1,14 +1,22 @@
 <script lang="ts" setup>
 import { useManagerOffer } from '~/composables/manager/offer';
-import type { Offer } from '~/types';
+import type { NextFixture, Offer } from '~/types';
 import { formatMoneyCompact } from '../../utils/helpers';
 import { useManagerDashboard } from '~/composables/manager/dashboard';
 
 const { getOffers } = useManagerOffer()
 const { getDashboardData } = useManagerDashboard()
-const { getFinance } = useClub()
+const { getFinance, getCompetitions, getFixtures, getNextFixture, getDynamics } = useClub()
 
 const financeStore = useFinanceStore()
+const clubStore = useClubStore()
+
+const club = {
+  competitions: computed(() => clubStore.competitions).value,
+  club: computed(() => clubStore.club).value,
+  game: ref<NextFixture>().value,
+  dynamics: ref().value
+}
 
 const finance = {
   summary: computed(() => financeStore.summary)
@@ -50,11 +58,45 @@ async function getClubFinance() {
   }
 }
 
+async function getClubCompetitions() {
+  try {
+    loading.competitions = "loading"
+    await getCompetitions()
+    loading.competitions = "loaded"
+  } catch (error) {
+    loading.competitions = "error"
+  }
+}
+
+async function getClubNextFixtures() {
+  try {
+    loading.fixtures = "loading"
+    club.game = await getNextFixture()
+    loading.fixtures = "loaded"
+  } catch (error) {
+    loading.fixtures = "error"
+  }
+}
+
+async function getClubDynamics() {
+  try {
+    loading.dynamics = "loading"
+    club.dynamics = await getDynamics()
+    loading.dynamics = "loaded"
+  } catch (error) {
+    loading.dynamics = "error"
+  }
+}
+
 async function init() {
   await Promise.all([
     getManagerDashboardData(),
     getManagerOffers(),
-    getClubFinance()
+    getClubFinance(),
+    getClubCompetitions(),
+    getClubNextFixtures(),
+    getClubDynamics()
+    // getClubFixtures()
   ])
 }
 
@@ -70,6 +112,10 @@ onMounted(() => init())
           <h3 class="heading heading--small">Overview</h3>
         </div>
         <div class="mt-5">
+          <div v-if="club.game" class="">
+            Next Game Goes Here
+          </div>
+          {{ club.game }}
           Current Match / Last Match Report / Next Match Report
           <br /><br />
           // cyan if there's a current match
@@ -77,12 +123,48 @@ onMounted(() => init())
         </div>
       </div>
       <div class="border-brutal border-void-500 p-5">
-        <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
-          <h3 class="heading heading--small">League</h3>
+        <div v-if="loading.competitions !== 'loaded'" class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
+          <h3 class="heading heading--small">Competitions</h3>
+          <nuxt-link to="/play/competitions" class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
+            all
+          </nuxt-link>
         </div>
 
-        <div class="mt-5">
-          Show League Table
+        <UiLoader v-if="loading.competitions === 'loading'" />
+        <template v-else-if="loading.competitions === 'loaded'">
+          <div class="carousel h-50 p-0 m-0">
+            <div
+              v-for="(competition, key) in club.competitions"
+              :key
+              class="carousel__item w-full h-full font-mono"
+            >
+              <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
+                <h3 class="uppercase heading heading--small">
+                  {{ competition[competition.competition_type as 'league']?.competition.name }}
+                </h3>
+
+                <nuxt-link to="/play/competitions"
+                  class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase"
+                >
+                  {{ competition.competition_type.split("_").join(" ") }}
+                </nuxt-link>
+              </div>
+              <template v-if="competition[competition.competition_type as 'league']?.started">
+                League Has started, show table or next fixture
+              </template>
+              <div v-else class="uppercase text-xs flex flex-col items-start gap-2 py-5">
+                <div class="text-draw-500">
+                  {{ competition.competition_type.split("_").join(" ") }} has not yet started
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="getClubCompetitions()">Retry</button>
         </div>
       </div>
       <div class="row-span-2 border-brutal border-void-800 p-5">
@@ -95,7 +177,7 @@ onMounted(() => init())
           {{ dashboard }}
         </div>
       </div>
-      <div class="border-brutal p-5 space-y-5" :class="[finance.summary.value!.cash <= 0 ? 'border-loss-500' : 'border-void-500']">
+      <div class="border-brutal p-5 space-y-5" :class="[finance.summary.value?.cash <= 0 ? 'border-loss-500' : 'border-void-500']">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Finance</h3>
         </div>

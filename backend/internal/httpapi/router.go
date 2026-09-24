@@ -90,6 +90,16 @@ func (s *server) router() *gin.Engine {
 			manager.GET("/me/offers", s.handleListOffers)
 			manager.POST("/me/resign", s.handleResign)
 			manager.GET("/:id/profile", s.handleGetManagerProfile)
+			manager.GET("/me/board", s.handleBoardView)
+			manager.POST("/me/board/mandates/:id/negotiate", s.handleNegotiateMandate)
+			manager.GET("/me/policies/:type", s.handleGetPolicy)
+			manager.PUT("/me/policies/:type", s.handleUpsertPolicy)
+			manager.DELETE("/me/policies/:type", s.handleDeletePolicy)
+			manager.GET("/me/absence", s.handleGetAbsence)
+			manager.PUT("/me/absence", s.handleSetAway)
+			manager.DELETE("/me/absence", s.handleClearAway)
+			manager.GET("/me/absence-summary", s.handleGetAbsenceSummary)
+			manager.GET("/me/competitions", s.handleMyClubCompetitions)
 		}
 
 		// Social messaging (S06-04b): the manager's inbox and sending.
@@ -116,26 +126,6 @@ func (s *server) router() *gin.Engine {
 		api.POST("/transfers/bids", s.requireAuth, s.handlePlaceBid)
 		api.GET("/transfers/bids", s.requireAuth, s.handleListBids)
 		api.POST("/transfers/bids/:id/respond", s.requireAuth, s.handleRespondBid)
-
-		// Board (S06-02): confidence + structured mandates, sporting-target
-		// negotiation. World-scoped like the transfer market; the board is
-		// always that of the caller's current club.
-		api.GET("/managers/me/board", s.requireAuth, s.handleBoardView)
-		api.POST("/managers/me/board/mandates/:id/negotiate", s.requireAuth, s.handleNegotiateMandate)
-
-		// PolicyBot (S06-05): per-manager delegation policies and absence
-		// state. World-scoped to the caller's manager via session identity.
-		api.GET("/managers/me/policies/:type", s.requireAuth, s.handleGetPolicy)
-		api.PUT("/managers/me/policies/:type", s.requireAuth, s.handleUpsertPolicy)
-		api.DELETE("/managers/me/policies/:type", s.requireAuth, s.handleDeletePolicy)
-		api.GET("/managers/me/absence", s.requireAuth, s.handleGetAbsence)
-		api.PUT("/managers/me/absence", s.requireAuth, s.handleSetAway)
-		api.DELETE("/managers/me/absence", s.requireAuth, s.handleClearAway)
-		api.GET("/managers/me/absence-summary", s.requireAuth, s.handleGetAbsenceSummary)
-
-		// My club's competitions (S04-01): the league table and each cup's
-		// round + next fixture in one call. Empty when the caller is unemployed.
-		api.GET("/managers/me/competitions", s.requireAuth, s.handleMyClubCompetitions)
 
 		// Player morale + playing time (S06-03): per-club squad overview and
 		// individual detail with the 'why'; manager-facing promise and

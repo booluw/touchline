@@ -35,8 +35,10 @@ export interface UserOffer extends User {
 export function useAuth() {
   const { public: { apiBase } } = useRuntimeConfig()
   const { $api } = useNuxtApp()
-  const store = useAuthStore()
   const { notify } = useToast()
+
+  const store = useAuthStore()
+  const clubStore = useClubStore()
 
   const user = ref<string | null>(null)
   const worlds = ref<WorldOption[]>([])
@@ -51,7 +53,7 @@ export function useAuth() {
       const { club, ...resp} = await $api.post<User>(`${apiBase}/api/auth/login`, payload, { auth: false })
       
       store.setUser(resp)
-      store.setClub(club)
+      clubStore.setClub(club)
 
       notify({
         title: 'Welcome back',

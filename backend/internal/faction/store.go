@@ -203,7 +203,9 @@ func (s *store) componentRoots(ctx context.Context, q querier, worldID, clubID u
 			SELECT r.start, u.b
 			FROM reach r JOIN undirected u ON u.a = r.node
 		)
-		SELECT start::text, MIN(node)::text FROM reach GROUP BY start`, worldID, clubID)
+		SELECT start::text, (array_agg(node ORDER BY node))[1]::text
+		FROM reach
+		GROUP BY start`, worldID, clubID)
 	if err != nil {
 		return nil, fmt.Errorf("faction: component roots: %w", err)
 	}

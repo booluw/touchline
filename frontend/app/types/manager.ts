@@ -82,3 +82,200 @@ export interface ContractView {
   release_clause?: number
   status: string
 }
+
+export type CompetitionType = 'league' | 'domestic_cup';
+
+export type CupStage = 'not_started' | 'waiting' | 'playing' | 'eliminated';
+
+export interface SeasonRef {
+  id: string;
+  label: string;
+  number: number;
+  status: string;
+}
+
+export interface CountryRef {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface StandingRow {
+  club_name: string;
+  club_short: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goals_for: number;
+  goals_against: number;
+  points: number;
+}
+
+export interface Standings {
+  season_id: string;
+  season_label: string;
+  season_number: number;
+  status: string;
+  rows: StandingRow[];
+}
+
+export interface League {
+  id: string;
+  world_id: string;
+  country_id: string;
+  name: string;
+  tier: number;
+  team_count: number;
+  status: string;
+  promotions: number;
+  relegations: number;
+  promotes_to: string | null;
+  relegates_to: string | null;
+}
+
+export interface Cup {
+  id: string;
+  world_id: string;
+  name: string;
+  competition_type: 'domestic_cup';
+  status: string;
+  prize_pool: number;
+  country: CountryRef;
+  format: string;
+  is_home_and_away: boolean;
+  first_tier_bye: number;
+  survivor_threshold: number;
+}
+
+// Shape guessed: the code reads fixtures[i].Competition.ID and .Matchday,
+// so it's likely nested rather than the flat OpenAPI CompetitionFixture.
+export interface CompetitionFixture {
+  id: string;
+  world_id: string;
+  competition: { id: string; name?: string };
+  home_club_id: string;
+  home_club_name: string;
+  away_club_id: string;
+  away_club_name: string;
+  matchday: number;
+  scheduled_at: string;
+  status: 'scheduled' | 'running' | 'finished';
+  home_score?: number | null;
+  away_score?: number | null;
+}
+
+export interface ClubLeagueView {
+  competition: League;
+  season?: SeasonRef | null;   // absent/null until a season exists
+  started: boolean;
+  standings?: Standings | null; // null when no season
+  next_fixture?: CompetitionFixture | null;
+}
+
+export interface ClubCupView {
+  competition: Cup;
+  season?: SeasonRef | null;
+  started: boolean;
+  stage: CupStage;
+  total_rounds: number;
+  current_round: number;
+  champion?: unknown | null;   // type comes from cupClubState, not visible here
+  next_fixture?: CompetitionFixture | null;
+}
+
+export interface Competition {
+  role: string;
+  joined_at: string;           // ISO timestamp
+  competition_type: CompetitionType;
+  league?: ClubLeagueView | null; // set only when competition_type === 'league'
+  cup?: ClubCupView | null;       // set only when competition_type === 'domestic_cup'
+}
+
+export interface Fixture {
+  id: string
+  world_id: string,
+  competition: {
+    id: string,
+    name: string
+  },
+  home_club: Club,
+  away_club: Club,
+  matchday: number,
+  scheduled_at: string,
+  status: FixtureStatus
+}
+
+export interface NextFixture {
+  fixture: Fixture;
+  gameweek: number;
+  home_or_away: HomeOrAway;
+  derby: boolean;
+  golden_goal: boolean;
+  opponent: Opponent;
+}
+
+interface Opponent {
+  club: Club;
+  country: Country;
+  is_ai_controlled: boolean;
+  manager: Manager;
+  reputation: number;
+  tier: number;
+  league_position: number;
+  form: Form;
+  squad_count: number;
+  top_players: TopPlayer[];
+}
+
+interface Country {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface Manager {
+  id: string;
+  is_policy_bot: boolean;
+}
+
+interface Form {
+  form_string: string;
+  current_rating: number;
+}
+
+interface TopPlayer {
+  id: string;
+  person_id: string;
+  first_name: string;
+  last_name: string;
+  display_name: string;
+  primary_position: PlayerPosition;
+  rating: number;
+}
+
+type HomeOrAway = "home" | "away";
+
+type FixtureStatus =
+  | "scheduled"
+  | "live"
+  | "completed"
+  | "postponed"
+  | "cancelled";
+
+type PlayerPosition =
+  | "GK"
+  | "CB"
+  | "LB"
+  | "RB"
+  | "LWB"
+  | "RWB"
+  | "CDM"
+  | "CM"
+  | "CAM"
+  | "LM"
+  | "RM"
+  | "LW"
+  | "RW"
+  | "ST"
+  | "CF";
