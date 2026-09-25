@@ -11,11 +11,12 @@ Relates to: [setup-and-launch.md](setup-and-launch.md),
 ticks), [glossary.md](glossary.md) (the terms used here).
 
 **In short:** a season exists per league, one at a time. Season #1 is started
-via `POST /api/admin/worlds/:id/leagues/:leagueID/season`. After that the last
-result of a season triggers a single atomic transaction per country that
-completes the old season, applies promotions/relegations, and materialises the
-next season — scheduled to start after the configured off-season gap, with its
-`upcoming` status flipped to `in_progress` the moment its first fixture is due.
+via `POST /api/admin/worlds/:id/leagues/:leagueID/season` — optionally with a
+chosen kickoff date pinned in the body. After that the last result of a season
+triggers a single atomic transaction per country that completes the old season,
+applies promotions/relegations, and materialises the next season — scheduled
+to start after the configured off-season gap, with its `upcoming` status
+flipped to `in_progress` the moment its first fixture is due.
 
 ---
 
@@ -50,8 +51,20 @@ curl -c /tmp/jar -b /tmp/jar -X POST \
 #          "season_number": 1, "status": "in_progress" }
 ```
 
-Wraps the `Service.StartSeason` seam (`internal/competition/seeding.go`). What
-it does, in one transaction:
+Leaving the body empty starts the season and lets it kick off the **day after
+the world's current date**. To pin matchday 1 to a date instead, send it in a
+JSON body:
+
+```bash
+curl -c /tmp/jar -b /tmp/jar -X POST \
+  -H 'content-type: application/json' \
+  -d '{"kickoff_date": "2031-08-02"}' \
+  localhost:8080/api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season
+# 201 → matchday 1 now lands exactly on 2031-08-02
+```
+
+Wraps the `Service.StartSeason` / `Service.StartSeasonKickoff` seams
+(`internal/competition/seeding.go`). What it does, in one transaction:
 
 1. Validates the world exists and is not `archived`, and that
    `leagueID` belongs to that world (`ErrCompetitionWorldMismatch`).
@@ -63,13 +76,21 @@ it does, in one transaction:
    status `in_progress`) with `competition_entries` from the current league
    memberships.
 5. Generates the **deterministic double round-robin** fixture list, paced
-   across the game-week (IM03): a league plays `matchdays_per_week` matchdays
-   (default 3) spread over its `days_per_week` game-days (default 7, from the
-   world calendar), anchored to the world's reference date
-   (`launched_at`/`created_at`). Matchday `k` lands on game-day
-   `floor((k-1) × days_per_week / matchdays_per_week) + 1` — with the defaults,
-   days 1,3,5,8,10,12,… (two playing days, one rest).
+   across the game-week (IM03). The anchor for the calendar is the world's
+   current date by default (matchday 1 = current date + 1), or **the day
+   before a supplied `kickoff_date`** — so a pinned date lands exactly on
+   matchday 1. A pinned date that is not a calendar day before the world's
+   current date (matchday 1 would already be in the past) is rejected, and so
+   is one that is **not an allowed scheduling weekday** when the league's
+   effective `allowed_weekdays` set (IM05) is non-empty. Matchday `k` lands on
+   game-day `floor((k-1) × days_per_week / matchdays_per_week) + 1` over the
+   league's pacing rules — with the defaults, days 1,3,5,8,10,12,… (two
+   playing days, one rest).
 6. Emits `SEASON_CREATED` (world event, carries the world replay seed).
+7. Publishes **two country-wide `announcement` news stories** so the world sees
+   the new season land: the fixture list going out, and the official kickoff
+   day. Each links to the `SEASON_CREATED` event and reads the actual first
+   matchday from `MIN(scheduled_at)` of the generated fixtures.
 
 ### Fixture pacing and kickoff times (IM03)
 
@@ -122,7 +143,12 @@ set**, which replaces the mechanical day spacing when present.
   that moves fixtures publishes a country-scoped `scheduling` news story.
 
 Error mapping: `404` for unknown world/league; `409` for an archived world,
-a league from another world, an already-seeded league, or an unseeded league.
+a league from another world, an already-seeded league, or an unseeded league;
+`400` for a malformed `kickoff_date` (must be a `YYYY-MM-DD` calendar date);
+`422` for a kickoff date that precedes the world's current date or lands on a
+day the league's effective `allowed_weekdays` forbids (both validate before
+anything is written — the season is not created, the 201 `SEASON_CREATED`
+event and announcements do not appear).
 
 Requires: a **seeded** league (clubs + members) and a world that will be
 playable when matchdays arrive. The world may be `provisioning` or even
@@ -230,6 +256,14 @@ with the replay seed on the creation event.
 **Is there an admin "start season" endpoint?** Yes — `POST
 /api/admin/worlds/:id/leagues/:leagueID/season` starts season #1. All later
 seasons roll over automatically.
+
+**Can I choose when season #1 kicks off?** Yes. An empty body starts the
+season on the world's current date and schedules matchday 1 for the next day,
+so a freshly-seeded world becomes playable immediately. A JSON body with
+`kickoff_date` pins matchday 1 to exactly that date (handy for aligning a
+launch calendar); the fixture calendar anchors the day before. Dates already
+in the past, or off the league's allowed weekdays, come back `422` and write
+nothing.
 
 **Do I need to start each season manually?** Only season #1, per league. After
 the first rollover the loop is self-sustaining as long as the world stays

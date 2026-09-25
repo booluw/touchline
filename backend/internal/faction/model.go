@@ -19,6 +19,7 @@ package faction
 import (
 	"github.com/google/uuid"
 
+	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -205,12 +206,87 @@ func playerRefs(ids []string, names map[string]string) []*apiref.PlayerRef {
 }
 
 // TierView is one hierarchy entry in the API read model. The flat player id
-// stays internal; the wire carries a player ref.
+// stays internal; the wire carries a player ref and, for influencers, the full
+// player profile (no follow-up roster request needed).
 type TierView struct {
 	PlayerID string            `json:"-"`
 	Player   *apiref.PlayerRef `json:"player"`
 	Name     string            `json:"-"`
 	Tier     Tier              `json:"tier"`
+	Profile  *PlayerProfile    `json:"profile,omitempty"`
+}
+
+// PlayerAttributes is one player's six persisted attribute-category means
+// ([1,100] each; 0 until seeded), rolled up round-half-up from the EAV exactly
+// like internal/squad.
+type PlayerAttributes struct {
+	Technical   int `json:"technical"`
+	Physical    int `json:"physical"`
+	Mental      int `json:"mental"`
+	Tactical    int `json:"tactical"`
+	Goalkeeping int `json:"goalkeeping"`
+	Positional  int `json:"positional"`
+}
+
+// PlayerProfile is the full player read-model attached to each returned
+// hierarchy tier: identity, uniform, behavioural personality and the six
+// attribute-category means plus the position-weighted overall rating.
+type PlayerProfile struct {
+	ID                  uuid.UUID        `json:"id"`
+	Name                string           `json:"name"`
+	Position            string           `json:"position"`
+	Age                 int              `json:"age"`
+	Nationality         string           `json:"nationality"`
+	SecondNationality   string           `json:"second_nationality,omitempty"`
+	SquadNumber         *int             `json:"squad_number,omitempty"`
+	Status              string           `json:"status"`
+	SquadRole           string           `json:"squad_role,omitempty"`
+	AcademyProduct      bool             `json:"is_academy_product"`
+	Leadership          int              `json:"leadership"`
+	Sociability         int              `json:"sociability"`
+	EmotionalVolatility int              `json:"emotional_volatility"`
+	Loyalty             int              `json:"loyalty"`
+	Attributes          PlayerAttributes `json:"attributes"`
+	Overall             int              `json:"overall"`
+}
+
+// profileOf renders MemberProfile into the wire profile, computing the
+// position-weighted overall (squad.PositionalOverall, capped at 99).
+func profileOf(m MemberProfile) *PlayerProfile {
+	att := m.Attributes
+	return &PlayerProfile{
+		ID:                  mustUUID(m.PlayerID),
+		Name:                m.Name,
+		Position:            m.Position,
+		Age:                 m.Age,
+		Nationality:         m.Nationality,
+		SecondNationality:   m.SecondNationality,
+		SquadNumber:         m.SquadNumber,
+		Status:              m.Status,
+		SquadRole:           m.SquadRole,
+		AcademyProduct:      m.AcademyProduct,
+		Leadership:          m.Leadership,
+		Sociability:         m.Sociability,
+		EmotionalVolatility: m.Volatility,
+		Loyalty:             m.Loyalty,
+		Attributes:          att,
+		Overall: squad.PositionalOverall(m.Position, squad.AttributeSnapshot{
+			Technical:   att.Technical,
+			Physical:    att.Physical,
+			Mental:      att.Mental,
+			Tactical:    att.Tactical,
+			Goalkeeping: att.Goalkeeping,
+			Positional:  att.Positional,
+		}),
+	}
+}
+
+func mustUUID(id string) uuid.UUID {
+	u, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil
+	}
+	return u
 }
 
 // Dynamics is the club read model for GET /api/clubs/:id/dynamics: computed

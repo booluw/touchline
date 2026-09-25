@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -108,8 +109,25 @@ func TestGetDynamicsGeneratesIdempotentCanonicalGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get dynamics: %v", err)
 	}
-	if len(first.Tiers) != len(players) {
-		t.Fatalf("tiers = %d, want %d", len(first.Tiers), len(players))
+	if len(first.Tiers) == 0 || len(first.Tiers) > len(players) {
+		t.Fatalf("tiers = %d, want between 1 and %d (influencers only)", len(first.Tiers), len(players))
+	}
+	for i, tv := range first.Tiers {
+		if tv.Tier == TierOther {
+			t.Fatalf("tier %d must not be 'other' (influencers only), got %s", i, tv.Tier)
+		}
+		if tv.Profile == nil {
+			t.Fatalf("tier %d (%s) must carry a full player profile", i, tv.PlayerID)
+		}
+		if tv.Profile.Overall < 1 || tv.Profile.Overall > 99 {
+			t.Fatalf("tier %d (%s) overall = %d out of [1,99]", i, tv.PlayerID, tv.Profile.Overall)
+		}
+		if tv.Profile.Name == "" || tv.Profile.Position == "" {
+			t.Fatalf("tier %d (%s) profile missing identity: %+v", i, tv.PlayerID, tv.Profile)
+		}
+	}
+	if first.Tiers[0].Tier != TierTeamLeader {
+		t.Fatalf("highest-ranked tier must be team leader, got %s", first.Tiers[0].Tier)
 	}
 	if first.Cohesion < CohesionMin || first.Cohesion > CohesionMax {
 		t.Fatalf("cohesion %d out of [%d,%d]", first.Cohesion, CohesionMin, CohesionMax)
@@ -154,6 +172,57 @@ func TestGetDynamicsGeneratesIdempotentCanonicalGraph(t *testing.T) {
 	}
 	if nonCanonical != 0 {
 		t.Fatalf("%d player edges are not canonically oriented", nonCanonical)
+	}
+}
+
+// TestGetDynamicsSecondReadIsNoOp: once the persisted graph matches the squad
+// fingerprint, a steady-state read skips the rewrite entirely — the fingerprint
+// rows stay put and no edge's last_interaction_at is touched, so the ~1100-edge
+// batch write that used to dominate GET /dynamics latency is paid once.
+func TestGetDynamicsSecondReadIsNoOp(t *testing.T) {
+	ctx := context.Background()
+	pool, worldID, clubID, managerID, _ := factionFixture(t)
+	svc := NewService(pool, nil)
+
+	if _, err := svc.GetDynamics(ctx, worldID, managerID, clubID); err != nil {
+		t.Fatalf("first dynamics read: %v", err)
+	}
+	var stamp time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT MAX(last_interaction_at) FROM social.relationships
+		WHERE world_id = $1 AND entity_a_type = 'player' AND entity_b_type = 'player'`,
+		worldID).Scan(&stamp); err != nil {
+		t.Fatalf("max last_interaction_at: %v", err)
+	}
+	var before, afterHash int64
+	if err := pool.QueryRow(ctx, `
+		SELECT member_hash FROM social.squad_graph_state WHERE world_id = $1 AND club_id = $2`,
+		worldID, clubID).Scan(&before); err != nil {
+		t.Fatalf("squad graph state after first read: %v", err)
+	}
+
+	time.Sleep(1500 * time.Millisecond)
+
+	if _, err := svc.GetDynamics(ctx, worldID, managerID, clubID); err != nil {
+		t.Fatalf("second dynamics read: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT member_hash FROM social.squad_graph_state WHERE world_id = $1 AND club_id = $2`,
+		worldID, clubID).Scan(&afterHash); err != nil {
+		t.Fatalf("squad graph state after second read: %v", err)
+	}
+	if afterHash != before {
+		t.Fatalf("fingerprint changed %d → %d; second read must be a no-op", before, afterHash)
+	}
+	var afterStamp time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT MAX(last_interaction_at) FROM social.relationships
+		WHERE world_id = $1 AND entity_a_type = 'player' AND entity_b_type = 'player'`,
+		worldID).Scan(&afterStamp); err != nil {
+		t.Fatalf("max last_interaction_at after: %v", err)
+	}
+	if afterStamp.After(stamp) {
+		t.Fatalf("second read rewrote edges (%v → %v); fingerprint must suppress the rewrite", stamp, afterStamp)
 	}
 }
 

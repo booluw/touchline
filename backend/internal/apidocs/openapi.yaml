@@ -2824,6 +2824,11 @@ paths:
         rollover, after the admin-tunable off-season gap
         (`season.off_season_ticks` world config, or a per-league override in
         `competition_rules.scheduling_rules`).
+
+        Without a body the season kicks off the day after the world's current
+        date. An optional body pins matchday 1 to a calendar date:
+        `{"kickoff_date": "2031-08-02"}`. Dates before the world's current date
+        or off the league's effective allowed weekdays are rejected with 422.
       parameters:
         - $ref: "#/components/parameters/WorldID"
         - name: leagueID
@@ -2831,6 +2836,18 @@ paths:
           required: true
           description: League id.
           schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000a" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kickoff_date:
+                  type: string
+                  format: date
+                  description: Calendar date (YYYY-MM-DD) for matchday 1; defaults to the world's current date plus one day.
+                  example: "2031-08-02"
       responses:
         "201":
           description: The started season (status in_progress).
@@ -2856,6 +2873,13 @@ paths:
           description: |
             League already has a season, is not seeded, or does not belong to
             this world; the world is archived.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: |
+            The kickoff date precedes the world's current date, or it is not an
+            allowed scheduling weekday for this league.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -4400,9 +4424,46 @@ components:
           allOf: [{ $ref: "#/components/schemas/Explanation" }]
     SquadTier:
       type: object
+      description: |
+        One hierarchy rung in the dynamics read. Only influencers are returned
+        (ranks 0..5 — team leader, highly influential, influential); the
+        'other' tail is dropped so the wire is exactly the frontend's
+        influencers panel. Each tier carries the full player profile, so the
+        read needs no follow-up roster request.
       properties:
         player: { $ref: "#/components/schemas/NestedPlayer" }
-        tier: { type: string, enum: [team_leader, highly_influential, influential, other] }
+        tier: { type: string, enum: [team_leader, highly_influential, influential] }
+        profile: { $ref: "#/components/schemas/PlayerProfile" }
+    PlayerProfile:
+      type: object
+      description: "Full player read-model attached to each returned dynamics tier: identity, uniform, behavioural personality and the six attribute-category means plus the position-weighted overall."
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        position: { type: string }
+        age: { type: integer, minimum: 15, maximum: 45 }
+        nationality: { type: string }
+        second_nationality: { type: string }
+        squad_number: { type: integer, nullable: true }
+        status: { type: string, enum: [active, injured, suspended, on_loan, retired, free_agent] }
+        squad_role: { type: string, enum: [key_player, rotation, squad_player, development] }
+        is_academy_product: { type: boolean }
+        leadership: { type: integer, minimum: 1, maximum: 100 }
+        sociability: { type: integer, minimum: 1, maximum: 100 }
+        emotional_volatility: { type: integer, minimum: 1, maximum: 100 }
+        loyalty: { type: integer, minimum: 1, maximum: 100 }
+        attributes: { $ref: "#/components/schemas/PlayerAttributes" }
+        overall: { type: integer, minimum: 1, maximum: 99 }
+    PlayerAttributes:
+      type: object
+      description: "Six persisted attribute-category means ([1,100] each, round-half-up roll-up of the player_attributes EAV)."
+      properties:
+        technical: { type: integer, minimum: 1, maximum: 100 }
+        physical: { type: integer, minimum: 1, maximum: 100 }
+        mental: { type: integer, minimum: 1, maximum: 100 }
+        tactical: { type: integer, minimum: 1, maximum: 100 }
+        goalkeeping: { type: integer, minimum: 1, maximum: 100 }
+        positional: { type: integer, minimum: 1, maximum: 100 }
     Faction:
       type: object
       properties:

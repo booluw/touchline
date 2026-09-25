@@ -68,7 +68,7 @@ func (s *Service) GetDynamics(ctx context.Context, worldID, managerID, clubID uu
 	if err != nil {
 		return Dynamics{}, err
 	}
-	snap, err := s.store.squadSnapshot(ctx, tx, worldID, clubID)
+	snap, err := s.store.squadSnapshot(ctx, tx, worldID, clubID, profiles)
 	if err != nil {
 		return Dynamics{}, err
 	}
@@ -112,12 +112,35 @@ func (s *Service) GetDynamics(ctx context.Context, worldID, managerID, clubID uu
 		Cohesion:         overallCohesion(res.Factions),
 		ManagerSupport:   support,
 		DressingRoomMood: mood,
-		Tiers:            sortedTiers(res.Tiers, names),
+		Tiers:            influencerTiers(res.Tiers, names, profiles),
 		Factions:         res.Factions,
 		Contagion:        res.Contagion,
 		Unrest:           unrest,
 		Explanation:      res.Explanation,
 	}, nil
+}
+
+// influencerTiers renders the hierarchy sorted the documented way but keeps
+// only the influencers (ranks 0..5: team leader, highly influential,
+// influential), each carrying the full player profile. The 'other' tail is
+// intentionally dropped — the wire is the frontend's "influencers" panel, and
+// this is where that contract is enforced.
+func influencerTiers(tiers map[string]Tier, names map[string]string, profiles []MemberProfile) []TierView {
+	out := sortedTiers(tiers, names)
+	kept := out[:0]
+	for _, t := range out {
+		if t.Tier == TierOther {
+			continue
+		}
+		for i := range profiles {
+			if profiles[i].PlayerID == t.PlayerID {
+				t.Profile = profileOf(profiles[i])
+				break
+			}
+		}
+		kept = append(kept, t)
+	}
+	return kept
 }
 
 // OnPlayerSold runs in the transfer transaction BEFORE the ownership flip, so
@@ -129,7 +152,7 @@ func (s *Service) OnPlayerSold(ctx context.Context, tx pgx.Tx, worldID uuid.UUID
 	if err != nil {
 		return err
 	}
-	snap, err := s.store.squadSnapshot(ctx, tx, worldID, clubID)
+	snap, err := s.store.squadSnapshot(ctx, tx, worldID, clubID, profiles)
 	if err != nil {
 		return err
 	}

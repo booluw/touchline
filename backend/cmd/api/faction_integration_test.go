@@ -49,8 +49,30 @@ func TestHTTPGetSquadDynamics(t *testing.T) {
 		tw.HumanClub).Scan(&players); err != nil {
 		t.Fatalf("count players: %v", err)
 	}
-	if len(tiers) != players {
-		t.Fatalf("tiers = %d, want %d (one per squad member)", len(tiers), players)
+	if len(tiers) > players {
+		t.Fatalf("tiers = %d > squad %d", len(tiers), players)
+	}
+	for i, raw := range tiers {
+		tv, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("tier %d not an object", i)
+		}
+		if tier := stringField(t, tv, "tier"); tier == "other" {
+			t.Fatalf("tier %d is 'other'; only influencers are returned", i)
+		}
+		profile, ok := tv["profile"].(map[string]any)
+		if !ok {
+			t.Fatalf("tier %d missing player profile: %v", i, tv)
+		}
+		if name := stringField(t, profile, "name"); name == "" {
+			t.Fatalf("tier %d profile has no name", i)
+		}
+		if attrs, ok := profile["attributes"].(map[string]any); !ok || len(attrs) == 0 {
+			t.Fatalf("tier %d profile missing attribute means: %v", i, profile["attributes"])
+		}
+		if ovr, ok := profile["overall"].(float64); !ok || ovr < 1 || ovr > 99 {
+			t.Fatalf("tier %d overall = %v, want [1,99]", i, profile["overall"])
+		}
 	}
 	if mv, _ := body["dressing_room_mood"].(float64); mv < 0 || mv > 100 {
 		t.Fatalf("dressing_room_mood = %v, want [0,100]", body["dressing_room_mood"])

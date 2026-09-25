@@ -311,10 +311,26 @@ func (s *Service) ValidateSeedWorld(ctx context.Context, worldID uuid.UUID) erro
 
 // StartSeason materializes the next season for a competition from its current
 // league memberships: the season row, its competition_entries, and the
-// deterministic double round-robin fixture list begun at the world's season
-// reference date. It is the launcher for a playable year — separate from
-// SeedWorld, which only guarantees clubs + members.
+// deterministic double round-robin fixture list. It is the launcher for a
+// playable year — separate from SeedWorld, which only guarantees clubs +
+// members. Season #1 kicks off the day after the world's current date;
+// StartSeasonKickoff pins matchday 1 to a caller-chosen calendar day instead.
 func (s *Service) StartSeason(ctx context.Context, worldID, competitionID uuid.UUID) (*Season, error) {
+	return s.startSeason(ctx, worldID, competitionID, nil)
+}
+
+// StartSeasonKickoff starts a league season like StartSeason but pins matchday
+// 1 of the new season to the given calendar date: the season is anchored the
+// day before that date so the first fixtures land exactly on it (also on the
+// IM05 weekday walk, provided the date is an allowed weekday). A nil date
+// behaves exactly like StartSeason (kickoff = world's current date + 1). Dates
+// before the world's current date (ErrKickoffDateInPast) or off the league's
+// effective allowed weekdays (ErrKickoffNotAllowedWeekday) are rejected.
+func (s *Service) StartSeasonKickoff(ctx context.Context, worldID, competitionID uuid.UUID, kickoffDate *time.Time) (*Season, error) {
+	return s.startSeason(ctx, worldID, competitionID, kickoffDate)
+}
+
+func (s *Service) startSeason(ctx context.Context, worldID, competitionID uuid.UUID, kickoffDate *time.Time) (*Season, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin start-season tx: %w", err)
@@ -323,9 +339,10 @@ func (s *Service) StartSeason(ctx context.Context, worldID, competitionID uuid.U
 
 	var worldStatus string
 	var worldRef time.Time
+	var currentDay int
 	err = tx.QueryRow(ctx,
-		`SELECT status, COALESCE(launched_at, created_at) FROM world.worlds WHERE id = $1 FOR UPDATE`, worldID).
-		Scan(&worldStatus, &worldRef)
+		`SELECT status, COALESCE(launched_at, created_at), current_day FROM world.worlds WHERE id = $1 FOR UPDATE`, worldID).
+		Scan(&worldStatus, &worldRef, &currentDay)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWorldNotFound
 	}
@@ -365,12 +382,21 @@ func (s *Service) StartSeason(ctx context.Context, worldID, competitionID uuid.U
 		return nil, ErrCompetitionNotSeeded
 	}
 
-	season, err := s.createSeason(ctx, tx, worldID, competitionID, worldRef, members)
+	// The season anchor is the day before matchday 1: legacy pacing plays
+	// matchday 1 on anchor + 1, so the default anchor is the world's current
+	// game-day and a caller-chosen kickoff lifts matchday 1 onto that date.
+	today := daysTruncate(worldRef).AddDate(0, 0, currentDay)
+	anchor, err := s.resolveSeasonAnchor(ctx, tx, worldID, competitionID, today, kickoffDate)
 	if err != nil {
 		return nil, err
 	}
 
-	fixtureCount, matchdays, err := s.createFixtures(ctx, tx, worldID, competitionID, members, worldRef)
+	season, err := s.createSeason(ctx, tx, worldID, competitionID, anchor, members)
+	if err != nil {
+		return nil, err
+	}
+
+	fixtureCount, matchdays, err := s.createFixtures(ctx, tx, worldID, competitionID, members, anchor)
 	if err != nil {
 		return nil, err
 	}
@@ -397,10 +423,72 @@ func (s *Service) StartSeason(ctx context.Context, worldID, competitionID uuid.U
 		return nil, err
 	}
 
+	// Press releases: the board publishes the fixture list and the official
+	// kickoff day as country-scoped 'announcement' stories, in the same tx as
+	// the season they describe (feeds never report a season the engine didn't
+	// keep, and losing either rollback together).
+	var kickoffDay *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT MIN(scheduled_at)::date FROM match.fixtures
+		WHERE competition_id = $1 AND world_id = $2 AND matchday = 1`,
+		competitionID, worldID).Scan(&kickoffDay); err != nil {
+		return nil, fmt.Errorf("load matchday-1 kickoff day: %w", err)
+	}
+	day := kickoffDay.Format("2006-01-02")
+	name, err := s.competitionName(ctx, tx, competitionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.publishAnnouncementNews(ctx, tx, worldID, competitionID, seedEvent.ID,
+		fmt.Sprintf("%s season fixtures set", name),
+		fmt.Sprintf("The %s season fixture list is set: %d matchdays across %d fixtures. Season kickoff: %s.",
+			season.SeasonLabel, matchdays, fixtureCount, day)); err != nil {
+		return nil, err
+	}
+	if err := s.publishAnnouncementNews(ctx, tx, worldID, competitionID, seedEvent.ID,
+		fmt.Sprintf("%s season kicks off %s", name, day),
+		fmt.Sprintf("The %s season officially kicks off on %s.", season.SeasonLabel, day)); err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit start-season: %w", err)
 	}
 	return season, nil
+}
+
+// resolveSeasonAnchor returns the season anchor (the day before matchday 1)
+// for a started season. Without a kickoff date it is the world's current
+// game-day, so matchday 1 lands the next day. With a date, matchday 1 is
+// pinned exactly onto it: the date must not precede the world's current date,
+// and when the league plays a weekday-set calendar (IM05) it must be one of
+// the allowed weekdays or the calendar cannot honor it.
+func (s *Service) resolveSeasonAnchor(ctx context.Context, tx pgx.Tx, worldID, leagueID uuid.UUID, today time.Time, kickoffDate *time.Time) (time.Time, error) {
+	if kickoffDate == nil {
+		return today, nil
+	}
+	p, err := s.scheduleParams(ctx, tx, leagueID, worldID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return resolveKickoffAnchor(today, *kickoffDate, p.allowedWeekdays)
+}
+
+// resolveKickoffAnchor is the pure kickoff-date rule: a requested matchday-1
+// kickoff must not precede the world's current game-day, and when the league
+// has an allowed-weekday set it must be one of those weekdays. The returned
+// anchor is the day before the kickoff so matchday 1 lands exactly on it under
+// both pacing formulas (legacy and weekday walk, whose matchday 1 is the first
+// allowed weekday on/after anchor + 1).
+func resolveKickoffAnchor(today, kickoff time.Time, allowedWeekdays []int) (time.Time, error) {
+	day := daysTruncate(kickoff)
+	if day.Before(today) {
+		return time.Time{}, ErrKickoffDateInPast
+	}
+	if len(allowedWeekdays) > 0 && !isAllowedWeekday(day, allowedWeekdays) {
+		return time.Time{}, ErrKickoffNotAllowedWeekday
+	}
+	return day.AddDate(0, 0, -1), nil
 }
 
 // createSeason inserts the next season for a league with its entries.

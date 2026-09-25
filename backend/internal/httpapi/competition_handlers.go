@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -163,7 +164,13 @@ func (s *server) handleSeedWorld(c *gin.Context) {
 
 // handleStartSeason starts a league's first season (IM01). It requires the
 // league to already be seeded (clubs present). Later seasons are created
-// automatically at rollover, after the configured off-season gap.
+// automatically at rollover, after the configured off-season gap. An optional
+// JSON body may pin matchday 1 to a calendar date:
+//
+//	{"kickoff_date": "2031-08-02"}
+//
+// Without a body the season kicks off the day after the world's current date;
+// a past date or a date off the league's allowed weekdays is rejected with 422.
 func (s *server) handleStartSeason(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -175,7 +182,25 @@ func (s *server) handleStartSeason(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid league id"})
 		return
 	}
-	season, err := s.compSvc.StartSeason(c.Request.Context(), worldID, leagueID)
+
+	var body struct {
+		KickoffDate *string `json:"kickoff_date"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid kickoff date body"})
+		return
+	}
+	var kickoff *time.Time
+	if body.KickoffDate != nil {
+		day, err := time.Parse("2006-01-02", *body.KickoffDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "kickoff_date must be a calendar date (YYYY-MM-DD)"})
+			return
+		}
+		kickoff = &day
+	}
+
+	season, err := s.compSvc.StartSeasonKickoff(c.Request.Context(), worldID, leagueID, kickoff)
 	switch {
 	case errors.Is(err, internalcompetition.ErrWorldNotFound),
 		errors.Is(err, internalcompetition.ErrCompetitionNotFound):
@@ -186,6 +211,10 @@ func (s *server) handleStartSeason(c *gin.Context) {
 		errors.Is(err, internalcompetition.ErrLeagueAlreadySeeded),
 		errors.Is(err, internalcompetition.ErrCompetitionNotSeeded):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	case errors.Is(err, internalcompetition.ErrKickoffDateInPast),
+		errors.Is(err, internalcompetition.ErrKickoffNotAllowedWeekday):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	case err != nil:
 		internalError(c, err)

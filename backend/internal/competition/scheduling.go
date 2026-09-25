@@ -414,6 +414,28 @@ func (s *Service) publishSchedulingNews(ctx context.Context, tx pgx.Tx, worldID,
 	return nil
 }
 
+// publishAnnouncementNews records a country-scoped press-release story
+// (category 'announcement') inside the caller's transaction, linked to an
+// already-recorded engine event (related_event_id). Unlike publishSchedulingNews
+// it does not raise its own event: season-start releases share the SEASON_CREATED
+// event so readers can group the fixture-list and kickoff bulletins together.
+// All-or-nothing with the season they describe.
+func (s *Service) publishAnnouncementNews(ctx context.Context, tx pgx.Tx, worldID, competitionID uuid.UUID, relatedEventID uuid.UUID, headline, body string) error {
+	var countryID *uuid.UUID
+	if err := tx.QueryRow(ctx, `
+		SELECT country_id FROM competition.competitions WHERE id = $1`,
+		competitionID).Scan(&countryID); err != nil {
+		return fmt.Errorf("load competition for announcement: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO world.news_stories (world_id, headline, body, category, related_event_id, country_id)
+		VALUES ($1, $2, $3, 'announcement', $4, $5)`,
+		worldID, headline, body, relatedEventID, countryID); err != nil {
+		return fmt.Errorf("publish announcement news: %w", err)
+	}
+	return nil
+}
+
 // competitionName is a tiny read helper for news headlines.
 func (s *Service) competitionName(ctx context.Context, tx pgx.Tx, competitionID uuid.UUID) (string, error) {
 	var name string

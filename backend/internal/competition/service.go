@@ -84,6 +84,8 @@ var (
 	ErrQualificationField       = errors.New("cup qualification field must contain at least two clubs")
 	ErrRegionMismatch           = errors.New("a qualification band must reference a league in the cup's region")
 	ErrQualificationOverlap     = errors.New("qualification bands on the same league must not overlap")
+	ErrKickoffDateInPast        = errors.New("kickoff date cannot be before the world's current date")
+	ErrKickoffNotAllowedWeekday = errors.New("kickoff date must be an allowed scheduling weekday for this league")
 )
 
 var errInternalRollover = errors.New("competition: internal rollover error")

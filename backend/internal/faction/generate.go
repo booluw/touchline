@@ -24,7 +24,9 @@ const (
 )
 
 // MemberProfile is the persistence-free input to edge generation: the identity
-// and behavioural attributes that decide who bonds with whom.
+// and behavioural attributes that decide who bonds with whom. The lower block
+// (uniform + attribute means) is read-model enrichment for the dynamics wire —
+// edge generation never reads it, so it is excluded from the graph fingerprint.
 type MemberProfile struct {
 	PlayerID          string
 	Name              string
@@ -37,6 +39,11 @@ type MemberProfile struct {
 	Sociability       int // 1..100
 	Volatility        int // 1..100
 	Loyalty           int // 1..100
+
+	SquadNumber *int
+	Status      string
+	SquadRole   string
+	Attributes  PlayerAttributes
 }
 
 // GenerateEdges deterministically derives a club's player↔player relationship

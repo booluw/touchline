@@ -533,6 +533,14 @@ func TestHTTPStartSeasonEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create unseeded league: %v", err)
 	}
+	kickoffLeague, err := svc.CreateLeague(ctx, internalcompetition.LeagueParams{CountryID: country.ID, Name: "Kickoff", Tier: 2, TeamCount: 4})
+	if err != nil {
+		t.Fatalf("create kickoff league: %v", err)
+	}
+	pastLeague, err := svc.CreateLeague(ctx, internalcompetition.LeagueParams{CountryID: country.ID, Name: "Past Start", Tier: 2, TeamCount: 4})
+	if err != nil {
+		t.Fatalf("create past-start league: %v", err)
+	}
 	if _, err := svc.SeedWorld(ctx, w); err != nil {
 		t.Fatalf("seed world: %v", err)
 	}
@@ -580,5 +588,39 @@ func TestHTTPStartSeasonEndpoint(t *testing.T) {
 	// Unseeded league -> 409.
 	if resp := post(t, ts, client, seasonURL(unseeded.ID), "", cookies); resp.StatusCode != http.StatusConflict {
 		t.Fatalf("unseeded start = %d, want 409", resp.StatusCode)
+	}
+
+	// Kickoff-date start -> 201 with matchday 1 pinned to the date.
+	var today time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT date_trunc('day', COALESCE(launched_at, created_at)) + make_interval(days => current_day::int)
+		FROM world.worlds WHERE id = $1`, w).Scan(&today); err != nil {
+		t.Fatalf("world today: %v", err)
+	}
+	kickoff := today.AddDate(0, 0, 2)
+	resp = post(t, ts, client, seasonURL(kickoffLeague.ID),
+		fmt.Sprintf(`{"kickoff_date": %q}`, kickoff.Format("2006-01-02")), cookies)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("kickoff start = %d, want 201 (body %v)", resp.StatusCode, resp.Body)
+	}
+	var md1 time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT MIN(scheduled_at)::date FROM match.fixtures
+		WHERE competition_id = $1 AND world_id = $2 AND matchday = 1`,
+		kickoffLeague.ID, w).Scan(&md1); err != nil {
+		t.Fatalf("kickoff matchday 1: %v", err)
+	}
+	if !md1.Equal(kickoff) {
+		t.Fatalf("matchday 1 = %v, want the pinned kickoff %v", md1, kickoff)
+	}
+
+	// A past kickoff date -> 422 (unprocessable), a malformed body -> 400.
+	past := today.AddDate(0, 0, -1).Format("2006-01-02")
+	if resp := post(t, ts, client, seasonURL(pastLeague.ID),
+		fmt.Sprintf(`{"kickoff_date": %q}`, past), cookies); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("past kickoff = %d, want 422", resp.StatusCode)
+	}
+	if resp := post(t, ts, client, seasonURL(pastLeague.ID), `{"kickoff_date": "not-a-date"}`, cookies); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed kickoff = %d, want 400", resp.StatusCode)
 	}
 }

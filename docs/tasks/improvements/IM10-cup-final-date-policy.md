@@ -105,10 +105,16 @@ materialized; the computation stays deterministic and never reads the wall clock
 
 ### Migration `0053`
 
+> **Numbering note (IM11):** IM11 already consumed `0053`
+> (`0053_season_kickoff_announcement.up.sql`). When IM10 is implemented it must
+> pick the **next free number** (≥ `0054`) for the three columns below; the
+> content of this section is otherwise unchanged.
+
 - `competition.competitions`: `final_date_mode TEXT NOT NULL DEFAULT 'calculated'
   CHECK (final_date_mode IN ('calculated','fixed'))`, `final_date DATE NULL`,
   `final_offset_days INT NOT NULL DEFAULT 3 CHECK (final_offset_days >= 0)`.
-- `.down.sql` drops the three columns. `migrations/README.md` gets a `0053` row.
+- `.down.sql` drops the three columns. `migrations/README.md` gets a row for
+  the chosen number.
 
 ### internal/competition
 
@@ -173,8 +179,8 @@ materialized; the computation stays deterministic and never reads the wall clock
   timing via a per-declaration policy; recurring dates derive deterministically
   from the league calendar and are editable per campaign until the final round
   materializes.
-- `backend/migrations/README.md`: `0053` row; `docs/tasks/README.md`
-  improvements list gains IM10.
+- `backend/migrations/README.md`: row for the chosen number (see the
+  numbering note above); `docs/tasks/README.md` improvements list gains IM10.
 
 ## Recorded decisions
 

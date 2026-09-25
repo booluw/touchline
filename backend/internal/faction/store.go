@@ -11,7 +11,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"io"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,7 +53,12 @@ func (s *store) worldSeed(ctx context.Context, q querier, worldID uuid.UUID) (in
 	return int64(SeedStream(0, worldID.String())), nil
 }
 
-// memberProfiles loads the squad's behavioural attributes for generation.
+// memberProfiles loads the squad's behavioural attributes for generation plus
+// the read-model enrichment (uniform, role, six attribute-category means) the
+// dynamics wire carries. The six means use the same round-half-up arithmetic as
+// internal/squad's categoryMean. Generation must NOT feed on the enrichment
+// block — memberHash deliberately omits it so development-driven attribute
+// drift never re-rolls the graph.
 func (s *store) memberProfiles(ctx context.Context, q querier, clubID uuid.UUID) ([]MemberProfile, error) {
 	rows, err := q.Query(ctx, `
 		SELECT p.id::text, pe.display_name,
@@ -58,11 +67,28 @@ func (s *store) memberProfiles(ctx context.Context, q querier, clubID uuid.UUID)
 		       COALESCE(pe.nationality_code, ''), COALESCE(pe.second_nationality_code, ''),
 		       COALESCE(DATE_PART('year', AGE(pe.date_of_birth))::int, 0),
 		       COALESCE(p.primary_position, ''),
-		       COALESCE(p.is_academy_product, FALSE)
+		       COALESCE(p.is_academy_product, FALSE),
+		       p.squad_number, COALESCE(p.status, 'active'),
+		       COALESCE(cr.squad_role, 'squad_player'),
+		       COALESCE(ROUND(AVG(a.value) FILTER (WHERE a.attribute_category = 'technical')), 0)::int,
+		       COALESCE(ROUND(AVG(a.value) FILTER (WHERE a.attribute_category = 'physical')), 0)::int,
+		       COALESCE(ROUND(AVG(a.value) FILTER (WHERE a.attribute_category = 'mental')), 0)::int,
+		       COALESCE(ROUND(AVG(a.value) FILTER (WHERE a.attribute_category = 'tactical')), 0)::int,
+		       COALESCE(ROUND(AVG(a.value) FILTER (WHERE a.attribute_category = 'goalkeeping')), 0)::int,
+		       COALESCE(ROUND(AVG(a.value) FILTER (WHERE a.attribute_category = 'positional')), 0)::int
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
 		LEFT JOIN player.player_personality pp ON pp.player_id = p.id
+		LEFT JOIN LATERAL (
+			SELECT squad_role FROM player.contracts
+			WHERE player_id = p.id AND status = 'active'
+			ORDER BY start_date DESC LIMIT 1
+		) cr ON TRUE
+		LEFT JOIN player.player_attributes a ON a.player_id = p.id
 		WHERE p.club_id = $1
+		GROUP BY p.id, pe.display_name, pp.leadership, pp.sociability, pp.emotional_volatility,
+		         pp.loyalty, pe.nationality_code, pe.second_nationality_code, pe.date_of_birth,
+		         p.primary_position, p.is_academy_product, p.squad_number, p.status, cr.squad_role
 		ORDER BY p.id`, clubID)
 	if err != nil {
 		return nil, fmt.Errorf("faction: squad profiles: %w", err)
@@ -74,7 +100,10 @@ func (s *store) memberProfiles(ctx context.Context, q querier, clubID uuid.UUID)
 		var m MemberProfile
 		if err := rows.Scan(&m.PlayerID, &m.Name, &m.Leadership, &m.Sociability,
 			&m.Volatility, &m.Loyalty, &m.Nationality, &m.SecondNationality,
-			&m.Age, &m.Position, &m.AcademyProduct); err != nil {
+			&m.Age, &m.Position, &m.AcademyProduct, &m.SquadNumber, &m.Status,
+			&m.SquadRole, &m.Attributes.Technical, &m.Attributes.Physical,
+			&m.Attributes.Mental, &m.Attributes.Tactical, &m.Attributes.Goalkeeping,
+			&m.Attributes.Positional); err != nil {
 			return nil, fmt.Errorf("faction: scan profile: %w", err)
 		}
 		out = append(out, m)
@@ -82,33 +111,55 @@ func (s *store) memberProfiles(ctx context.Context, q querier, clubID uuid.UUID)
 	return out, rows.Err()
 }
 
-// upsertEdges persists generated edges idempotently, keyed on the table's
-// canonical (entity_a_id, entity_b_id, relationship_type) uniqueness.
+// upsertEdges persists generated edges idempotently in one batched statement,
+// keyed on the table's canonical (entity_a_id, entity_b_id, relationship_type)
+// uniqueness. The previous per-edge loop paid a round-trip per bond; a dense
+// squad (~1100 edges) now costs a single round-trip. sentiment mirrors strength.
 func (s *store) upsertEdges(ctx context.Context, q querier, worldID uuid.UUID, edges []RelationshipEdge) error {
+	if len(edges) == 0 {
+		return nil
+	}
+	from := make([]uuid.UUID, 0, len(edges))
+	to := make([]uuid.UUID, 0, len(edges))
+	kinds := make([]string, 0, len(edges))
+	strengths := make([]int, 0, len(edges))
+	trusts := make([]int, 0, len(edges))
 	for _, e := range edges {
-		sentiment := clampInt(e.Strength, -100, 100)
-		if _, err := q.Exec(ctx, `
-			INSERT INTO social.relationships
-				(world_id, entity_a_id, entity_a_type, entity_b_id, entity_b_type,
-				 relationship_type, strength, trust, sentiment, last_interaction_at, created_at)
-			VALUES ($1, $2, 'player', $3, 'player', $4, $5, $6, $7, now(), now())
-			ON CONFLICT (entity_a_id, entity_b_id, relationship_type)
-			DO UPDATE SET
-				strength = EXCLUDED.strength,
-				trust = EXCLUDED.trust,
-				sentiment = EXCLUDED.sentiment,
-				last_interaction_at = EXCLUDED.last_interaction_at`,
-			worldID, e.From, e.To, e.Kind, clampInt(e.Strength, -100, 100), clampInt(e.Trust, -100, 100), sentiment); err != nil {
-			return fmt.Errorf("faction: upsert edge: %w", err)
+		a, errA := uuid.Parse(e.From)
+		b, errB := uuid.Parse(e.To)
+		if errA != nil || errB != nil {
+			return fmt.Errorf("faction: invalid edge endpoint (%s, %s): %w", e.From, e.To, errors.Join(errA, errB))
 		}
+		from = append(from, a)
+		to = append(to, b)
+		kinds = append(kinds, e.Kind)
+		strengths = append(strengths, clampInt(e.Strength, -100, 100))
+		trusts = append(trusts, clampInt(e.Trust, -100, 100))
+	}
+	_, err := q.Exec(ctx, `
+		INSERT INTO social.relationships
+			(world_id, entity_a_id, entity_a_type, entity_b_id, entity_b_type,
+			 relationship_type, strength, trust, sentiment, last_interaction_at, created_at)
+		SELECT $1, a, 'player', b, 'player', t, st, tr, st, now(), now()
+		FROM unnest($2::uuid[], $3::uuid[], $4::text[], $5::int[], $6::int[]) AS x(a, b, t, st, tr)
+		ON CONFLICT (entity_a_id, entity_b_id, relationship_type)
+		DO UPDATE SET
+			strength = EXCLUDED.strength,
+			trust = EXCLUDED.trust,
+			sentiment = EXCLUDED.sentiment,
+			last_interaction_at = EXCLUDED.last_interaction_at`,
+		worldID, from, to, kinds, strengths, trusts)
+	if err != nil {
+		return fmt.Errorf("faction: upsert edges: %w", err)
 	}
 	return nil
 }
 
 // ensureSquadRelationships generates and upserts the club's player↔player edges
-// deterministically. Idempotent: re-running on the same squad is a no-op state
-// change. It returns the members it saw, so callers can build former-teammate
-// edges or a pre-sale contagion snapshot without a second query.
+// deterministically. Idempotent: once the persisted graph matches the current
+// squad's fingerprint it is a no-op (no rewrite at all), which is the steady-state
+// cost driver for GET /dynamics. It returns the members it saw, so callers can
+// build former-teammate edges or the read model without a second query.
 func (s *store) ensureSquadRelationships(ctx context.Context, q querier, worldID, clubID uuid.UUID) ([]MemberProfile, error) {
 	seed, err := s.worldSeed(ctx, q, worldID)
 	if err != nil {
@@ -121,19 +172,73 @@ func (s *store) ensureSquadRelationships(ctx context.Context, q querier, worldID
 	if len(members) < 2 {
 		return members, nil
 	}
+	hash := memberHash(seed, members)
+
+	var stored int64
+	err = q.QueryRow(ctx, `
+		SELECT member_hash FROM social.squad_graph_state
+		WHERE world_id = $1 AND club_id = $2`, worldID, clubID).Scan(&stored)
+	if err == nil && stored == hash {
+		return members, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("faction: squad graph state: %w", err)
+	}
 	if err := s.upsertEdges(ctx, q, worldID, GenerateEdges(seed, members)); err != nil {
 		return nil, err
+	}
+	if _, err := q.Exec(ctx, `
+		INSERT INTO social.squad_graph_state (world_id, club_id, member_hash)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (world_id, club_id) DO UPDATE
+		SET member_hash = EXCLUDED.member_hash, updated_at = now()`,
+		worldID, clubID, hash); err != nil {
+		return nil, fmt.Errorf("faction: record squad graph state: %w", err)
 	}
 	return members, nil
 }
 
-// squadSnapshot loads the members, edges and CTE-derived component roots that
-// the pure engine runs on.
-func (s *store) squadSnapshot(ctx context.Context, q querier, worldID, clubID uuid.UUID) (SquadSnapshot, error) {
-	profiles, err := s.memberProfiles(ctx, q, clubID)
-	if err != nil {
-		return SquadSnapshot{}, err
+// memberHash fingerprints the exact inputs GenerateEdges consumes (world seed
+// + the per-member identity/behaviour block). Membership and the generation
+// fields land in the hash; read-model enrichment (attributes, uniform, role,
+// name) deliberately does not, so nothing the graph doesn't depend on triggers
+// a rewrite. Canonicalized by player id and rendered with value separators, so
+// it is deterministic across runs and stable against reordering.
+func memberHash(seed int64, members []MemberProfile) int64 {
+	sorted := make([]MemberProfile, len(members))
+	copy(sorted, members)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].PlayerID < sorted[j].PlayerID })
+
+	var sb strings.Builder
+	sb.WriteString(strconv.FormatInt(seed, 10))
+	for _, m := range sorted {
+		sb.WriteByte(0)
+		sb.WriteString(m.PlayerID)
+		sb.WriteByte(0)
+		sb.WriteString(m.Nationality)
+		sb.WriteByte(0)
+		sb.WriteString(m.SecondNationality)
+		sb.WriteByte(0)
+		sb.WriteString(strconv.Itoa(m.Age))
+		sb.WriteByte(0)
+		sb.WriteString(m.Position)
+		sb.WriteByte(0)
+		sb.WriteString(strconv.FormatBool(m.AcademyProduct))
+		sb.WriteByte(0)
+		sb.WriteString(strconv.Itoa(m.Leadership))
+		sb.WriteByte(0)
+		sb.WriteString(strconv.Itoa(m.Sociability))
+		sb.WriteByte(0)
+		sb.WriteString(strconv.Itoa(m.Volatility))
 	}
+	h := fnv.New64a()
+	_, _ = io.WriteString(h, sb.String())
+	return int64(h.Sum64())
+}
+
+// squadSnapshot loads the members (from the profiles the caller already has),
+// edges and CTE-derived component roots that the pure engine runs on.
+func (s *store) squadSnapshot(ctx context.Context, q querier, worldID, clubID uuid.UUID, profiles []MemberProfile) (SquadSnapshot, error) {
 	snap := SquadSnapshot{Members: make([]SquadMember, 0, len(profiles))}
 	for _, m := range profiles {
 		snap.Members = append(snap.Members, SquadMember{
@@ -141,6 +246,7 @@ func (s *store) squadSnapshot(ctx context.Context, q querier, worldID, clubID uu
 			Loyalty: m.Loyalty, Volatility: m.Volatility,
 		})
 	}
+	var err error
 	snap.Edges, err = s.squadEdges(ctx, q, worldID, clubID)
 	if err != nil {
 		return SquadSnapshot{}, err
