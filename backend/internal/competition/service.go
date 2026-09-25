@@ -82,6 +82,8 @@ var (
 	ErrCupDraw                  = errors.New("knockout ties cannot finish level; the golden goal must decide")
 	ErrQualificationUnavailable = errors.New("a banded league has no completed season to qualify from")
 	ErrQualificationField       = errors.New("cup qualification field must contain at least two clubs")
+	ErrRegionMismatch           = errors.New("a qualification band must reference a league in the cup's region")
+	ErrQualificationOverlap     = errors.New("qualification bands on the same league must not overlap")
 )
 
 var errInternalRollover = errors.New("competition: internal rollover error")
@@ -103,6 +105,12 @@ type Region struct {
 	ID      uuid.UUID `json:"id"`
 	WorldID uuid.UUID `json:"world_id"`
 	Name    string    `json:"name"`
+}
+
+// RegionRef is the wire reference to a region (IM08 regional cups).
+type RegionRef struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 // LeagueParams declares a new league (admin input; nothing is invented).

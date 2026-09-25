@@ -3330,31 +3330,52 @@ paths:
   /api/admin/cups:
     post:
       tags: [admin]
-      summary: Declare a domestic cup
+      summary: Declare a knockout cup (country or regional scope)
       operationId: createCup
       description: |
-        Declares a knockout domestic cup under a world's country. Metadata plus
-        staged eligibility (IM04): N top tier-1 clubs (first_tier_bye) sit out
-        the qualifiers and join when X (survivor_threshold) lower clubs remain;
-        golden goal decides drawn ties. The bracket is drawn lazily round by
-        round from a persisted plan.
+        Declares a knockout cup. Country scope (IM04) is the system-seeded
+        domestic cup: metadata plus staged eligibility (N top tier-1 clubs sit
+        out the qualifiers and join when X lower clubs remain); golden goal
+        decides drawn ties. Region scope (IM08) is a regional / continental cup
+        carrying a soft tier and per-league position-band qualification
+        (`competition_type 'continental'`, `country_id NULL`); the field is
+        projected by the IM07 qualification engine at preview and campaign
+        time. The bracket is drawn lazily round by round from a persisted plan.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [world_id, country_id, name]
-              properties:
-                world_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
-                country_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
-                name: { type: string, example: "FA Cup" }
-                first_tier_bye: { type: integer, minimum: 0, example: 4, description: "N: top tier-1 clubs that join late." }
-                survivor_threshold: { type: integer, minimum: 1, example: 8, description: "X: lower clubs remaining when the top N join." }
-                prize_pool: { type: number, example: 1000000 }
-                scheduling_rules:
-                  type: object
-                  description: Overrides for matchdays_per_week, days_per_week, kickoff_hours.
+              required: [world_id]
+              oneOf:
+                - title: country scope
+                  required: [country_id, name]
+                  properties:
+                    world_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+                    country_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000002" }
+                    name: { type: string, example: "FA Cup" }
+                    first_tier_bye: { type: integer, minimum: 0, example: 4, description: "N: top tier-1 clubs that join late." }
+                    survivor_threshold: { type: integer, minimum: 1, example: 8, description: "X: lower clubs remaining when the top N join." }
+                    prize_pool: { type: number, example: 1000000 }
+                    scheduling_rules:
+                      type: object
+                      description: Overrides for matchdays_per_week, days_per_week, kickoff_hours.
+                - title: region scope
+                  required: [region_id, name, qualification]
+                  properties:
+                    world_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+                    region_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-0000000000c1" }
+                    tier: { type: integer, minimum: 1, nullable: true, example: 1, description: "Soft tier label (IM08): a label + wizard default, never a qualification filter." }
+                    name: { type: string, example: "European Cup" }
+                    prize_pool: { type: number, example: 1000000 }
+                    scheduling_rules:
+                      type: object
+                      description: Overrides for matchdays_per_week, days_per_week, kickoff_hours.
+                    qualification:
+                      type: array
+                      description: Per-league position bands the IM07 engine qualifies from.
+                      items: { $ref: "#/components/schemas/CupQualificationBand" }
       responses:
         "201":
           description: The created cup.
@@ -3367,12 +3388,149 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "404":
-          description: World or country not found.
+          description: World, country, or region not found.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "409":
-          description: Cup name already taken in the country / stage conflict.
+          description: Cup name already taken in the world / stage conflict / band rejected (overlap, out-of-region league).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/cups/preview:
+    post:
+      tags: [admin]
+      summary: Preview a regional cup draft field
+      operationId: previewCupField
+      description: |
+        Projects a regional cup draft's qualification through the IM07 engine
+        without writing anything: every entrant with its origin (position,
+        champion_*), the reigning-champion +1, and warnings (league missing a
+        completed season, empty/partial band, field < 2, cross-cup
+        double-booking flagged for IM09). A `cup_id` re-previews an existing
+        cup so the reigning champion shows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [world_id, region_id, qualification]
+              properties:
+                world_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000001" }
+                region_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-0000000000c1" }
+                tier: { type: integer, minimum: 1, nullable: true }
+                name: { type: string }
+                cup_id: { type: string, format: uuid, description: "Optional existing cup; shows its reigning champion +1." }
+                qualification:
+                  type: array
+                  items: { $ref: "#/components/schemas/CupQualificationBand" }
+      responses:
+        "200":
+          description: The projected field, champion, and warnings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CupPreviewResult" }
+        "404":
+          description: World or region not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Band rejected (overlap, out-of-region league).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/cups/{id}/qualification:
+    patch:
+      tags: [admin]
+      summary: Replace a regional cup's qualification bands
+      operationId: setCupQualification
+      description: |
+        Replaces the cup's per-league position bands before its first campaign
+        starts. Overlapping bands (per league) and leagues outside the cup's
+        region are rejected.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Cup id.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-0000000000c2" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [qualification]
+              properties:
+                qualification:
+                  type: array
+                  items: { $ref: "#/components/schemas/CupQualificationBand" }
+      responses:
+        "200":
+          description: The updated cup.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cup" }
+        "404":
+          description: Cup not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Not a regional cup.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Band rejected (overlap, out-of-region league).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/cups/{cupID}/campaign:
+    post:
+      tags: [admin]
+      summary: Start a cup campaign (region route)
+      operationId: startRegionalCupCampaign
+      description: |
+        Starts the cup's first campaign from the world-scoped route: regional
+        (continental) cups build their field through the IM07 qualification
+        engine (bands + reigning-champion +1), write cap-exempt memberships,
+        anchor the calendar to the union of the participating countries' league
+        days, and schedule Round 1. Country cups dispatched to the same engine
+        as the country route. A second call while a campaign is live is a 409.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - name: cupID
+          in: path
+          required: true
+          description: Cup id.
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-0000000000c2" }
+      responses:
+        "201":
+          description: The started season (status in_progress) and any calendar warnings.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  season: { $ref: "#/components/schemas/Season" }
+                  warnings:
+                    type: array
+                    items: { type: string }
+        "404":
+          description: World or cup not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Cup already has a campaign / insufficient entrants / already a cup member.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: A banded league has no completed season / field < 2 / band rejected.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -4663,15 +4821,49 @@ components:
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        country: { $ref: "#/components/schemas/CountryRef" }
+        country: { allOf: [ { $ref: "#/components/schemas/CountryRef" } ], nullable: true, description: "Set for country-scoped cups; null for regional cups." }
+        region: { $ref: "#/components/schemas/RegionRef", description: "Set for regional cups." }
+        tier: { type: integer, nullable: true, description: "Soft tier label (regional cups)." }
         name: { type: string }
         competition_type: { type: string, example: domestic_cup }
         status: { type: string }
         prize_pool: { type: number }
         format: { type: string, example: knockout }
         is_home_and_away: { type: boolean }
-        first_tier_bye: { type: integer, description: "N top tier-1 clubs seeded straight into the bracket." }
-        survivor_threshold: { type: integer, description: "X qualifier survivors remaining when the top N join." }
+        first_tier_bye: { type: integer, description: "N top tier-1 clubs seeded straight into the bracket (country cups)." }
+        survivor_threshold: { type: integer, description: "X qualifier survivors remaining when the top N join (country cups)." }
+    RegionRef:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    CupQualificationBand:
+      type: object
+      description: "One per-league position band: final-table positions from_position..to_position (to omits through last place)."
+      required: [league_id, from_position]
+      properties:
+        league_id: { type: string, format: uuid }
+        from_position: { type: integer, minimum: 1, example: 1 }
+        to_position: { type: integer, minimum: 1, nullable: true, example: 4 }
+    CupPreviewEntrant:
+      type: object
+      properties:
+        club_id: { type: string, format: uuid }
+        country: { $ref: "#/components/schemas/CountryRef" }
+        league: { $ref: "#/components/schemas/LeagueRef" }
+        origin: { type: string, enum: [position, champion_direct, champion_next_best, champion_out_of_band], description: "Why the club is in the field (IM07)." }
+        rank: { type: integer, description: "Table rank the club entered at; 0 for a direct champion." }
+    CupPreviewResult:
+      type: object
+      properties:
+        field:
+          type: array
+          items: { $ref: "#/components/schemas/CupPreviewEntrant" }
+        champion: { $ref: "#/components/schemas/CupPreviewEntrant", description: "The reigning champion when the +1 applied." }
+        warnings:
+          type: array
+          items: { type: string }
+        field_size: { type: integer }
     CupCampaign:
       type: object
       description: "The manager cup view (IM04): cup, qualification read-back, season, materialized bracket, champion."
@@ -5171,6 +5363,15 @@ components:
         world_id: { type: string, format: uuid }
         code: { type: string }
         name: { type: string }
+    LeagueRef:
+      type: object
+      required: [id, name, tier]
+      properties:
+        id: { type: string, format: uuid }
+        country: { $ref: "#/components/schemas/CountryRef" }
+        region: { $ref: "#/components/schemas/RegionRef" }
+        name: { type: string }
+        tier: { type: integer }
     PopulationSummary:
       type: object
       properties:

@@ -193,7 +193,7 @@ func (s *Service) UpdateCupScheduling(ctx context.Context, cupID uuid.UUID, week
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if _, err := s.requireCompetition(ctx, tx, cupID, "domestic_cup"); err != nil {
+	if _, err := s.requireCup(ctx, tx, cupID); err != nil {
 		return nil, err
 	}
 	if err := updateRulesWeekdays(ctx, tx, cupID, weekdaysJSON(weekdays)); err != nil {
@@ -203,6 +203,28 @@ func (s *Service) UpdateCupScheduling(ctx context.Context, cupID uuid.UUID, week
 		return nil, fmt.Errorf("commit cup scheduling update: %w", err)
 	}
 	return &RescheduleResult{CalendarUpdated: true}, nil
+}
+
+// requireCup asserts the competition exists and is a knockout cup (country or
+// regional scope), returning its world id for scoping downstream reads.
+func (s *Service) requireCup(ctx context.Context, tx pgx.Tx, cupID uuid.UUID) (uuid.UUID, error) {
+	var (
+		ctype   string
+		worldID uuid.UUID
+	)
+	err := tx.QueryRow(ctx, `
+		SELECT competition_type, world_id FROM competition.competitions
+		WHERE id = $1`, cupID).Scan(&ctype, &worldID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrCompetitionNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("load competition: %w", err)
+	}
+	if ctype != "domestic_cup" && ctype != "continental" {
+		return uuid.Nil, ErrCompetitionTypeMismatch
+	}
+	return worldID, nil
 }
 
 // requireCompetition asserts the competition exists (errors otherwise) and
@@ -266,9 +288,9 @@ func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID
 	horizonDate := time.Time{}
 	for rows.Next() {
 		var (
-			md     int
+			md      int
 			kickoff time.Time
-			status string
+			status  string
 		)
 		if err := rows.Scan(&md, &kickoff, &status); err != nil {
 			return 0, 0, fmt.Errorf("repacing: scan fixture: %w", err)

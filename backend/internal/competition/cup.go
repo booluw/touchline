@@ -43,31 +43,40 @@ const (
 	cupDaysPerWeek      = 7
 )
 
-// CupParams is the admin declaration for a new domestic cup. N and X are the
-// staged-eligibility variables (see Cup.FirstTierBye/SurvivorThreshold).
+// CupParams is the admin declaration for a new knockout cup. A country-scoped
+// cup uses CountryID with the IM04 staged-eligibility variables N and X; a
+// region-scoped cup sets RegionID (plus optional soft Tier and the per-league
+// Qualification bands) and creates a 'continental' competition.
 type CupParams struct {
 	WorldID           uuid.UUID       `json:"world_id"`
 	CountryID         uuid.UUID       `json:"country_id"`
+	RegionID          *uuid.UUID      `json:"region_id,omitempty"`
+	Tier              *int            `json:"tier,omitempty"`
 	Name              string          `json:"name"`
 	FirstTierBye      int             `json:"first_tier_bye"`     // N: top-N tier-1 clubs join late
 	SurvivorThreshold int             `json:"survivor_threshold"` // X: survivors remain when they do
 	PrizePool         float64         `json:"prize_pool,omitempty"`
 	SchedulingRules   json.RawMessage `json:"scheduling_rules,omitempty"`
+	Qualification     []QualBandInput `json:"qualification,omitempty"`
 }
 
-// Cup is a domestic cup competition decorated with its country and rules.
+// Cup is a knockout cup competition decorated with its scope (country or
+// region), soft tier, and rules. Country is nil for regional cups; Region and
+// Tier are nil for country cups.
 type Cup struct {
-	ID                uuid.UUID         `json:"id"`
-	WorldID           uuid.UUID         `json:"world_id"`
-	Country           apiref.CountryRef `json:"country"`
-	Name              string            `json:"name"`
-	CompetitionType   string            `json:"competition_type"`
-	Status            string            `json:"status"`
-	PrizePool         float64           `json:"prize_pool"`
-	Format            string            `json:"format"`
-	IsHomeAndAway     bool              `json:"is_home_and_away"`
-	FirstTierBye      int               `json:"first_tier_bye"`
-	SurvivorThreshold int               `json:"survivor_threshold"`
+	ID                uuid.UUID          `json:"id"`
+	WorldID           uuid.UUID          `json:"world_id"`
+	Country           *apiref.CountryRef `json:"country,omitempty"`
+	Region            *RegionRef         `json:"region,omitempty"`
+	Tier              *int               `json:"tier,omitempty"`
+	Name              string             `json:"name"`
+	CompetitionType   string             `json:"competition_type"`
+	Status            string             `json:"status"`
+	PrizePool         float64            `json:"prize_pool"`
+	Format            string             `json:"format"`
+	IsHomeAndAway     bool               `json:"is_home_and_away"`
+	FirstTierBye      int                `json:"first_tier_bye"`
+	SurvivorThreshold int                `json:"survivor_threshold"`
 }
 
 // CupTie is one bracket tie: a scheduled fixture with a decided winner where
@@ -130,6 +139,15 @@ type cupPlan struct {
 	Total       int         `json:"total_rounds"`
 	Ladder      []roundPlan `json:"ladder"`
 	Joined      bool        `json:"joined"`
+	// Entrants is the campaign's field with each club's IM07 origin (recorded
+	// for preview/news; regional cups always set it, domestic cups may not).
+	Entrants []cupPlanEntrant `json:"entrants,omitempty"`
+}
+
+// cupPlanEntrant is one campaign field entrant with its qualification origin.
+type cupPlanEntrant struct {
+	ClubID uuid.UUID `json:"club_id"`
+	Origin string    `json:"origin"`
 }
 
 // cupLateEntry mirrors the admin-facing qualification JSON.
@@ -230,18 +248,19 @@ func (s *Service) CreateCup(ctx context.Context, p CupParams) (*Cup, error) {
 	return cup, nil
 }
 
-// ListCups returns the world's domestic cups ordered by name. It reads the
-// staging variables back from qualification_rules.
+// ListCups returns the world's knockout cups (country + regional) ordered by
+// name. It reads the staging variables back from qualification_rules.
 func (s *Service) ListCups(ctx context.Context, worldID uuid.UUID) ([]Cup, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.name, c.competition_type, c.status, c.prize_pool,
-		       wc.name, wc.code, r.format, r.is_home_and_away,
+		SELECT c.id, c.world_id, c.country_id, c.region_id, c.tier, c.name, c.competition_type, c.status, c.prize_pool,
+		       wc.name, wc.code, wr.name, r.format, r.is_home_and_away,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'teams', '0')::int,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'enter_when_survivors', '0')::int
 		FROM competition.competitions c
 		JOIN competition.competition_rules r ON r.competition_id = c.id
-		JOIN world.countries wc ON wc.id = c.country_id
-		WHERE c.world_id = $1 AND c.competition_type = 'domestic_cup'
+		LEFT JOIN world.countries wc ON wc.id = c.country_id
+		LEFT JOIN world.regions wr ON wr.id = c.region_id
+		WHERE c.world_id = $1 AND c.competition_type IN ('domestic_cup', 'continental')
 		ORDER BY c.name`, worldID)
 	if err != nil {
 		return nil, fmt.Errorf("list cups: %w", err)
@@ -249,14 +268,11 @@ func (s *Service) ListCups(ctx context.Context, worldID uuid.UUID) ([]Cup, error
 	defer rows.Close()
 	out := []Cup{}
 	for rows.Next() {
-		var cup Cup
-		if err := rows.Scan(&cup.ID, &cup.WorldID, &cup.Country.ID, &cup.Name,
-			&cup.CompetitionType, &cup.Status, &cup.PrizePool,
-			&cup.Country.Name, &cup.Country.Code, &cup.Format, &cup.IsHomeAndAway,
-			&cup.FirstTierBye, &cup.SurvivorThreshold); err != nil {
-			return nil, fmt.Errorf("scan cup: %w", err)
+		cup, err := scanCup(rows)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, cup)
+		out = append(out, *cup)
 	}
 	return out, rows.Err()
 }
@@ -367,27 +383,65 @@ func (s *Service) GetCup(ctx context.Context, worldID uuid.UUID, cupID uuid.UUID
 	return cam, nil
 }
 
-// getCup loads one cup competition joined with its country and rules.
+// getCup loads one cup competition joined with its scope (country and/or
+// region) and rules. It serves both country-scoped and regional cups.
 func (s *Service) getCup(ctx context.Context, q rowQueryer, cupID uuid.UUID) (*Cup, error) {
-	var cup Cup
-	err := q.QueryRow(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.name, c.competition_type, c.status, c.prize_pool,
-		       wc.name, wc.code, r.format, r.is_home_and_away,
+	cup, err := scanCup(q.QueryRow(ctx, `
+		SELECT c.id, c.world_id, c.country_id, c.region_id, c.tier, c.name, c.competition_type, c.status, c.prize_pool,
+		       wc.name, wc.code, wr.name, r.format, r.is_home_and_away,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'teams', '0')::int,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'enter_when_survivors', '0')::int
 		FROM competition.competitions c
 		JOIN competition.competition_rules r ON r.competition_id = c.id
-		JOIN world.countries wc ON wc.id = c.country_id
-		WHERE c.id = $1 AND c.competition_type = 'domestic_cup'`, cupID).
-		Scan(&cup.ID, &cup.WorldID, &cup.Country.ID, &cup.Name, &cup.CompetitionType,
-			&cup.Status, &cup.PrizePool, &cup.Country.Name, &cup.Country.Code,
-			&cup.Format, &cup.IsHomeAndAway, &cup.FirstTierBye, &cup.SurvivorThreshold)
+		LEFT JOIN world.countries wc ON wc.id = c.country_id
+		LEFT JOIN world.regions wr ON wr.id = c.region_id
+		WHERE c.id = $1 AND c.competition_type IN ('domestic_cup', 'continental')`, cupID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrCompetitionNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
+	return cup, nil
+}
+
+// cupRow is the shared SELECT column shape for Cup reads (ListCups/getCup).
+type cupRow interface {
+	Scan(dest ...any) error
+}
+
+// scanCup decodes one cup row with nullable country/region/tier.
+func scanCup(row cupRow) (*Cup, error) {
+	var (
+		cup                                  Cup
+		countryID, regionID                  *uuid.UUID
+		countryName, countryCode, regionName *string
+		tier                                 *int
+	)
+	if err := row.Scan(&cup.ID, &cup.WorldID, &countryID, &regionID, &tier, &cup.Name,
+		&cup.CompetitionType, &cup.Status, &cup.PrizePool,
+		&countryName, &countryCode, &regionName, &cup.Format, &cup.IsHomeAndAway,
+		&cup.FirstTierBye, &cup.SurvivorThreshold); err != nil {
+		return nil, fmt.Errorf("scan cup: %w", err)
+	}
+	if countryID != nil {
+		name, code := "", ""
+		if countryName != nil {
+			name = *countryName
+		}
+		if countryCode != nil {
+			code = *countryCode
+		}
+		cup.Country = &apiref.CountryRef{ID: *countryID, Name: name, Code: code}
+	}
+	if regionID != nil {
+		name := ""
+		if regionName != nil {
+			name = *regionName
+		}
+		cup.Region = &RegionRef{ID: *regionID, Name: name}
+	}
+	cup.Tier = tier
 	return &cup, nil
 }
 
@@ -594,15 +648,26 @@ func cupGap(seed int64, cupID uuid.UUID, round, total int) int {
 // the country's leagues has a non-cancelled fixture — the days a cup round
 // must not land on, because the league calendar is the country's anchor.
 func (s *Service) countryLeagueDays(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.UUID) ([]time.Time, error) {
+	return s.unionLeagueDays(ctx, tx, worldID, []uuid.UUID{countryID})
+}
+
+// unionLeagueDays returns the sorted, deduped set of calendar days any of the
+// given countries' leagues has a non-cancelled fixture on. Regional cup rounds
+// must avoid every participating country's league days (IM08); a country with
+// no league fixtures contributes nothing.
+func (s *Service) unionLeagueDays(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, countryIDs []uuid.UUID) ([]time.Time, error) {
+	if len(countryIDs) == 0 {
+		return []time.Time{}, nil
+	}
 	rows, err := tx.Query(ctx, `
-		SELECT DISTINCT scheduled_at::date
+		SELECT DISTINCT f.scheduled_at::date
 		FROM match.fixtures f
 		JOIN competition.competitions c ON c.id = f.competition_id
-		WHERE c.country_id = $1 AND f.world_id = $2
+		WHERE c.country_id = ANY($1::uuid[]) AND f.world_id = $2
 		  AND c.competition_type = 'league' AND f.status <> 'cancelled'`,
-		countryID, worldID)
+		countryIDs, worldID)
 	if err != nil {
-		return nil, fmt.Errorf("country league days: %w", err)
+		return nil, fmt.Errorf("union league days: %w", err)
 	}
 	defer rows.Close()
 	seen := map[time.Time]bool{}
@@ -699,26 +764,23 @@ func findCupRoundDay(target, next time.Time, leagueDays []time.Time, weekdays []
 
 // planCupCalendar derives the anchored calendar slot of every cup round
 // (IM05). The final lands the first allowed weekday at least three game-days
-// after the country's latest league fixture — a small window ahead of the next
-// season's rollover anchor — then each earlier round walks backward on a
+// after the latest league fixture in the anchor days — a country's league
+// days for domestic cups; the union over participating countries' league days
+// for regional cups (IM08) — then each earlier round walks backward on a
 // seeded 2-3-day gap (cupGap) and snaps onto the best league-free day
-// (findCupRoundDay). Rounds are stamped onto the ladder, which StartCupCampaign
-// persists so lazy materialization reproduces them. When the country has no
-// league fixtures (no running season), no round is stamped and materializeRound
-// keeps the legacy weekly placement.
-func (s *Service) planCupCalendar(ctx context.Context, tx pgx.Tx, worldID, countryID, cupID uuid.UUID, seed int64, ladder []roundPlan) ([]roundPlan, error) {
+// (findCupRoundDay). Rounds are stamped onto the ladder, which the campaign
+// caller persists so lazy materialization reproduces them. Empty anchor days
+// (no participating league fixtures) stamp nothing and materializeRound keeps
+// the legacy weekly placement; the region caller surfaces that as a warning.
+func (s *Service) planCupCalendar(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, leagueDays []time.Time, cupID uuid.UUID, seed int64, ladder []roundPlan) ([]roundPlan, error) {
 	k := len(ladder)
 	if k == 0 {
 		return ladder, nil
 	}
-	days, err := s.countryLeagueDays(ctx, tx, worldID, countryID)
-	if err != nil {
-		return nil, err
-	}
-	if len(days) == 0 {
+	if len(leagueDays) == 0 {
 		return ladder, nil
 	}
-	leagueEnd := days[len(days)-1]
+	leagueEnd := leagueDays[len(leagueDays)-1]
 
 	p, err := s.scheduleParams(ctx, tx, cupID, worldID)
 	if err != nil {
@@ -735,7 +797,7 @@ func (s *Service) planCupCalendar(ctx context.Context, tx pgx.Tx, worldID, count
 		next := *ladder[idx+1].Date
 		round := idx + 1 // 1-based round
 		target := next.AddDate(0, 0, -cupGap(seed, cupID, round, k))
-		date := findCupRoundDay(target, next, days, p.allowedWeekdays)
+		date := findCupRoundDay(target, next, leagueDays, p.allowedWeekdays)
 		ladder[idx].Date = &date
 	}
 	return ladder, nil
@@ -936,7 +998,11 @@ func (s *Service) StartCupCampaign(ctx context.Context, worldID, countryID, cupI
 		`SELECT COALESCE(world_seed, 0) FROM world.worlds WHERE id = $1`, worldID).Scan(&seed); err != nil {
 		return nil, fmt.Errorf("load world seed: %w", err)
 	}
-	ladder, err = s.planCupCalendar(ctx, tx, worldID, countryID, cupID, seed, ladder)
+	anchorDays, err := s.countryLeagueDays(ctx, tx, worldID, countryID)
+	if err != nil {
+		return nil, err
+	}
+	ladder, err = s.planCupCalendar(ctx, tx, worldID, anchorDays, cupID, seed, ladder)
 	if err != nil {
 		return nil, err
 	}

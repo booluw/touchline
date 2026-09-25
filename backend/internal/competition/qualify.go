@@ -136,7 +136,21 @@ type SiblingCupProvider interface {
 // completed season per banded league, applies the reigning-champion +1, and
 // flags cross-cup overlaps for IM09. It writes nothing and never reads the
 // wall clock: identical inputs + identical provider answers ⇒ identical fields.
+// A field of fewer than two clubs is an error (no knockout is possible).
 func ComputeField(ctx context.Context, in QualifyField, st StandingsProvider, rp ReigningChampionProvider, cp SiblingCupProvider) (*Field, error) {
+	field, err := computeField(ctx, in, st, rp, cp)
+	if err != nil {
+		return nil, err
+	}
+	if len(field.Entrants) < 2 {
+		return nil, fmt.Errorf("%w (cup %s)", ErrQualificationField, in.Cup.ID)
+	}
+	return field, nil
+}
+
+// computeField is ComputeField without the minimum-field-size guard; the IM08
+// preview reuses it so a sub-two field renders warnings instead of failing.
+func computeField(ctx context.Context, in QualifyField, st StandingsProvider, rp ReigningChampionProvider, cp SiblingCupProvider) (*Field, error) {
 	bands := sortedBands(in.Bands)
 	for _, b := range bands {
 		if err := validateQualBand(b); err != nil {
@@ -199,9 +213,6 @@ func ComputeField(ctx context.Context, in QualifyField, st StandingsProvider, rp
 		}
 	}
 
-	if len(entrants) < 2 {
-		return nil, fmt.Errorf("%w (cup %s)", ErrQualificationField, in.Cup.ID)
-	}
 	field.Entrants = entrants
 	field.ClubCount = len(entrants)
 	return field, nil
@@ -527,27 +538,10 @@ func (s *Service) ComputeCupField(ctx context.Context, cupID uuid.UUID) (*Field,
 	if err != nil {
 		return nil, err
 	}
-
-	rows, err := s.pool.Query(ctx, `
-		SELECT league_id, from_position, to_position
-		FROM competition.cup_qualification WHERE cup_id = $1
-		ORDER BY league_id, from_position`, cupID)
+	bands, err := s.bandsForCup(ctx, s.pool, cupID)
 	if err != nil {
-		return nil, fmt.Errorf("qualification bands of %s: %w", cupID, err)
-	}
-	defer rows.Close()
-	bands := []Band{}
-	for rows.Next() {
-		var b Band
-		if err := rows.Scan(&b.LeagueID, &b.From, &b.To); err != nil {
-			return nil, fmt.Errorf("scan qualification band: %w", err)
-		}
-		bands = append(bands, b)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
 	return ComputeField(ctx, QualifyField{Cup: ref, Bands: bands}, s, s, s)
 }
 

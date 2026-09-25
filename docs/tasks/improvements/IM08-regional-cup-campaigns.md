@@ -1,6 +1,6 @@
 # IM08 — Regional (continental) cup campaigns: creation, preview, anchored calendar, membership, bracket
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Improvements (competition scheduling)
 **Source:** Product decision (manual session)
 **Depends on:** IM04 (knockout bracket, golden goal, `applyKnockoutResult`, the
@@ -205,3 +205,82 @@ warnings: […], field_size}` with:
 - **Regional rounds follow union league days** (IM05 anchoring, ≥3-day final
   gap after the latest league end, weekly fallback when nothing is configured)
   because a region has no single country calendar to anchor to.
+
+## Delivery evidence
+
+**Status:** Implemented (backend + docs in one slice; the Nuxt admin form from
+the Frontend section is deferred — plan-mode decision).
+
+**Delivered files**
+
+- `AGENTS.md` — repo-root agent guidance (layout, verification order,
+  improvement workflow) shipping with this milestone.
+- `backend/internal/competition/regional_cup.go` (new) — the IM08 service
+  surface: `CreateRegionalCup`, `SetQualification`,
+  `PreviewCupField`, `StartRegionalCupCampaign`, `CupScope`, pure helpers
+  `DefaultBandForReputation`, `inputsToBands`, `validateBandsNoOverlap`,
+  `bandsForCup`, `validateRegionalBands`, `unionLeagueDays` (in `cup.go`),
+  `previewEntrants`/`previewWarnings`, cap-exempt `writeRegionalMemberships`,
+  and the `regionalRulesJSON` `"entry":"regional_league_bands"` mirror.
+- `backend/internal/competition/cup.go` — `Cup` now carries nullable `Country`
+  (pointer), `Region *RegionRef`, `Tier *int`; `ListCups`/`getCup`/`scanCup`
+  cover both `domestic_cup` and `continental` (IN list, LEFT JOINs);
+  `cupPlan.Entrants` + `cupPlanEntrant` persist the field's origins;
+  `planCupCalendar` takes precomputed `leagueDays` (loads moved to
+  `unionLeagueDays`); `CupParams` gained region scope fields.
+- `backend/internal/competition/qualify.go` — extracted `computeField` (no
+  min-size error) so preview renders a sub-2 field as a warning; `ComputeField`
+  keeps the `ErrQualificationField` wrap; `ComputeCupField` now reuses
+  `bandsForCup`.
+- `backend/internal/competition/service.go` — sentinels `ErrRegionMismatch`,
+  `ErrQualificationOverlap`; `RegionRef`.
+- `backend/internal/competition/scheduling.go` — `UpdateCupScheduling` accepts
+  `domestic_cup`/`continental` via `requireCup`.
+- `backend/internal/competition/club_overview.go` — `Country` pointer for the
+  nullable field.
+- `backend/internal/httpapi/cup_handlers.go` — `handleCreateCup` dispatches
+  country vs region scope; new `handlePreviewCup`,
+  `handleSetCupQualification`, `handleStartRegionalCupCampaign` (dispatched on
+  `Service.CupScope`; returns `{season, warnings}`); route registration in
+  `router.go`.
+- `backend/internal/apidocs/openapi.yaml` — three new admin routes, `Cup`
+  region/tier/nullable `country`, `RegionRef`, `CupQualificationBand`,
+  `CupPreviewEntrant`/`CupPreviewResult`, `LeagueRef`; both
+  `TestDocsCoverRouter` and `TestDocsOpenAPIValid` green.
+- Tests — `backend/internal/competition/regional_cup_test.go`
+  (`TestDefaultBandForReputation` incl. clamp, `TestInputsToBands`,
+  `TestValidateBandsNoOverlap`) and
+  `regional_cup_integration_test.go` (lifecycle: two-country region → create →
+  preview = engine field → campaign → Round-1 fixtures → memberships →
+  ListCups/GetCup reads → `409` double-start → out-of-region band `422`; plus
+  champion re-preview, unavailable-league, and cap-exemption scenarios).
+
+**Notable plan deviations (all kept in-scope, documented above)**
+
+- `calendar.go` plan entry implemented as a `unionLeagueDays` helper + a
+  `planCupCalendar` signature change in `cup.go`; no `calendar.go` edits.
+- Qualification route is `PATCH /api/admin/cups/:id/qualification` (the plan
+  sketched `POST`).
+- Campaign start is a dedicated world-scoped route
+  (`POST /api/admin/worlds/:id/cups/:cupID/campaign`) that dispatches on the
+  cup's type via `CupScope`, rather than extending the country route.
+- Integration tests compile-gated via `//go:build integration`; they cannot
+  run locally here (no `TEST_DATABASE_URL`, Docker down) — verified by
+  `go vet -tags integration ./internal/... ./pkg/...`.
+
+**Docs**
+
+- `docs/how-to/cup-competitions.md` — new "6. Regional (continental) cups".
+- `docs/how-to/glossary.md` — `regional cup`, `soft tier`, `reputation default
+  band`; `cup qualification (field)` updated with `ErrQualificationUnavailable`.
+- `docs/product_manager.md` — recorded decision `OPD-35`.
+
+**Verify**
+
+```
+gofmt -w                      # on every touched Go file
+go build ./...                # clean
+go vet ./...                  # clean
+go vet -tags integration ./internal/... ./pkg/...   # clean (integration compile-gate)
+go test ./...                 # green — includes TestDocsCoverRouter/TestDocsOpenAPIValid
+```

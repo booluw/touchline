@@ -1,21 +1,24 @@
 # How to: cup competitions
 
-How a **domestic cup** (IM04) is created, who gets to play, and how ties
-resolve. This is the knock-out complement to [seasons.md](seasons.md): leagues
-are round-robin point-scoring seasons, cups are single-elimination brackets
-with golden-goal ties.
+How **cup competitions** are created, who gets to play, and how ties resolve.
+There are two scopes: **domestic cups** (IM04) scoped to a country, and
+**regional / continental cups** (IM08) scoped to a region, seeded by per-league
+position bands. Both are single-elimination brackets with golden-goal ties; the
+league flow is covered by [seasons.md](seasons.md).
 
 Relates to: [seasons.md](seasons.md), [setup-and-launch.md](setup-and-launch.md)
 (seed first — cups need clubs),
 [cadences-and-time.md](cadences-and-time.md) (cup ties kick off on daily ticks
 like any fixture), [glossary.md](glossary.md).
 
-**In short:** an admin declares a cup for a country with two staging numbers
-(how many first-tier clubs get a bye, and when they join), starts its
-campaign, and every club with a league seat in that country is eligible. The
-bottom-tier pool plays rounds among itself until X survivors remain; then the
-top N join and the field plays out to a champion. A drawn tie is settled by a
-deterministic golden goal, never a replay or a penalty shootout.
+**In short:** an admin declares a cup either for a country or for a region. A
+**country cup** uses two staging numbers (how many first-tier clubs get a bye,
+and when they join); every league club in that country is eligible. A
+**regional cup** sets a soft tier label, defines per-league position-band
+qualification, previews the projected field, and starts a campaign whose
+entrants come from the IM07 qualification engine (bands + reigning champion).
+Either way a drawn tie is settled by a deterministic golden goal, never a replay
+or a penalty shootout.
 
 ---
 
@@ -131,6 +134,82 @@ only engages for knockout fixtures that are level at 90'.
 The frontend shows a cup page with the rounds list (kickoff day/time from
 `scheduled_at`, results, champion highlight); the admin console has the
 create-cup form and the "start campaign" action.
+
+## 6. Regional (continental) cups
+
+A regional cup (IM08) is a `continental`-type knockout cup scoped to a
+**region** instead of a country. It has a **soft tier** label and per-league
+**position-band qualification** (`cup_qualification` rows), and its field is
+built by the IM07 qualification engine — not by "all league clubs".
+
+### Creating, banding, and previewing
+
+```bash
+# 1. Declare the regional cup: region scope + soft tier + the per-league bands.
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/cups \
+  -d '{"world_id":"'$WORLD_ID'","region_id":"'$REGION_ID'","tier":1,
+       "name":"European Cup",
+       "qualification":[{"league_id":"'$ENG_ID'","from_position":1,"to_position":4},
+                        {"league_id":"'$SPA_ID'","from_position":1,"to_position":4}]}'
+# 201 → { "id": ..., "region": {...}, "tier": 1, "competition_type": "continental", ... }
+
+# 2. Preview the projected field (no writes) — origins + warnings.
+curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/cups/preview \
+  -d '{"world_id":"'$WORLD_ID'","region_id":"'$REGION_ID'","cup_id":"'$CUP_ID'",
+       "qualification":[{"league_id":"'$ENG_ID'","from_position":1,"to_position":4}]}'
+# 200 → { "field": [...], "champion": {...}, "warnings": [...], "field_size": 5 }
+
+# 3. Edit the bands before the first campaign.
+curl -c /tmp/jar -b /tmp/jar -X PATCH \
+  localhost:8080/api/admin/cups/$CUP_ID/qualification \
+  -d '{"qualification":[{"league_id":"'$ENG_ID'","from_position":1,"to_position":3}]}'
+```
+
+- A band is a `from_position..to_position` cut of the league's **most recent
+  completed** final table (`to_position` omitted = through last place). Bands
+  on the **same league may not overlap** (`422`), and every banded league must
+  belong to a country **inside the cup's region** (`ErrRegionMismatch` `422`).
+- The **reputation default band** is a wizard suggestion, never a rule: rep
+  ≥90 → `1..4`, ≥75 → `1..3`, ≥60 → `1..2`, else `1..1`. The engine reads only
+  the committed rows.
+- The preview applies the **reigning-champion +1** exactly as IM07 computes
+  it (an in-band champion keeps its rank and pulls the next best club; an
+  out-of-band champion enters on top), so the admin sees the final count.
+  Warnings cover leagues with no completed season, empty/partial bands, a
+  field < 2, and champion double-booking (flagged; full resolution is IM09).
+
+### Starting the campaign
+
+`POST /api/admin/worlds/{id}/cups/{cupID}/campaign` works for both scopes
+(dispatched on the cup's type). The regional path, in one transaction:
+
+1. Re-validates the bands (region + overlap) — fail-fast `422`.
+2. Requires a **completed season for every banded league** — a banded league
+   with none refuses to start (`ErrQualificationUnavailable` `422`).
+3. Computes the field via IM07 (`computeField`), `field_size >= 2` required.
+4. Writes the `seasons` row, `role='cup'` memberships + `competition_entries`,
+   and Round-1 fixtures. Positional entrants stay under the **3-cup cap**;
+   the champion (and its next-best cascade) are **exempt** — they can never be
+   denied their slot.
+5. **Calendar anchors to the union of the participating countries' league
+   days**: the countries whose leagues have band rows (plus the champion's
+   country, when it differs). The final lands ≥3 game-days after the latest
+   league ends; earlier rounds walk backward by the seeded 2-3-day gap and snap
+   to league-free days, exactly like IM05. When no participating country has a
+   configured calendar yet the cup falls back to the weekly default and the
+   campaign response carries a warning.
+
+A second campaign while one is live returns `409`, like a domestic cup.
+
+### Reading regional cups
+
+| Endpoint | Who | Returns |
+| --- | --- | --- |
+| `GET /api/cups` | manager (world-scoped) | both `domestic_cup` and `continental` cups; regional cups carry `region` + `tier` |
+| `GET /api/cups/:id` | manager (world-scoped) | the same campaign view as a domestic cup |
+
+A club's cup ties appear in `GET /api/clubs/:id/fixtures` via the existing
+`role='cup'` plumbing; there is no separate code path.
 
 ## Recorded decisions
 

@@ -134,7 +134,7 @@ func (s *Service) MyClubCompetitions(ctx context.Context, worldID, clubID uuid.U
 				Competition: Cup{
 					ID: compID, WorldID: worldID, Name: compName, CompetitionType: item.CompetitionType,
 					Status: status, PrizePool: prizePool,
-					Country:           apiref.CountryRef{ID: countryID, Name: countryName, Code: countryCode},
+					Country:           &apiref.CountryRef{ID: countryID, Name: countryName, Code: countryCode},
 					Format:            format,
 					IsHomeAndAway:     isHomeAndAway,
 					FirstTierBye:      firstTierBye,
