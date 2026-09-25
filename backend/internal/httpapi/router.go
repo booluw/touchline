@@ -66,6 +66,11 @@ func (s *server) router() *gin.Engine {
 		api.GET("/clubs/:id/training-plan", s.requireAuth, s.handleGetTrainingPlan)
 		api.POST("/clubs/:id/training-plan", s.requireAuth, s.handleSetTrainingPlan)
 
+		// Cup qualification resolution (IM09): the club's continental outlook
+		// and the manager's opt-in choices. Caller's own club only.
+		api.GET("/clubs/:id/cup-qualifications", s.requireAuth, s.handleClubCupQualifications)
+		api.POST("/clubs/:id/cup-choices", s.requireAuth, s.handleRecordCupChoice)
+
 		// Academy investment (S08-01): the owning manager's own club only.
 		api.GET("/clubs/:id/academy", s.requireAuth, s.handleGetAcademy)
 		api.PUT("/clubs/:id/academy", s.requireAuth, s.handleUpdateAcademy)

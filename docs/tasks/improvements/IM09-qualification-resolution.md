@@ -1,6 +1,6 @@
 # IM09 — Qualification resolution: tier precedence, manager cup choices, and commitment news
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Improvements (competition scheduling)
 **Source:** Product decision (manual session)
 **Depends on:** IM07 (the qualification engine and its per-cup conflict flags);
@@ -163,3 +163,90 @@ that decides, in priority order:
   feed and the schedule never diverge.
 - **Auto-qualified entrants are cap-exempt** (their entitlement can't be denied
   by the 3-cup cap); positional entrants keep `ErrCupLimit` semantics.
+
+## Delivery evidence
+
+Implemented backend + docs only (frontend "Cup outlook" tile deferred; the API
+serves everything the tile needs — see the recorded-decision note below and
+`docs/product_manager.md`).
+
+### Files
+
+- `backend/internal/competition/qualify.go` — `OriginCascadeReplacement`,
+  `CompetitionRef.CreatedAt`, `Field.Bands []Band`; `qualCupRef` also reads the
+  tie-break `created_at`. `effectiveTo` (qualify.go:332) is the shared band-cut
+  for the next-best walk.
+- `backend/internal/competition/resolve.go` (new) — `ResolveField(
+  ResolveInput{Fields, Tables, Choices})` → `ResolveOutput{Assignments, Cascades}`.
+  Strict tier precedence (`cupKeyBetter`, larger integer = higher tier wins),
+  equal-tier manager choice (`uniqueChoiceFor`), defend (`club.championOf`),
+  earlier-created tie-break; `cascadeReplacement` (skips the current field and a
+  per-cup `resolved` pair-map so promotions reach a fixpoint), `leagueOfEntry`,
+  `rankOf`, `pickWinner`, and the closing invariants → `ErrResolutionImpossible`
+  (champion kept in zero cups, any cup under 2 entrants, any club in two cups).
+- `backend/internal/competition/resolve_test.go` (new) — 9 deterministic,
+  DB-free tests: defend default, choice > defend, tier > choice + defend,
+  earlier-created tie-break, ambiguous equal-tier choice → defend default,
+  unprojected-choice noise ignored, cascade chain to fixpoint, determinism
+  across field-order shuffle, and `ErrResolutionImpossible` on a cup shrink.
+  Fixtures guarantee exactly ONE initial double-booking so outcomes are
+  processing-order independent. `-count=5` stable.
+- `backend/internal/competition/cup_resolution.go` (new) — the campaign hook:
+  `resolveContinentalCups` (runs the IM07 engine tx-consistently over every
+  continental cup, loads tables + choices, hands `ResolveField`), `sweepTables`,
+  `sweepChoices`, and `publishCupCascadeNews` + `cascadeNames`/`buildCascadeBody`.
+- `backend/internal/competition/regional_cup.go` — `StartRegionalCupCampaign`
+  sweeps before any write; the **starting cup** writes the *resolved* field
+  (memberships, season, plan team_count live `len(entrants)`); the cascade chain
+  is published as news tied to the `CUP_CAMPAIGN_STARTED` event. Second-start
+  `409` and `ErrCupLimit` for positional entrants unchanged. Domestic
+  `StartCupCampaign` untouched.
+- `backend/internal/competition/cup_choices.go` (new) — `ClubCupQualifications`
+  (per-cup outlook: projection + tier + scope + origin/rank, conflicts,
+  recorded choice, next-best) and `RecordCupChoice`
+  (ownership → world match → continental check → projected-membership check
+  `ErrChoiceNotEligible` → `ON CONFLICT (club_id, cup_id)` upsert).
+- `backend/internal/competition/service.go` — `RequireOwnership(managerID,
+  clubID)` and sentinels `ErrResolutionImpossible`, `ErrClubNotOwned`,
+  `ErrChoiceNotEligible`.
+- `backend/internal/httpapi/cup_resolution_handlers.go` (new) + `router.go` —
+  `GET /clubs/:id/cup-qualifications`, `POST /clubs/:id/cup-choices`
+  (`requireAuth`, caller's club only). Error mapping: 404 (club/cup missing),
+  403 (not owned), 422 (not projected / world mismatch), 500 otherwise.
+- `backend/internal/apidocs/openapi.yaml` — `CupQualificationView`,
+  `CupConflictView`, `CupNextBestView`, both routes with examples.
+- `backend/internal/competition/sweep_integration_test.go` (new,
+  `//go:build integration`) — `TestRegionalCupIntegrationSweepTierProves`
+  (tier-3 defending champion kept out of a tier-1 cup at campaign start;
+  "freed place stays open" when the losing league is exhausted) and
+  `TestRegionalCupIntegrationSweepChoiceFlips` (human manager opt-in decides an
+  equal-tier conflict; cascade next-best is a cap-exempt
+  `cascade_replacement` seat; exactly one `general` news story per touched
+  campaign start; outlook readback shows the recorded choice on both conflicted
+  cups).
+
+### Verification (run from `backend/`)
+
+- `gofmt -w` on every touched Go file.
+- `go build ./...` — clean.
+- `go vet ./...` — clean.
+- `go vet -tags integration ./internal/... ./pkg/...` — clean (integration suites
+  compile-gated; they need a live Postgres at `TEST_DATABASE_URL`).
+- `go test ./...` — all packages pass, including the 9 IM09 unit tests and the
+  `TestDocsCoverRouter`/`TestDocsOpenAPIValid` apidocs gates.
+
+### Recorded decisions (scope vs the plan above)
+
+- **POST-time choice-confirmation news is NOT shipped.** The user-scoped build
+  emits cascade news only at campaign start, only for cascades touching the
+  starting cup (`KeptCupID == cupID || LostCupID == cupID`), category
+  `'general'`, `country_id NULL`, `related_event_id` = the cup's
+  `CUP_CAMPAIGN_STARTED` event. Cascades for other cups publish when those cups
+  start (no duplicates). Frontend choice-confirmation remains a documented seam.
+- **Sweep width:** every continental cup in the world is resolved
+  tx-consistently per campaign start, but only the starting cup's assignment
+  crosses the transaction into memberships/entries.
+- **News story is per-cascade** (a champion moved between two cups), one row per
+  cascade, not one row per cup.
+- Frontend work (Cup outlook tile, news rendering) stays out of scope per
+  AGENTS.md unless a task includes it.

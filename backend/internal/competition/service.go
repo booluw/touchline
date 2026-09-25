@@ -84,6 +84,9 @@ var (
 	ErrQualificationField       = errors.New("cup qualification field must contain at least two clubs")
 	ErrRegionMismatch           = errors.New("a qualification band must reference a league in the cup's region")
 	ErrQualificationOverlap     = errors.New("qualification bands on the same league must not overlap")
+	ErrResolutionImpossible     = errors.New("cup qualification resolution could not keep every champion in exactly one cup")
+	ErrChoiceNotEligible        = errors.New("this club is not projected for that cup; a choice for a cup you are not in is rejected")
+	ErrClubNotOwned             = errors.New("club is not managed by the caller")
 	ErrKickoffDateInPast        = errors.New("kickoff date cannot be before the world's current date")
 	ErrKickoffNotAllowedWeekday = errors.New("kickoff date must be an allowed scheduling weekday for this league")
 )
@@ -269,6 +272,40 @@ type Publishable interface {
 // NewService builds the competition service.
 func NewService(pool *pgxpool.Pool, bus Publishable) *Service {
 	return &Service{pool: pool, bus: bus}
+}
+
+// RequireOwnership verifies that managerID currently manages clubID in a
+// playable world and returns the club's world id. It gates the manager-facing
+// cup surface (IM09): cup qualifications are world-scoped to the caller's
+// club, and choices are only recordable for a club the caller owns.
+func (s *Service) RequireOwnership(ctx context.Context, managerID, clubID uuid.UUID) (uuid.UUID, error) {
+	var worldID uuid.UUID
+	var status string
+	err := s.pool.QueryRow(ctx, `
+		SELECT c.world_id, w.status
+		FROM club.clubs c
+		JOIN world.worlds w ON w.id = c.world_id
+		WHERE c.id = $1`, clubID,
+	).Scan(&worldID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrClubNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("competition: club world: %w", err)
+	}
+
+	var current uuid.UUID
+	err = s.pool.QueryRow(ctx, `
+		SELECT current_club_id FROM manager.managers
+		WHERE id = $1 AND status = 'active' AND current_club_id IS NOT NULL`, managerID,
+	).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) || current != clubID {
+		return uuid.Nil, ErrClubNotOwned
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("competition: ownership: %w", err)
+	}
+	return worldID, nil
 }
 
 // ---------------------------------------------------------------------------

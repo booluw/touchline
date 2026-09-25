@@ -718,14 +718,21 @@ func (s *Service) StartRegionalCupCampaign(ctx context.Context, worldID, cupID u
 		return nil, err
 	}
 
-	field, err := ComputeField(ctx, QualifyField{Cup: regionalRef(cup), Bands: bands}, s, s, s)
+	// Resolution sweep (IM09): recompute every continental cup's IM07
+	// entitlement-max field tx-consistently, consume manager_cup_choices, and
+	// resolve every double-booked champion to exactly one cup before any
+	// membership/entry is written. The starting cup writes the *resolved*
+	// field; the cascade chain becomes the commitment news below.
+	resolved, fieldsByCup, err := s.resolveContinentalCups(ctx, tx, worldID)
 	if err != nil {
 		return nil, err
 	}
+	field := fieldsByCup[cupID]
 	if len(field.Unavailable) > 0 {
 		league := field.Unavailable[0].LeagueID
 		return nil, fmt.Errorf("%w (league %s)", ErrQualificationUnavailable, league)
 	}
+	entrants := resolved.Assignments[cupID]
 
 	reigning, err := s.ReigningChampion(ctx, cupID)
 	if err != nil {
@@ -736,7 +743,7 @@ func (s *Service) StartRegionalCupCampaign(ctx context.Context, worldID, cupID u
 		return nil, err
 	}
 
-	ladder, err := cupLadder(field.ClubCount, 2, 0)
+	ladder, err := cupLadder(len(entrants), 2, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -756,12 +763,12 @@ func (s *Service) StartRegionalCupCampaign(ctx context.Context, worldID, cupID u
 		return nil, err
 	}
 
-	if err := s.writeRegionalMemberships(ctx, tx, worldID, cupID, field.Entrants, cupMaxMemberships); err != nil {
+	if err := s.writeRegionalMemberships(ctx, tx, worldID, cupID, entrants, cupMaxMemberships); err != nil {
 		return nil, err
 	}
 
-	entrantIDs := make([]uuid.UUID, 0, len(field.Entrants))
-	for _, e := range field.Entrants {
+	entrantIDs := make([]uuid.UUID, 0, len(entrants))
+	for _, e := range entrants {
 		entrantIDs = append(entrantIDs, e.ClubID)
 	}
 	sort.Slice(entrantIDs, func(i, j int) bool { return entrantIDs[i].String() < entrantIDs[j].String() })
@@ -777,7 +784,7 @@ func (s *Service) StartRegionalCupCampaign(ctx context.Context, worldID, cupID u
 	planDoc := cupPlan{
 		Total:    len(ladder),
 		Ladder:   ladder,
-		Entrants: fieldEntrantsToPlan(field.Entrants),
+		Entrants: fieldEntrantsToPlan(entrants),
 	}
 	pb, err := json.Marshal(planDoc)
 	if err != nil {
@@ -795,17 +802,22 @@ func (s *Service) StartRegionalCupCampaign(ctx context.Context, worldID, cupID u
 		return nil, err
 	}
 
-	if err := s.recordSeedEvent(ctx, tx, &eventbus.Event{
+	campaignEvent := &eventbus.Event{
 		WorldID:   worldID,
 		EventType: "CUP_CAMPAIGN_STARTED",
 		Payload: mustJSON(map[string]any{
 			"competition_id": cupID,
 			"season_id":      season.ID,
 			"region_id":      cup.Region.ID,
-			"team_count":     field.ClubCount,
+			"team_count":     len(entrants),
 			"rounds":         len(ladder),
 		}),
-	}); err != nil {
+	}
+	if err := s.recordSeedEvent(ctx, tx, campaignEvent); err != nil {
+		return nil, err
+	}
+
+	if err := s.publishCupCascadeNews(ctx, tx, worldID, cupID, campaignEvent.ID, resolved.Cascades); err != nil {
 		return nil, err
 	}
 

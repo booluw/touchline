@@ -770,6 +770,125 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/cup-qualifications:
+    get:
+      tags: [clubs]
+      summary: The club's continental cup outlook
+      operationId: getCupQualifications
+      description: >-
+        Every continental cup in the club's world with the club's projected
+        entry (origin + rank), the conflicts it is double-booked into (pod
+        list of other cups + tier), the manager's recorded choice, and the
+        next-best replacements who would take its place if it forfeits.
+        Read-only; world-scoped to the caller's own club.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: The club's cup outlook.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cups:
+                    type: array
+                    items: { $ref: "#/components/schemas/CupQualificationView" }
+              examples:
+                sample:
+                  value:
+                    cups:
+                      - cup_id: 00000000-0000-4000-8000-000000000011
+                        cup_name: Champions Continental
+                        tier: 1
+                        scope: region
+                        origin: champion_direct
+                        projected: true
+                        conflicts:
+                          - cup_id: 00000000-0000-4000-8000-000000000012
+                            tier: 2
+                        next_best: []
+                      - cup_id: 00000000-0000-4000-8000-000000000012
+                        cup_name: Continental Shield
+                        tier: 2
+                        scope: region
+                        origin: position
+                        rank: 4
+                        projected: true
+                        recorded_choice_id: 00000000-0000-4000-8000-000000000012
+                        conflicts: []
+                        next_best:
+                          - club_id: 00000000-0000-4000-8000-000000000007
+                            name: Nordhaven FC
+                            rank: 5
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/cup-choices:
+    post:
+      tags: [clubs]
+      summary: Record the manager's cup opt-in
+      operationId: recordCupChoice
+      description: >-
+        Upserts the caller's choice of continental cup for this club. The cup
+        must be one the club is currently projected for; anything else is
+        rejected 422. The sweep consumes the choice at the cup's next campaign
+        start.
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cup_id]
+              properties:
+                cup_id:
+                  type: string
+                  format: uuid
+                  example: 00000000-0000-4000-8000-000000000011
+      responses:
+        "200":
+          description: The choice was recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: recorded
+                  cup_id:
+                    type: string
+                    format: uuid
+        "400":
+          description: Missing cup_id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the owning manager.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club or cup not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: The club is not projected for that cup.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/academy:
     get:
       tags: [clubs]
@@ -4964,6 +5083,42 @@ components:
         home_score: { type: integer, nullable: true }
         away_score: { type: integer, nullable: true }
         winner: { $ref: "#/components/schemas/ClubRef" }
+    CupQualificationView:
+      type: object
+      description: >-
+        The club's outlook for one continental cup (IM09): projected entry,
+        conflicts, the manager's recorded choice, and the next-best
+        replacements that would take its place if it forfeits.
+      properties:
+        cup_id: { type: string, format: uuid }
+        cup_name: { type: string }
+        tier: { type: integer }
+        scope: { type: string, enum: [region, country] }
+        origin:
+          type: string
+          enum: [position, champion_direct, champion_next_best, champion_out_of_band, cascade_replacement]
+        rank: { type: integer }
+        projected: { type: boolean }
+        conflicts:
+          type: array
+          items: { $ref: "#/components/schemas/CupConflictView" }
+        recorded_choice_id: { type: string, format: uuid }
+        next_best:
+          type: array
+          items: { $ref: "#/components/schemas/CupNextBestView" }
+    CupConflictView:
+      type: object
+      description: Another continental cup claiming the same club (with its soft tier for tier-precedence awareness).
+      properties:
+        cup_id: { type: string, format: uuid }
+        tier: { type: integer }
+    CupNextBestView:
+      type: object
+      description: A club that would take the club's seat in the cup if it forfeited.
+      properties:
+        club_id: { type: string, format: uuid }
+        name: { type: string }
+        rank: { type: integer }
     CareerSummary:
       type: object
       properties:

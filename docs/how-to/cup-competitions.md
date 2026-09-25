@@ -186,7 +186,9 @@ curl -c /tmp/jar -b /tmp/jar -X PATCH \
 1. Re-validates the bands (region + overlap) — fail-fast `422`.
 2. Requires a **completed season for every banded league** — a banded league
    with none refuses to start (`ErrQualificationUnavailable` `422`).
-3. Computes the field via IM07 (`computeField`), `field_size >= 2` required.
+3. Runs the **resolution sweep (IM09)** over every continental cup in the world
+   before anything is written, then takes this cup's resolved assignment as the
+   field (`field_size >= 2` required).
 4. Writes the `seasons` row, `role='cup'` memberships + `competition_entries`,
    and Round-1 fixtures. Positional entrants stay under the **3-cup cap**;
    the champion (and its next-best cascade) are **exempt** — they can never be
@@ -210,6 +212,57 @@ A second campaign while one is live returns `409`, like a domestic cup.
 
 A club's cup ties appear in `GET /api/clubs/:id/fixtures` via the existing
 `role='cup'` plumbing; there is no separate code path.
+
+## 7. Double-qualified champions (the resolution sweep)
+
+A club can legitimately qualify for more than one continental cup — always the
+reigning champion, effectively: it holds a `champion_*` seat in the cup it won,
+and it *also* finished inside another cup's qualification band. Each cup's field
+(IM07) is entitlement-maximal, so the same club can appear in several. The IM09
+**sweep** is what the campaign start runs to leave it in exactly one:
+
+- It recomputes every continental cup's field in the same transaction, loads the
+  world's `manager_cup_choices`, and resolves every double-booked club.
+- **Tier precedence (strict):** the higher-tier cup always claims the club
+  ("higher tier *integer* wins" — tier 3 beats tier 1). No choice can override a
+  strict tier difference.
+- **Manager choice:** among equal-tier cups, the club's recorded opt-in decides
+  — a choice for one cup forfeits the others. A choice for a cup the club is
+  **not** projected for is rejected `422`; choices for unprojected clubs are
+  noise and never read.
+- **Deterministic default:** with no choice, the club defends the cup it is the
+  reigning champion of; ties resolve to the **earlier-created** cup.
+- **Cascades reach a fixpoint:** the forfeited cup's freed slot goes to the
+  next-best club past its band cut (skipping clubs already in the field); that
+  club may itself be double-booked, so the sweep loops until stable. Only the
+  *starting* cup writes its resolved field; the rest update when they start.
+- **Invariants or nothing:** if a champion would be left with zero cups, any
+  cup would fall below 2 entrants, or any club still holds two cups, the
+  campaign start fails loudly (`ErrResolutionImpossible`) — never a silent drop.
+
+The freed "next-best" entrant is written with `origin: cascade_replacement` and
+is **cap-exempt** like a champion (the entitlement can't be denied by the 3-cup
+cap). Positional (band) entrants keep the `ErrCupLimit` semantics.
+
+### Commitment news
+
+Each campaign start publishes one `world.news_stories` row (category `general`,
+world feed) **per cascade touching the starting cup**: the club that moved, both
+cups, and the next-best replacement (or that the freed place stays open when the
+league has no one left). Stories are tied to the cup's `CUP_CAMPAIGN_STARTED`
+event and commit in the same transaction as the memberships, so the news feed
+and the schedule never diverge.
+
+### The manager surface
+
+| Endpoint | Who | Returns |
+| --- | --- | --- |
+| `GET /api/clubs/:id/cup-qualifications` | owning manager | per continental cup: projected entry (origin/rank), tier, scope, conflicts (other cups + tier), recorded choice, next-best replacements |
+| `POST /api/clubs/:id/cup-choices` `{"cup_id": …}` | owning manager | upserts the opt-in; `422` if the club isn't projected for that cup |
+
+Choices can be recorded any time before the cup's next campaign start; the
+sweep consumes them there, and the outlook endpoint always shows the live
+state so a manager sees it converge as they choose.
 
 ## Recorded decisions
 

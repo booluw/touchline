@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,10 @@ const (
 	OriginChampionDirect    = "champion_direct"
 	OriginChampionNextBest  = "champion_next_best"
 	OriginChampionOutOfBand = "champion_out_of_band"
+	// OriginCascadeReplacement is a club promoted into a cup by the IM09
+	// resolve sweep after a higher-priority club forfeited the slot. Cap-exempt
+	// like the champion origins (its entitlement is a cascade, not a band).
+	OriginCascadeReplacement = "cascade_replacement"
 )
 
 // CompetitionScope is the geographic scope a cup draws its field from.
@@ -61,7 +66,8 @@ type SiblingCup struct {
 }
 
 // CompetitionRef identifies a cup for the engine: world, scope, and the soft
-// tier (a label; only IM09's precedence sweep compares tiers).
+// tier (a label; only IM09's precedence sweep compares tiers). CreatedAt
+// breaks equal-tier, no-choice conflicts in the sweep (earlier cup wins).
 type CompetitionRef struct {
 	ID        uuid.UUID
 	WorldID   uuid.UUID
@@ -71,6 +77,7 @@ type CompetitionRef struct {
 	Type      string
 	Tier      int
 	Scope     CompetitionScope
+	CreatedAt time.Time
 }
 
 // Entrant is one club in the computed field with the reason it enters and its
@@ -100,6 +107,7 @@ type UnavailableLeague struct {
 // — resolving double bookings is IM09's sweep.
 type Field struct {
 	Cup         CompetitionRef
+	Bands       []Band
 	ClubCount   int
 	Entrants    []Entrant
 	Conflicts   map[uuid.UUID][]Conflict
@@ -160,7 +168,7 @@ func computeField(ctx context.Context, in QualifyField, st StandingsProvider, rp
 
 	// Load each banded league's most recent completed table in band order;
 	// leagues with none are recorded as unavailable, never guessed at.
-	field := &Field{Cup: in.Cup, Conflicts: map[uuid.UUID][]Conflict{}}
+	field := &Field{Cup: in.Cup, Bands: bands, Conflicts: map[uuid.UUID][]Conflict{}}
 	tables := map[uuid.UUID]*Table{}
 	for _, lid := range uniqueLeagueIDs(bands) {
 		t, err := st.LastCompletedStandings(ctx, lid)
@@ -551,9 +559,9 @@ func (s *Service) qualCupRef(ctx context.Context, cupID uuid.UUID) (CompetitionR
 	var countryID, regionID *uuid.UUID
 	var tier *int
 	err := s.pool.QueryRow(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.region_id, c.name, c.competition_type, c.tier
+		SELECT c.id, c.world_id, c.country_id, c.region_id, c.name, c.competition_type, c.tier, c.created_at
 		FROM competition.competitions c WHERE c.id = $1`, cupID).
-		Scan(&ref.ID, &ref.WorldID, &countryID, &regionID, &ref.Name, &ref.Type, &tier)
+		Scan(&ref.ID, &ref.WorldID, &countryID, &regionID, &ref.Name, &ref.Type, &tier, &ref.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CompetitionRef{}, ErrCompetitionNotFound
 	}
