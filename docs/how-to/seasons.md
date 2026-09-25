@@ -172,9 +172,24 @@ season completion cascades country-wide in **one transaction**
    difference, goals scored, club name) and promotions/relegations applied per
    the leagues' adjacency rules (`CLUB_PROMOTED` / `CLUB_RELEGATED` events).
 3. Each league's **next** season is created as `upcoming` (`SEASON_CREATED`),
-   with fresh entries (promoted/relegated clubs move leagues) and a new
-   double round-robin fixture list **anchored to the last scheduled matchday
-   plus the off-season gap** (`season.off_season_ticks`).
+   with fresh entries and a new double round-robin fixture list **anchored to
+   the last scheduled matchday plus the off-season gap**
+   (`season.off_season_ticks`).
+
+**Composing the next season's table (IM14).** A league's next entries are, in
+order:
+
+1. its **stayers** — everyone not relegated, plus the clubs promoted up from
+   below and relegated down from above (per the adjacency counts, ~:211);
+2. its **declared members** — clubs an admin added mid-season via
+   `POST /api/admin/leagues/:id/…/league` (they bind here, never mid-season);
+3. its **auto-fill** to `team_count` — first from the country's league-less
+   club pool, then freshly generated AI clubs, so the table is never holey.
+
+Declared members sort ahead of any automated fill. Promotions/relegations and
+`team_count` are read **at rollover**, so a mid-season capacity change
+(`PATCH /api/admin/leagues/:id/capacity`, IM14) takes effect on this very
+table.
 
 ### The off-season gap
 
@@ -213,7 +228,8 @@ open, and no `SEASON_COMPLETED` survives
 - Adjacencies are admin-declared per league (`promotes_to`, `relegates_to`)
   and must be **within the same country** with **symmetric counts** (the
   league above relegates exactly as many as the league below promotes —
-  `ErrAdjacencyMismatch`), validated at seed time.
+  `ErrAdjacencyMismatch`). A capacity change auto-adjusts the neighbour's
+  reciprocal count so the ladder stays symmetric (IM14).
 - A league with no declared movement simply keeps its members.
 - Season-complete promotion/relegation uses the final table (points, GD, GF,
   name); the "best season" and mid-season reads use the same ordering.

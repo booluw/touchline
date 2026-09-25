@@ -187,6 +187,8 @@ func (s *server) router() *gin.Engine {
 			admin.GET("/worlds/:id/countries/:countryID/finance", s.handleAdminCountryFinance)
 			admin.GET("/worlds/:id/countries/:countryID/timeline", s.handleAdminCountryTimeline)
 			admin.PATCH("/worlds/:id/countries/:countryID/clubs/:clubID", s.handleAdminRenameClub)
+			admin.POST("/worlds/:id/countries/:countryID/clubs/:clubID/league", s.handleAdminAddClubToLeague)
+			admin.PATCH("/leagues/:id/capacity", s.handleSetLeagueCapacity)
 			admin.PATCH("/worlds/:id/countries/:countryID/scheduling", s.handleUpdateCountryScheduling)
 			admin.PATCH("/leagues/:id/scheduling", s.handleUpdateLeagueScheduling)
 			admin.PATCH("/cups/:id/scheduling", s.handleUpdateCupScheduling)

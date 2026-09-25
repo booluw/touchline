@@ -15,9 +15,11 @@ import (
 // rolloverCountry completes the just-finished season of every league in the
 // country and advances promotion/relegation. It runs only when every league's
 // fixtures are finished, so the cascade is atomic per country. Entry sets are
-// stayers + clubs promoted from the tier below + clubs relegated from the
-// tier above; the team count of each next season must reproduce the league's
-// team_count exactly (guaranteed by symmetric adjacency rules).
+// composed by composeLeagueEntries: stayers + clubs promoted from the tier
+// below + clubs relegated from the tier above, then declared members not yet
+// seated, then an auto-fill from the country's league-less club pool and fresh
+// AI clubs — always reproducing each league's team_count exactly (symmetric
+// adjacency + the IM14 add-cap make over-subscription structurally impossible).
 func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.UUID) error {
 	leagues, err := s.leaguesByCountry(ctx, tx, countryID)
 	if err != nil {
@@ -104,12 +106,21 @@ func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, count
 		}
 	}
 
+	// A club given a seat by the standings pass (stayer or a mover) is seated:
+	// declared memberships must not double-book it into a second league. IM14:
+	// entries = standings + declared members + auto-fill to team_count.
+	seated := map[uuid.UUID]bool{}
+	for _, ids := range nextEntries {
+		for _, id := range ids {
+			seated[id] = true
+		}
+	}
+
 	for _, a := range actives {
 		l := a.league
-		entries := nextEntries[l.ID]
-		if len(entries) != l.TeamCount {
-			return fmt.Errorf("%w: %s next season has %d entries, want %d",
-				errInternalRollover, l.Name, len(entries), l.TeamCount)
+		entries, err := s.composeLeagueEntries(ctx, tx, worldID, l, nextEntries[l.ID], seated)
+		if err != nil {
+			return err
 		}
 		anchor, err := s.lastScheduledDay(ctx, tx, l.ID, worldID)
 		if err != nil {

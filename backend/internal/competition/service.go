@@ -91,6 +91,10 @@ var (
 	ErrKickoffNotAllowedWeekday = errors.New("kickoff date must be an allowed scheduling weekday for this league")
 	ErrCupFinalDateInvalid      = errors.New("invalid cup final-date policy: fixed cups require a calendar date (YYYY-MM-DD) and offsets must be >= 0")
 	ErrCupFinalDateLocked       = errors.New("the cup final is already scheduled, or the edit would move an already-scheduled round")
+	ErrClubAlreadyInLeague      = errors.New("this club already plays a league")
+	ErrLeagueFull               = errors.New("this league is full: raise team_count or wait for the next season")
+	ErrLeagueShrink             = errors.New("league team_count may only be raised; shrinking a composed pyramid is not coherent")
+	ErrOddMemberCount           = errors.New("a league season needs an even number of member clubs")
 )
 
 var errInternalRollover = errors.New("competition: internal rollover error")

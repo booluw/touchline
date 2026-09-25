@@ -400,6 +400,57 @@ a few game-days after the country's latest league fixture and earlier rounds
 walk backward on league-free days. Cup results never touch league standings or
 the rollover. See [cup-competitions.md](cup-competitions.md).
 
+### 7b. Administer league membership (IM14)
+
+Two admin controls let the operator grow a running pyramid; **both bind at the
+NEXT season composition** — the live season is never edited under teams.
+
+**Add a league-less club to a league.** A club that holds no `role='league'`
+membership (seeded or auto-filled clubs do; see glossary) can join any league in
+its world via
+
+```bash
+curl -c /tmp/jar -b /tmp/jar -X POST \
+  localhost:8080/api/admin/worlds/$WORLD_ID/countries/$COUNTRY_ID/clubs/$CLUB_ID/league \
+  -H 'Content-Type: application/json' -d '{"league_id":"'"$LEAGUE_ID"'"}'
+# 200 → { "league": {...}, "club": {...}, "current_size":6, "pending_members":1,
+#         "defers_to_next_season":true }
+```
+
+The club's `country` text is normalised to the league's country, its membership
+is recorded, and at the next composition it plays with the league. **Admission is
+refused** (`409`) when the club already plays a league, the world is archived, or
+the league is **structurally full** — the engine reserves a seat (`realSize +
+pending + 1` must fit `team_count`) so a running pyramid can never be
+over-subscribed. Clubs admitted this way are *declared members*: they sort ahead
+of any automated fill. A league that has **never played** composes its **first**
+season from its declared members (join before `StartSeason`).
+
+**Resize capacity and promotion/relegation counts.** `team_count` only ever
+**rises** (shrinking a composed pyramid is refused), and the counts it carries
+apply at the next rollover:
+
+```bash
+curl -c /tmp/jar -b /tmp/jar -X PATCH localhost:8080/api/admin/leagues/$LEAGUE_ID/capacity \
+  -H 'Content-Type: application/json' \
+  -d '{"team_count":8,"promotions":1,"relegations":2}'
+# 200 → the updated league
+```
+
+Promotion/relegation counts must be symmetric across each ladder edge. Instead of
+refusing when the neighbour disagrees, the engine **auto-adjusts the neighbour's
+reciprocal count in the same transaction** (the tier above's `relegations`
+tracks your `promotions`, the tier below's `promotions` tracks your
+`relegations`), then re-validates the whole country ladder before committing. A
+call that would leave a dangling edge (`promotions > 0` with no league above,
+or a neighbour that relegates elsewhere) is refused (`409
+ErrAdjacencyMismatch`). At the next rollover the enlarged league keeps its
+stayers + movers, merges any declared members, then **auto-fills** its remaining
+seats — first from the country's league-less club pool (by name), then from
+freshly generated AI clubs — so the fixture schedule is never holey. Both
+operations are audited (`CLUB_JOINED_LEAGUE`, `LEAGUE_CAPACITY_CHANGED`) in the
+same transaction.
+
 ---
 
 ## 8. Launch the world and let the ticks run
@@ -540,6 +591,10 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/transfers/bids/<bid-id>/
 | `ErrCountryWorldMismatch` | country belongs to another world | Reuse the `country_id` returned for *this* world |
 | `ErrInvalidTeamCount` / 400 | `team_count` odd or < 4 | Use an even count ≥ 4 |
 | `ErrBadAdjacency` / `ErrAdjacencyMismatch` | promotion/relegation link bad, or counts asymmetric | Link a league in the same country; the league above must relegate exactly as many as the league below promotes |
+| `ErrLeagueFull` on add-club | league already at capacity: `realSize + pending + 1` won't fit `team_count` | Raise `team_count` via `PATCH /api/admin/leagues/:id/capacity` (Step 7b), or wait for next season's rollover to free seats |
+| `ErrClubAlreadyInLeague` / 409 on add-club | the club already holds a league membership | Add only league-less clubs; auto-fill handles the rest at rollover |
+| `ErrLeagueShrink` on capacity | `team_count` lowered below the current value | `team_count` only rises (IM14, upward-only) |
+| `ErrOddMemberCount` on StartSeason | the composed member count is odd | Resize the league to an even `team_count` and re-roll; the engine refuses an odd season instead of panicking |
 | `/api/clubs`, `/api/competitions`, … → `403 no world context` | admin console session is world-less | Use a manager-scoped session (grant the admin a manager row, Step 4) |
 | Plain account can't log in (`403 no world joined`) | account has no `manager.managers` row in a non-archived world | Admin joins it: `cmd/user-create … -world-id`, or wait for signup to join the single playable world |
 | Login returns a world *picker* (`status: worlds`) | jobless account joined to two or more worlds | Re-post login with the chosen `world_id` (OPD-15(4)(b)) |

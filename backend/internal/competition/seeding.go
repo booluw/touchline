@@ -381,6 +381,12 @@ func (s *Service) startSeason(ctx context.Context, worldID, competitionID uuid.U
 	if len(members) == 0 {
 		return nil, ErrCompetitionNotSeeded
 	}
+	// The round-robin scheduler pairs teams; an odd member count would pad and
+	// then index past the entry slice (clubnames.go roundRobin), so reject it
+	// up front instead of panicking (IM14 hardening).
+	if len(members)%2 != 0 {
+		return nil, ErrOddMemberCount
+	}
 
 	// The season anchor is the day before matchday 1: legacy pacing plays
 	// matchday 1 on anchor + 1, so the default anchor is the world's current

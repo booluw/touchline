@@ -2715,6 +2715,67 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/worlds/{id}/countries/{countryID}/clubs/{clubID}/league:
+    post:
+      tags: [admin]
+      summary: Add a league-less club to a league
+      operationId: adminAddClubToLeague
+      description: |
+        Admits an existing, league-less club into a league as a declared member.
+        The club's country text is normalised to the league's country and the
+        change binds at the NEXT season composition (rollover for a league that
+        has played, first StartSeason for one that has not) — the live season is
+        never edited. The admission is refused when the club already plays a
+        league or the league is structurally full (add-cap rule). Audited as
+        CLUB_JOINED_LEAGUE.
+      parameters:
+        - $ref: "#/components/parameters/WorldID"
+        - $ref: "#/components/parameters/AdminCountryID"
+        - name: clubID
+          in: path
+          required: true
+          description: The league-less club to admit.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [league_id]
+              properties:
+                league_id: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000003" }
+      responses:
+        "200":
+          description: The club's admission with its next-season projection.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClubLeagueAdmission" }
+        "400":
+          description: Invalid ids or missing league_id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: World, club or league not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: World archived, club already in a league, or league full.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: League does not belong to the country in the URL.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/admin/worlds/{id}/news:
     get:
       tags: [admin]
@@ -3569,6 +3630,47 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "404":
           description: League not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/leagues/{id}/capacity:
+    patch:
+      tags: [admin]
+      summary: Resize a league's capacity for next season
+      operationId: setLeagueCapacity
+      description: |
+        Raises a league's team_count and sets the promotions/relegations that
+        apply at the NEXT rollover (upward-only; shrinking is refused). The
+        reciprocal counts on the league's two neighbours are auto-adjusted in
+        the same transaction so the country ladder stays coherent, then the
+        whole ladder is re-validated — a change that would leave a dangling
+        edge is refused. The live season is never edited. Audited as
+        LEAGUE_CAPACITY_CHANGED.
+      parameters:
+        - $ref: "#/components/parameters/LeagueID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetLeagueCapacityRequest" }
+      responses:
+        "200":
+          description: The updated league.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/League" }
+        "400":
+          description: team_count must be even and >= 4; counts must fall below it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: League not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Shrink attempt, missing promotion/relegation link, or an incoherent ladder.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -6048,6 +6150,22 @@ components:
         new_name: { type: string }
         short_name: { type: string }
         news_story_id: { type: string, format: uuid }
+    SetLeagueCapacityRequest:
+      type: object
+      required: [team_count, promotions, relegations]
+      properties:
+        team_count: { type: integer, minimum: 4, description: "New team count (even, at least 4, upward-only)." }
+        promotions: { type: integer, minimum: 0, description: "Promotions out of this league next season." }
+        relegations: { type: integer, minimum: 0, description: "Relegations out of this league next season." }
+      additionalProperties: false
+    ClubLeagueAdmission:
+      type: object
+      properties:
+        league: { $ref: "#/components/schemas/League" }
+        club: { $ref: "#/components/schemas/ClubRef" }
+        current_size: { type: integer, description: Live season entry count (0 pre-season). }
+        pending_members: { type: integer, description: Declared members not yet in a live season. }
+        defers_to_next_season: { type: boolean, description: True when a season is live, so the club joins in at rollover. }
     NewsStory:
       type: object
       properties:
