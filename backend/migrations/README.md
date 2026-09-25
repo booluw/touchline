@@ -128,6 +128,7 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0048 | `ref` / `world` | Country-scoped club name parts (`ref.club_name_parts.country_code`, `''` = global fallback, per-code pools from `data/clubs/regional/`) + admin club rename publishing `CLUB_RENAMED` events and `world.news_stories` rows |
 | 0049–0052 | `competition` / `world` / `match` | Single-daily-cadence calendar advance (0049, `world.current_day`), cup bracket/entries for knockout cups (0050), country-wide scheduling rules + `scheduling` news (0051), and IM06 world regions + league reputation + continental-cup qualification/choice tables (0052: `world.regions`, `countries.region_id`, `competitions.region_id`, `competition.cup_qualification`, `competition.manager_cup_choices`) |
 | 0053 | `world` / `social` | Season-kickoff press releases (`world.news_stories` gains the `announcement` category for country-scoped fixture-list/kickoff bulletins) + team-dynamics no-op guard (`social.squad_graph_state` fingerprints a squad's generated player↔player edges) |
+| 0054 | `competition` | Cup final-date policy (IM10): `competitions` gains `final_date_mode` (`calculated`/`fixed`, default `calculated`), `final_date` (absolute pin), `final_offset_days` (default 3) |
 
 ### River migrations (0016–0022)
 

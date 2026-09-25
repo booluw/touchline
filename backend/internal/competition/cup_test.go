@@ -1,7 +1,9 @@
 package competition
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -191,5 +193,165 @@ func TestStagingFromRules(t *testing.T) {
 		t.Fatal(err)
 	} else if string(g) == "" {
 		t.Fatal("cup rules default is empty")
+	}
+}
+
+func TestNormalizeFinalDatePolicy(t *testing.T) {
+	zero := 0
+	neg := -1
+	three := 3
+	fixed := "fixed"
+	calculated := "calculated"
+	date := "2031-09-14"
+	badDate := "14/09/2031"
+
+	cases := []struct {
+		name    string
+		in      FinalDatePolicy
+		want    FinalDatePolicy
+		wantErr bool
+	}{
+		{
+			name: "absent defaults to calculated with offset 3",
+			in:   FinalDatePolicy{},
+			want: FinalDatePolicy{FinalDateMode: calculated, FinalOffsetDays: &three},
+		},
+		{
+			name: "calculated explicit offset 0 preserved",
+			in:   FinalDatePolicy{FinalDateMode: calculated, FinalOffsetDays: &zero},
+			want: FinalDatePolicy{FinalDateMode: calculated, FinalOffsetDays: &zero},
+		},
+		{
+			name:    "calculated negative offset rejected",
+			in:      FinalDatePolicy{FinalDateMode: calculated, FinalOffsetDays: &neg},
+			wantErr: true,
+		},
+		{
+			name: "calculated supplied date ignored",
+			in:   FinalDatePolicy{FinalDateMode: calculated, FinalDate: &date},
+			want: FinalDatePolicy{FinalDateMode: calculated, FinalOffsetDays: &three},
+		},
+		{
+			name: "fixed pins the date and ignores offsets",
+			in:   FinalDatePolicy{FinalDateMode: fixed, FinalDate: &date, FinalOffsetDays: &zero},
+			want: FinalDatePolicy{FinalDateMode: fixed, FinalDate: &date, FinalOffsetDays: &three},
+		},
+		{
+			name:    "fixed without a date rejected",
+			in:      FinalDatePolicy{FinalDateMode: fixed},
+			wantErr: true,
+		},
+		{
+			name:    "fixed with a malformed date rejected",
+			in:      FinalDatePolicy{FinalDateMode: fixed, FinalDate: &badDate},
+			wantErr: true,
+		},
+		{
+			name:    "unknown mode rejected",
+			in:      FinalDatePolicy{FinalDateMode: "weekly"},
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeFinalDatePolicy(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeFinalDatePolicy(%+v) = %+v, want error", tc.in, got)
+				}
+				if !errors.Is(err, ErrCupFinalDateInvalid) {
+					t.Fatalf("error = %v, want ErrCupFinalDateInvalid", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeFinalDatePolicy(%+v) error: %v", tc.in, err)
+			}
+			if got.FinalDateMode != tc.want.FinalDateMode {
+				t.Errorf("mode = %q, want %q", got.FinalDateMode, tc.want.FinalDateMode)
+			}
+			if (got.FinalDate == nil) != (tc.want.FinalDate == nil) || (got.FinalDate != nil && *got.FinalDate != *tc.want.FinalDate) {
+				t.Errorf("final date = %v, want %v", got.FinalDate, tc.want.FinalDate)
+			}
+			if (got.FinalOffsetDays == nil) != (tc.want.FinalOffsetDays == nil) || (got.FinalOffsetDays != nil && *got.FinalOffsetDays != *tc.want.FinalOffsetDays) {
+				t.Errorf("offset = %v, want %v", got.FinalOffsetDays, tc.want.FinalOffsetDays)
+			}
+		})
+	}
+}
+
+func TestResolveCupFinalDate(t *testing.T) {
+	leagueEnd := time.Date(2031, 6, 25, 0, 0, 0, 0, time.UTC) // a Wednesday
+	mustDate := func(s string) *time.Time {
+		d, err := parseDateOnly(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &d
+	}
+
+	cases := []struct {
+		name       string
+		mode       string
+		fixed      *time.Time
+		offset     int
+		leagueDays []time.Time
+		weekdays   []int
+		want       string
+		wantOK     bool
+	}{
+		{
+			name: "calculated default offset snaps to allowed weekday",
+			mode: cupFinalModeCalculated, offset: cupDefaultFinalOffsetDays,
+			leagueDays: []time.Time{leagueEnd}, weekdays: []int{6}, // Sat
+			want: "2031-06-28", wantOK: true,
+		},
+		{
+			name: "calculated zero offset on allowed day stays",
+			mode: cupFinalModeCalculated, offset: 0,
+			leagueDays: []time.Time{leagueEnd}, weekdays: []int{3}, // Wed = the final fixture day itself
+			want: "2031-06-25", wantOK: true,
+		},
+		{
+			name: "calculated no weekday set uses the plain offset",
+			mode: cupFinalModeCalculated, offset: 2,
+			leagueDays: []time.Time{leagueEnd},
+			want:       "2031-06-27", wantOK: true,
+		},
+		{
+			name: "calculated empty league days anchors nothing",
+			mode: cupFinalModeCalculated, offset: cupDefaultFinalOffsetDays,
+			wantOK: false,
+		},
+		{
+			name: "fixed pins the declared date",
+			mode: cupFinalModeFixed, fixed: mustDate("2031-09-14"),
+			want: "2031-09-14", wantOK: true,
+		},
+		{
+			name: "fixed ignores the league calendar entirely",
+			mode: cupFinalModeFixed, fixed: mustDate("2031-09-14"),
+			weekdays: []int{1, 2, 3, 4, 5},
+			want:     "2031-09-14", wantOK: true,
+		},
+		{
+			name:   "fixed with nil date is unusable",
+			mode:   cupFinalModeFixed,
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := resolveCupFinalDate(tc.mode, tc.fixed, tc.offset, tc.leagueDays, tc.weekdays)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				return
+			}
+			if got.Format("2006-01-02") != tc.want {
+				t.Errorf("final = %s, want %s", got.Format("2006-01-02"), tc.want)
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ package competition
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -1202,4 +1203,272 @@ func boolInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+// cupPlanLadder reads the stored campaign ladder for a live cup.
+func cupPlanLadder(t *testing.T, pool *pgxpool.Pool, cupID uuid.UUID) []roundPlan {
+	t.Helper()
+	var raw json.RawMessage
+	if err := pool.QueryRow(context.Background(),
+		`SELECT qualification_rules FROM competition.competition_rules WHERE competition_id = $1`, cupID).Scan(&raw); err != nil {
+		t.Fatalf("load cup rules: %v", err)
+	}
+	plan, ok := planFromQual(raw)
+	if !ok {
+		t.Fatalf("cup %s has no stored campaign plan", cupID)
+	}
+	return plan.Ladder
+}
+
+// playOutCupRounds plays every cup round up to (but not including) the final,
+// so the final's fixtures materialize. Cup ties go 2-1 to the home side
+// (golden goal must decide draws, so scores never tie).
+func playOutCupRounds(t *testing.T, svc *Service, worldID, cupID uuid.UUID, total int) {
+	t.Helper()
+	ctx := context.Background()
+	for r := 1; r < total; r++ {
+		fxs, err := svc.GetFixtures(ctx, cupID, worldID, newInt(r))
+		if err != nil {
+			t.Fatalf("cup round %d fixtures: %v", r, err)
+		}
+		for _, f := range fxs {
+			if err := svc.ApplyResult(ctx, f.ID, 2, 1); err != nil {
+				t.Fatalf("apply cup result round %d: %v", r, err)
+			}
+		}
+	}
+}
+
+func TestCupFinalDateDefaultsAndValidation(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+
+	cup, err := svc.CreateCup(ctx, CupParams{
+		WorldID: worldID, CountryID: countryID, Name: "FA Cup", FirstTierBye: 0, SurvivorThreshold: 2,
+	})
+	if err != nil {
+		t.Fatalf("create cup: %v", err)
+	}
+	if cup.FinalDateMode != cupFinalModeCalculated {
+		t.Fatalf("default final_date_mode = %q, want calculated", cup.FinalDateMode)
+	}
+	if cup.FinalDate != nil {
+		t.Fatalf("default final_date = %v, want nil", cup.FinalDate)
+	}
+	if cup.FinalOffsetDays == nil || *cup.FinalOffsetDays != cupDefaultFinalOffsetDays {
+		t.Fatalf("default offset = %v, want %d", cup.FinalOffsetDays, cupDefaultFinalOffsetDays)
+	}
+	listed, err := svc.ListCups(ctx, worldID)
+	if err != nil {
+		t.Fatalf("list cups: %v", err)
+	}
+	roundTrip := false
+	for _, c := range listed {
+		if c.ID == cup.ID {
+			roundTrip = c.FinalDateMode == cupFinalModeCalculated && c.FinalDate == nil
+		}
+	}
+	if !roundTrip {
+		t.Fatalf("ListCups did not round-trip the final-date policy: %+v", listed)
+	}
+
+	// Fixed without a date is rejected at creation.
+	if _, err := svc.CreateCup(ctx, CupParams{
+		WorldID: worldID, CountryID: countryID, Name: "Broken Cup", FirstTierBye: 0, SurvivorThreshold: 2,
+		FinalDatePolicy: FinalDatePolicy{FinalDateMode: cupFinalModeFixed},
+	}); !errors.Is(err, ErrCupFinalDateInvalid) {
+		t.Fatalf("fixed without date err = %v, want ErrCupFinalDateInvalid", err)
+	}
+	// Calculated ignores a supplied date at creation; fixed stores its pin.
+	date := "2031-09-14"
+	derived, err := svc.CreateCup(ctx, CupParams{
+		WorldID: worldID, CountryID: countryID, Name: "Derived Cup", FirstTierBye: 0, SurvivorThreshold: 2,
+		FinalDatePolicy: FinalDatePolicy{FinalDateMode: cupFinalModeCalculated, FinalDate: &date},
+	})
+	if err != nil {
+		t.Fatalf("create calculated with supplied date: %v", err)
+	}
+	if derived.FinalDate != nil {
+		t.Fatalf("calculated cup stored supplied date %v, want nil", derived.FinalDate)
+	}
+	pinned, err := svc.CreateCup(ctx, CupParams{
+		WorldID: worldID, CountryID: countryID, Name: "Pinned Cup", FirstTierBye: 0, SurvivorThreshold: 2,
+		FinalDatePolicy: FinalDatePolicy{FinalDateMode: cupFinalModeFixed, FinalDate: &date},
+	})
+	if err != nil {
+		t.Fatalf("create fixed cup: %v", err)
+	}
+	if pinned.FinalDate == nil || *pinned.FinalDate != date {
+		t.Fatalf("fixed final_date = %v, want %s", pinned.FinalDate, date)
+	}
+}
+
+// TestCupFinalDateFixedPins covers IM10 fixed mode: the campaign's final lands
+// exactly on the declared date regardless of the league calendar, earlier
+// rounds still anchor backward, offsets are rejected on a fixed cup, and once
+// the final round has materialized any edit is refused.
+func TestCupFinalDateFixedPins(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	weekend := []int{5, 6, 7}
+	if _, err := svc.UpdateCountryScheduling(ctx, worldID, countryID, weekend); err != nil {
+		t.Fatalf("set country weekdays: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+
+	pinned := "2032-05-08"
+	cup, err := svc.CreateCup(ctx, CupParams{
+		WorldID: worldID, CountryID: countryID, Name: "Pinned Cup", FirstTierBye: 0, SurvivorThreshold: 2,
+		FinalDatePolicy: FinalDatePolicy{FinalDateMode: cupFinalModeFixed, FinalDate: &pinned},
+	})
+	if err != nil {
+		t.Fatalf("create cup: %v", err)
+	}
+	if _, err := svc.StartCupCampaign(ctx, worldID, countryID, cup.ID); err != nil {
+		t.Fatalf("start campaign: %v", err)
+	}
+
+	ladder := cupPlanLadder(t, pool, cup.ID)
+	finalRound := ladder[len(ladder)-1]
+	if finalRound.Date == nil || finalRound.Date.Format("2006-01-02") != pinned {
+		t.Fatalf("plan final = %v, want pinned %s", finalRound.Date, pinned)
+	}
+	if ladder[0].Date == nil {
+		t.Fatal("fixed cup left round 1 unanchored")
+	}
+
+	// Fixed cups reject offset edits and null/absent dates.
+	off := 5
+	if _, err := svc.SetCupFinalDate(ctx, cup.ID, nil, false, &off); !errors.Is(err, ErrCupFinalDateInvalid) {
+		t.Fatalf("fixed offset edit err = %v, want ErrCupFinalDateInvalid", err)
+	}
+	if _, err := svc.SetCupFinalDate(ctx, cup.ID, nil, true, nil); !errors.Is(err, ErrCupFinalDateInvalid) {
+		t.Fatalf("fixed null-date edit err = %v, want ErrCupFinalDateInvalid", err)
+	}
+
+	// Play the whole bracket out: the final materializes on the pinned date.
+	cam, err := svc.GetCup(ctx, worldID, cup.ID)
+	if err != nil {
+		t.Fatalf("get cup: %v", err)
+	}
+	playOutCupRounds(t, svc, worldID, cup.ID, cam.TotalRounds)
+	fxs, err := svc.GetFixtures(ctx, cup.ID, worldID, newInt(cam.TotalRounds))
+	if err != nil {
+		t.Fatalf("final fixtures: %v", err)
+	}
+	if len(fxs) != 1 {
+		t.Fatalf("final fixtures = %d, want 1", len(fxs))
+	}
+	if got := daysTruncate(fxs[0].ScheduledAt).Format("2006-01-02"); got != pinned {
+		t.Fatalf("final fixture date = %s, want pinned %s", got, pinned)
+	}
+	// The final is now scheduled: any final-date edit is locked.
+	newPin := "2032-05-22"
+	if _, err := svc.SetCupFinalDate(ctx, cup.ID, &newPin, true, nil); !errors.Is(err, ErrCupFinalDateLocked) {
+		t.Fatalf("post-final edit err = %v, want ErrCupFinalDateLocked", err)
+	}
+}
+
+// TestSetCupFinalDateOverrideAndClear covers IM10 calculated-mode edits: a
+// per-campaign override moves the unstamped tail (round-1 fixtures never
+// move), an edit landing behind the played history is locked, and clearing the
+// override re-derives the original anchored final. Every moved final publishes
+// a scheduling story.
+func TestSetCupFinalDateOverrideAndClear(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	weekend := []int{5, 6, 7}
+	if _, err := svc.UpdateCountryScheduling(ctx, worldID, countryID, weekend); err != nil {
+		t.Fatalf("set country weekdays: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+	cup, err := svc.CreateCup(ctx, CupParams{
+		WorldID: worldID, CountryID: countryID, Name: "FA Cup", FirstTierBye: 0, SurvivorThreshold: 2,
+	})
+	if err != nil {
+		t.Fatalf("create cup: %v", err)
+	}
+	if _, err := svc.StartCupCampaign(ctx, worldID, countryID, cup.ID); err != nil {
+		t.Fatalf("start campaign: %v", err)
+	}
+
+	firstFinal := cupPlanLadder(t, pool, cup.ID)
+	lastRound := firstFinal[len(firstFinal)-1]
+	if lastRound.Date == nil {
+		t.Fatal("calculated campaign left the final unanchored")
+	}
+	derivedFinal := lastRound.Date.Format("2006-01-02")
+	round1Before := matchdayDays(t, pool, cup.ID)[1]
+	if round1Before.IsZero() {
+		t.Fatal("round 1 has no fixture")
+	}
+
+	var beforeStories int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM world.news_stories
+		WHERE category = 'scheduling' AND headline LIKE '%final date set%'`).Scan(&beforeStories); err != nil {
+		t.Fatalf("count final-date news: %v", err)
+	}
+
+	// Override the final a week later than the derived anchor.
+	derivedPlus7, err := time.Parse("2006-01-02", derivedFinal)
+	if err != nil {
+		t.Fatalf("parse derived final: %v", err)
+	}
+	override := derivedPlus7.AddDate(0, 0, 7).Format("2006-01-02")
+	if _, err := svc.SetCupFinalDate(ctx, cup.ID, &override, true, nil); err != nil {
+		t.Fatalf("override: %v", err)
+	}
+	if round1After := matchdayDays(t, pool, cup.ID)[1]; !round1After.Equal(round1Before) {
+		t.Fatalf("round 1 fixture moved %v -> %v; history must stand", round1Before, round1After)
+	}
+	if got := cupPlanLadder(t, pool, cup.ID)[len(firstFinal)-1].Date.Format("2006-01-02"); got != override {
+		t.Fatalf("stored final = %s, want override %s", got, override)
+	}
+
+	// An override landing before the played rounds is locked.
+	early := "2000-01-10"
+	if _, err := svc.SetCupFinalDate(ctx, cup.ID, &early, true, nil); !errors.Is(err, ErrCupFinalDateLocked) {
+		t.Fatalf("early-override err = %v, want ErrCupFinalDateLocked", err)
+	}
+
+	// Clearing restores the derived anchor without touching the declaration.
+	if _, err := svc.SetCupFinalDate(ctx, cup.ID, nil, true, nil); err != nil {
+		t.Fatalf("clear override: %v", err)
+	}
+	if got := cupPlanLadder(t, pool, cup.ID)[len(firstFinal)-1].Date.Format("2006-01-02"); got != derivedFinal {
+		t.Fatalf("cleared final = %s, want derived %s", got, derivedFinal)
+	}
+	after, err := svc.GetCup(ctx, worldID, cup.ID)
+	if err != nil {
+		t.Fatalf("get cup: %v", err)
+	}
+	if after.Cup.FinalDateMode != cupFinalModeCalculated || after.Cup.FinalDate != nil {
+		t.Fatalf("declaration after edits = mode %q date %v, want calculated/nil", after.Cup.FinalDateMode, after.Cup.FinalDate)
+	}
+
+	var afterStories int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM world.news_stories
+		WHERE category = 'scheduling' AND headline LIKE '%final date set%'`).Scan(&afterStories); err != nil {
+		t.Fatalf("count final-date news: %v", err)
+	}
+	if afterStories <= beforeStories {
+		t.Fatalf("expected a scheduling story per moved final (was %d, now %d)", beforeStories, afterStories)
+	}
 }

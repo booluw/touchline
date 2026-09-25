@@ -101,6 +101,44 @@ mirroring `ErrLeagueAlreadySeeded` for leagues).
 - `PATCH /api/admin/cups/:id/scheduling` sets a cup's `allowed_weekdays`; cup
   dates already materialized stand until the next campaign materializes its
   ladder (the anchored walk re-stamps future campaigns).
+
+### Final-date policy (IM10)
+
+Each cup carries a **final-date policy** declared at creation and visible on
+every `Cup` payload: `final_date_mode`, `final_date`, `final_offset_days`.
+
+- **`calculated` (default)** — the final is derived each season: the first
+  allowed weekday at least `final_offset_days` game-days (default **3**) after
+  the **scope's latest league fixture** — the owning country's league days for a
+  domestic cup; the **union over the region's countries** for a regional cup.
+  This is exactly where IM05 places it, so an unconfigured cup never moves.
+- **`fixed`** — the admin pins an absolute `final_date`; the final is played on
+  exactly that day every season, never recalculated. No weekday re-snap — the
+  admin picked the day — but earlier rounds still walk backward and snap onto
+  league-free days.
+- Creation rules: `fixed` requires `final_date` (`422` without it); `calculated`
+  ignores a supplied date and requires `final_offset_days >= 0` (`422` otherwise;
+  `0` is valid — the final lands the first allowed weekday at/after the last
+  league fixture).
+
+#### Editing a live campaign (`PATCH /api/admin/cups/:id/final-date`)
+
+Body `{"final_date": "YYYY-MM-DD" | null, "final_offset_days": n}` (at least one
+field, both on `400` absent):
+
+- **Calculated:** `final_date` sets a **per-campaign override** — the final
+  round's slot is re-stamped and the not-yet-played rounds walk backward from
+  it. `final_date: null` clears the override and restores the computed anchor.
+  Editing `final_offset_days` re-derives future seasons (and clears the
+  override); the declaration itself keeps its mode.
+- **Fixed:** `final_date` replaces the declared date (and the live stamp);
+  `final_offset_days` is rejected (`422` — fixed ignores offsets).
+- **History never moves:** rounds at or below the last materialized round are
+  frozen — only rounds after that frontier re-stamp. Any edit landing on or
+  behind the latest scheduled round is rejected (`422`), as is any edit once the
+  final round has its own fixtures (`ErrCupFinalDateLocked`). A successful
+  date-moving edit publishes a `scheduling` news story in the same transaction,
+  so the feed and schedule never diverge.
 - Ties are single-legged; home advantage is drawn deterministically.
 - When the final's result is applied, the winner's entry becomes `champion`,
   every other entry is `eliminated`, and the cup season closes
@@ -195,11 +233,13 @@ curl -c /tmp/jar -b /tmp/jar -X PATCH \
    denied their slot.
 5. **Calendar anchors to the union of the participating countries' league
    days**: the countries whose leagues have band rows (plus the champion's
-   country, when it differs). The final lands ≥3 game-days after the latest
-   league ends; earlier rounds walk backward by the seeded 2-3-day gap and snap
-   to league-free days, exactly like IM05. When no participating country has a
-   configured calendar yet the cup falls back to the weekly default and the
-   campaign response carries a warning.
+   country, when it differs). The final lands the first allowed weekday at
+   least `final_offset_days` (default 3) after the latest league ends — or, for
+   a `fixed`-policy cup, exactly on its pinned `final_date` (IM10); earlier
+   rounds walk backward by the seeded 2-3-day gap and snap to league-free days,
+   exactly like IM05. When no participating country has a league calendar and
+   the cup's policy derives (no fixed date, no override), the cup falls back to
+   the weekly default and the campaign response carries a warning.
 
 A second campaign while one is live returns `409`, like a domestic cup.
 

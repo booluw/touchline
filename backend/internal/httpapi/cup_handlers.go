@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -128,6 +130,58 @@ func (s *server) handleSetCupQualification(c *gin.Context) {
 		return
 	case errors.Is(err, internalcompetition.ErrRegionMismatch),
 		errors.Is(err, internalcompetition.ErrQualificationOverlap):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	case err != nil:
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, cup)
+}
+
+// handleSetCupFinalDate edits a cup's final-date policy (IM10): the
+// declaration's fixed date/offset for future seasons and, while a campaign is
+// live, re-stamps the rounds that have not materialized yet. Body:
+// {"final_date": "YYYY-MM-DD" | null, "final_offset_days": int}. On a
+// calculated cup final_date stamps a per-campaign override and null clears it;
+// on a fixed cup final_date is required and offsets are rejected.
+func (s *server) handleSetCupFinalDate(c *gin.Context) {
+	cupID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cup id"})
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed final-date payload"})
+		return
+	}
+	var req struct {
+		FinalDate       *string `json:"final_date"` // null = clear a calculated override
+		FinalOffsetDays *int    `json:"final_offset_days"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed final-date payload"})
+		return
+	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(body, &fields) //nolint:errcheck // presence probe only
+	_, finalDateSet := fields["final_date"]
+	_, offsetSet := fields["final_offset_days"]
+	if !finalDateSet && !offsetSet {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "final_date or final_offset_days is required"})
+		return
+	}
+	cup, err := s.compSvc.SetCupFinalDate(c.Request.Context(), cupID, req.FinalDate, finalDateSet, req.FinalOffsetDays)
+	switch {
+	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	case errors.Is(err, internalcompetition.ErrCompetitionTypeMismatch):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	case errors.Is(err, internalcompetition.ErrCupFinalDateInvalid),
+		errors.Is(err, internalcompetition.ErrCupFinalDateLocked):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	case err != nil:

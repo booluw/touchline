@@ -3216,6 +3216,71 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/cups/{id}/final-date:
+    patch:
+      tags: [admin]
+      summary: Set a cup's final-date policy (IM10)
+      operationId: updateCupFinalDate
+      description: |
+        Edits a cup's final-date policy. The declaration (final_date_mode /
+        final_date / final_offset_days) rules future seasons; while a campaign
+        is live the edit re-stamps only the rounds that have not materialized
+        yet — the fixture history never moves, and edits that would land on or
+        behind an already-scheduled round are rejected.
+
+        On a 'fixed' cup final_date is required and final_offset_days is
+        rejected (fixed ignores offsets). On a 'calculated' cup final_date
+        stamps a per-campaign override onto the live ladder (without touching
+        the declaration) and final_date:null clears it; final_offset_days
+        updates the declaration and re-derives the anchor from the live league
+        calendar. The mode itself only changes at cup creation.
+      parameters:
+        - $ref: "#/components/parameters/CupID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: At least one of final_date / final_offset_days is required.
+              properties:
+                final_date:
+                  type: string
+                  format: date
+                  example: "2031-09-14"
+                  description: |
+                    The final's calendar date (YYYY-MM-DD). Fixed cups pin it;
+                    calculated cups treat it as a per-campaign override, and an
+                    explicit null clears the override.
+                final_offset_days:
+                  type: integer
+                  minimum: 0
+                  example: 3
+                  description: |
+                    Calculated cups only: the game-day spacing between the
+                    scope's latest league fixture and the final. Defaults to 3,
+                    which reproduces the IM05 anchored final exactly.
+      responses:
+        "200":
+          description: The refreshed cup with its final-date policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cup" }
+        "400":
+          description: Malformed payload, missing fields, or not a cup.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Cup not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Invalid policy or the edit is locked behind materialized rounds.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/admin/worlds/{id}/countries/{countryID}/scheduling:
     patch:
       tags: [admin]
@@ -3504,6 +3569,21 @@ paths:
                     scheduling_rules:
                       type: object
                       description: Overrides for matchdays_per_week, days_per_week, kickoff_hours.
+                    final_date_mode:
+                      type: string
+                      enum: [calculated, fixed]
+                      example: calculated
+                      description: "IM10 policy: 'fixed' pins final_date; 'calculated' (default) derives it."
+                    final_date:
+                      type: string
+                      format: date
+                      example: "2031-09-14"
+                      description: "Required when final_date_mode=fixed (and ignored by calculated cups at creation)."
+                    final_offset_days:
+                      type: integer
+                      minimum: 0
+                      example: 3
+                      description: "Calculated cups only: game-days after the scope's latest league fixture. Defaults to 3."
                 - title: region scope
                   required: [region_id, name, qualification]
                   properties:
@@ -3519,6 +3599,21 @@ paths:
                       type: array
                       description: Per-league position bands the IM07 engine qualifies from.
                       items: { $ref: "#/components/schemas/CupQualificationBand" }
+                    final_date_mode:
+                      type: string
+                      enum: [calculated, fixed]
+                      example: calculated
+                      description: "IM10 policy: 'fixed' pins final_date; 'calculated' (default) derives it."
+                    final_date:
+                      type: string
+                      format: date
+                      example: "2031-09-14"
+                      description: "Required when final_date_mode=fixed (and ignored by calculated cups at creation)."
+                    final_offset_days:
+                      type: integer
+                      minimum: 0
+                      example: 3
+                      description: "Calculated cups only: game-days after the scope's latest league fixture. Defaults to 3."
       responses:
         "201":
           description: The created cup.
@@ -5012,6 +5107,26 @@ components:
         is_home_and_away: { type: boolean }
         first_tier_bye: { type: integer, description: "N top tier-1 clubs seeded straight into the bracket (country cups)." }
         survivor_threshold: { type: integer, description: "X qualifier survivors remaining when the top N join (country cups)." }
+        final_date_mode:
+          type: string
+          enum: [calculated, fixed]
+          example: calculated
+          description: |
+            IM10 final-date policy: 'calculated' re-derives the final each
+            season a short offset after the scope's latest league fixture;
+            'fixed' pins final_date and never recalculates.
+        final_date:
+          type: string
+          format: date
+          nullable: true
+          example: "2031-09-14"
+          description: "The pinned final date (fixed cups)."
+        final_offset_days:
+          type: integer
+          nullable: true
+          minimum: 0
+          example: 3
+          description: "Calculated cups only: game-days between the scope's latest league fixture and the final. Defaults to 3."
     RegionRef:
       type: object
       properties:

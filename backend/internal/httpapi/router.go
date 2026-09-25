@@ -189,6 +189,7 @@ func (s *server) router() *gin.Engine {
 			admin.PATCH("/worlds/:id/countries/:countryID/scheduling", s.handleUpdateCountryScheduling)
 			admin.PATCH("/leagues/:id/scheduling", s.handleUpdateLeagueScheduling)
 			admin.PATCH("/cups/:id/scheduling", s.handleUpdateCupScheduling)
+			admin.PATCH("/cups/:id/final-date", s.handleSetCupFinalDate)
 			admin.GET("/worlds/:id/news", s.handleAdminWorldNews)
 		}
 

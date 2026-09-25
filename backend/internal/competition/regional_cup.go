@@ -48,6 +48,7 @@ type RegionalCupParams struct {
 	PrizePool       float64         `json:"prize_pool,omitempty"`
 	SchedulingRules json.RawMessage `json:"scheduling_rules,omitempty"`
 	Qualification   []QualBandInput `json:"qualification"`
+	FinalDatePolicy
 }
 
 // CupPreviewParams is the draft-configuration payload for POST /api/admin/cups/preview.
@@ -333,6 +334,10 @@ func (s *Service) CreateRegionalCup(ctx context.Context, p RegionalCupParams) (*
 	if err != nil {
 		return nil, err
 	}
+	policy, err := normalizeFinalDatePolicy(p.FinalDatePolicy)
+	if err != nil {
+		return nil, err
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -380,9 +385,11 @@ func (s *Service) CreateRegionalCup(ctx context.Context, p RegionalCupParams) (*
 	var cupID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO competition.competitions
-			(world_id, region_id, tier, name, competition_type, prize_pool, status)
-		VALUES ($1, $2, $3, $4, 'continental', $5, 'active')
-		RETURNING id`, p.WorldID, p.RegionID, p.Tier, name, p.PrizePool).Scan(&cupID); err != nil {
+			(world_id, region_id, tier, name, competition_type, prize_pool, status,
+			 final_date_mode, final_date, final_offset_days)
+		VALUES ($1, $2, $3, $4, 'continental', $5, 'active', $6, $7, $8)
+		RETURNING id`, p.WorldID, p.RegionID, p.Tier, name, p.PrizePool,
+		policy.FinalDateMode, finalDateParam(policy.FinalDate), policy.FinalOffsetDays).Scan(&cupID); err != nil {
 		return nil, fmt.Errorf("insert regional cup: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -826,7 +833,7 @@ func (s *Service) StartRegionalCupCampaign(ctx context.Context, worldID, cupID u
 	}
 
 	res := &RegionalCampaignResult{Season: season}
-	if len(anchorDays) == 0 {
+	if len(ladder) > 0 && ladder[len(ladder)-1].Date == nil {
 		res.Warnings = append(res.Warnings,
 			"no participating country has a league calendar yet - cup rounds use the weekly default pacing")
 	}

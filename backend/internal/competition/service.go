@@ -89,6 +89,8 @@ var (
 	ErrClubNotOwned             = errors.New("club is not managed by the caller")
 	ErrKickoffDateInPast        = errors.New("kickoff date cannot be before the world's current date")
 	ErrKickoffNotAllowedWeekday = errors.New("kickoff date must be an allowed scheduling weekday for this league")
+	ErrCupFinalDateInvalid      = errors.New("invalid cup final-date policy: fixed cups require a calendar date (YYYY-MM-DD) and offsets must be >= 0")
+	ErrCupFinalDateLocked       = errors.New("the cup final is already scheduled, or the edit would move an already-scheduled round")
 )
 
 var errInternalRollover = errors.New("competition: internal rollover error")

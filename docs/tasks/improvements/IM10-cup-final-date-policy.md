@@ -1,6 +1,6 @@
 # IM10 — Cup final-date policy: calculated (recurring) or fixed, with per-campaign edit
 
-**Status:** Not started
+**Status:** Implemented
 **Sprint:** Improvements (competition scheduling)
 **Source:** Product decision (manual session)
 **Depends on:** IM05 (the anchored cup calendar — `roundPlan.Date`, `planCupCalendar`,
@@ -202,3 +202,73 @@ materialized; the computation stays deterministic and never reads the wall clock
 - **Per-campaign override stored on the ladder**: the edited date rides the
   persisted `roundPlan.Date` of `cupPlan.ladder` (the same stamp
   `materializeRound` already honors) — no new calendar state table.
+
+## Delivery evidence
+
+Changes landed exactly as planned above; two implementation names differ from the
+plan's sketch (behavior is identical):
+
+- The scope-aware league-day loader was added as `cupScopeLeagueDays` +
+  `regionCountries` (`cup.go`) rather than renaming `countryLeagueDays` — the
+  domestic call site stays untouched and the renamed helper accepts the loaded
+  cup directly.
+- The PATCH is behind a `finalDateSet` flag so `final_date: null` (clear an
+  override) is distinguishable from an absent field — the handler inspects the
+  raw body for key presence rather than relying on pointer nil.
+- The wire `Cup` shape exposes the three fields inline (embedded `FinalDatePolicy`):
+  `final_date_mode`, `final_date` (date-only string), `final_offset_days`
+  (pointer so an explicit `0` ≠ unset).
+
+Files changed / added:
+
+- `backend/migrations/0054_cup_final_date_policy.{up,down}.sql` (`0053` was
+  consumed by IM11; `0054` is the next free number). Up: the three columns with
+  CHECKs and defaults; down: drop.
+- `backend/migrations/README.md` — row for `0054`.
+- `backend/internal/competition/cup.go` — `FinalDatePolicy` (+ `CupParams`/`Cup`/
+  `RegionalCupParams` embed), `parseDateOnly`/`finalDateParam`/
+  `normalizeFinalDatePolicy`, `cupFinalDatePolicy` loader, `resolveCupFinalDate`
+  (pure anchor selection), `planCupCalendar` policy switch (default calculated
+  + offset reproduces IM05), `SetCupFinalDate` (override/clear/fixed/offset,
+  frontier lock, `jsonb_set` ladder persist, `scheduling` news), scope helpers.
+- `backend/internal/competition/regional_cup.go` — `CreateRegionalCup` persists +
+  validates the policy; `StartRegionalCupCampaign` warning now keys off the
+  ladder being unstamped (a fixed/overridden final no longer warns about
+  weekly-pace fallback).
+- `backend/internal/competition/service.go` — `ErrCupFinalDateInvalid`,
+  `ErrCupFinalDateLocked`.
+- `backend/internal/httpapi/cup_handlers.go` — `handleSetCupFinalDate` (400
+  malformed/nothing-requested, 404, 409 non-cup, 422 invalid/locked).
+- `backend/internal/httpapi/router.go` — `admin.PATCH("/cups/:id/final-date")`.
+- `backend/internal/apidocs/openapi.yaml` — `updateCupFinalDate` document, the
+  baked policy fields on `Cup` and the create-cup oneOf bodies.
+
+Tests / verification (run from `backend/`):
+
+- `gofmt -w` on all touched files; `gofmt -l` clean on them (pre-existing
+  `weekdays.go`/`scheduling_test.go`/`scheduling_handlers.go` remain untouched
+  formatting stragglers).
+- `go build ./...`, `go vet ./...`, `go vet -tags integration ./internal/... ./pkg/...`,
+  `go test ./...` — all green.
+- New unit tests (`cup_test.go`, DB-free): `TestNormalizeFinalDatePolicy`
+  (defaults, explicit-0, negatives, fixed parse/ignore, unknown mode) and
+  `TestResolveCupFinalDate` (calculated offset landings incl. default 3 vs IM05,
+  empty league days, fixed pin/no-snap).
+- New integration tests (`competition_integration_test.go`, `//go:build
+  integration`, compile-gated here — no `TEST_DATABASE_URL`): defaults + create
+  validation round-trip (`TestCupFinalDateDefaultsAndValidation`), fixed-pins +
+  offset/null rejection + locked-after-final (`TestCupFinalDateFixedPins`),
+  per-campaign override → history-stands → early-edit locked → clear restores
+  + news story count (`TestSetCupFinalDateOverrideAndClear`).
+- Regression: `TestDocsCoverRouter` / `TestDocsOpenAPIValid`, the existing
+  `TestCupCalendarAnchoredToLeagueEnd` (unconfigured calculated cup still lands
+  the IM05 anchored final), all IM04/IM08 cup tests.
+
+Deviations from the plan worth knowing:
+
+- The planned two-country regional-cup integration test was skipped (the union
+  code path is shared; integration is compile-only in this environment).
+  `cupFinalDatePolicy`'s fixed-missing-date guard and `finalAnchor`
+  determinism are exercised implicitly by the re-stamp/override tests.
+- No frontend work (`pnpm lint/typecheck`): IM10 is backend-only per the task
+  scope decision.

@@ -41,6 +41,13 @@ const (
 	// weekly game-week, on the default kickoff-hour rotation.
 	cupMatchdaysPerWeek = 1
 	cupDaysPerWeek      = 7
+	// Cup final-date policy (IM10): 'calculated' derives the final each season
+	// a short offset after the scope's latest league fixture; 'fixed' pins an
+	// absolute date that never recalculates. Wire/JSON values are date-only
+	// "2006-01-02" strings.
+	cupFinalModeCalculated    = "calculated"
+	cupFinalModeFixed         = "fixed"
+	cupDefaultFinalOffsetDays = 3
 )
 
 // CupParams is the admin declaration for a new knockout cup. A country-scoped
@@ -58,6 +65,81 @@ type CupParams struct {
 	PrizePool         float64         `json:"prize_pool,omitempty"`
 	SchedulingRules   json.RawMessage `json:"scheduling_rules,omitempty"`
 	Qualification     []QualBandInput `json:"qualification,omitempty"`
+	FinalDatePolicy
+}
+
+// FinalDatePolicy is the cup final-date declaration (IM10), shared by both cup
+// scopes. 'calculated' re-derives the final each season from the scope's
+// latest league fixture; 'fixed' pins FinalDate. FinalDate is a date-only
+// "2006-01-02" string on the wire. FinalOffsetDays is a pointer so an explicit
+// 0 (final on the first allowed weekday at/after the last league fixture) is
+// distinguishable from "unset" (defaults to 3, which reproduces the IM05
+// anchored final exactly). Fixed cups ignore offsets; the calculated mode
+// ignores a supplied date.
+type FinalDatePolicy struct {
+	FinalDateMode   string  `json:"final_date_mode"`
+	FinalDate       *string `json:"final_date,omitempty"`
+	FinalOffsetDays *int    `json:"final_offset_days,omitempty"`
+}
+
+// parseDateOnly parses a wire date-only string ("2006-01-02") into a UTC
+// midnight time.
+func parseDateOnly(s string) (time.Time, error) {
+	return time.Parse("2006-01-02", s)
+}
+
+// finalDateParam converts a date-only wire string into the pgx DATE parameter
+// shape (nil for an unset date).
+func finalDateParam(d *string) any {
+	if d == nil {
+		return nil
+	}
+	t, err := parseDateOnly(*d)
+	if err != nil {
+		return nil
+	}
+	return t
+}
+
+// normalizeFinalDatePolicy validates and completes a cup's final-date
+// declaration (IM10): the mode defaults to 'calculated', a calculated cup's
+// offset defaults to 3 and must be >= 0 (any supplied date is ignored), and a
+// fixed cup requires a parseable final date (offsets are ignored).
+func normalizeFinalDatePolicy(p FinalDatePolicy) (FinalDatePolicy, error) {
+	out := FinalDatePolicy{FinalDateMode: p.FinalDateMode}
+	if out.FinalDateMode == "" {
+		out.FinalDateMode = cupFinalModeCalculated
+	}
+	switch out.FinalDateMode {
+	case cupFinalModeCalculated:
+		out.FinalDate = nil // created cups always derive the final
+		if p.FinalOffsetDays == nil {
+			d := cupDefaultFinalOffsetDays
+			out.FinalOffsetDays = &d
+		} else {
+			out.FinalOffsetDays = p.FinalOffsetDays
+		}
+		if *out.FinalOffsetDays < 0 {
+			return out, fmt.Errorf("%w: final_offset_days must be >= 0", ErrCupFinalDateInvalid)
+		}
+		return out, nil
+	case cupFinalModeFixed:
+		if p.FinalDate == nil || *p.FinalDate == "" {
+			return out, fmt.Errorf("%w: fixed cups require a final_date", ErrCupFinalDateInvalid)
+		}
+		d, err := parseDateOnly(*p.FinalDate)
+		if err != nil {
+			return out, fmt.Errorf("%w: final_date must be a calendar date (YYYY-MM-DD)", ErrCupFinalDateInvalid)
+		}
+		d = daysTruncate(d)
+		s := d.Format("2006-01-02")
+		out.FinalDate = &s
+		off := cupDefaultFinalOffsetDays
+		out.FinalOffsetDays = &off // fixed ignores offsets; the column keeps its default
+		return out, nil
+	default:
+		return out, fmt.Errorf("%w: final_date_mode must be 'calculated' or 'fixed'", ErrCupFinalDateInvalid)
+	}
 }
 
 // Cup is a knockout cup competition decorated with its scope (country or
@@ -77,6 +159,7 @@ type Cup struct {
 	IsHomeAndAway     bool               `json:"is_home_and_away"`
 	FirstTierBye      int                `json:"first_tier_bye"`
 	SurvivorThreshold int                `json:"survivor_threshold"`
+	FinalDatePolicy
 }
 
 // CupTie is one bracket tie: a scheduled fixture with a decided winner where
@@ -182,6 +265,10 @@ func (s *Service) CreateCup(ctx context.Context, p CupParams) (*Cup, error) {
 	if err := cupStagingBaseValid(p.FirstTierBye, p.SurvivorThreshold); err != nil {
 		return nil, err
 	}
+	policy, err := normalizeFinalDatePolicy(p.FinalDatePolicy)
+	if err != nil {
+		return nil, err
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -225,9 +312,11 @@ func (s *Service) CreateCup(ctx context.Context, p CupParams) (*Cup, error) {
 	var cupID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO competition.competitions
-			(world_id, country_id, name, competition_type, prize_pool, status)
-		VALUES ($1, $2, $3, 'domestic_cup', $4, 'active')
-		RETURNING id`, worldID, p.CountryID, name, p.PrizePool).Scan(&cupID); err != nil {
+			(world_id, country_id, name, competition_type, prize_pool, status,
+			 final_date_mode, final_date, final_offset_days)
+		VALUES ($1, $2, $3, 'domestic_cup', $4, 'active', $5, $6, $7)
+		RETURNING id`, worldID, p.CountryID, name, p.PrizePool,
+		policy.FinalDateMode, finalDateParam(policy.FinalDate), policy.FinalOffsetDays).Scan(&cupID); err != nil {
 		return nil, fmt.Errorf("insert cup: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -253,6 +342,7 @@ func (s *Service) CreateCup(ctx context.Context, p CupParams) (*Cup, error) {
 func (s *Service) ListCups(ctx context.Context, worldID uuid.UUID) ([]Cup, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id, c.world_id, c.country_id, c.region_id, c.tier, c.name, c.competition_type, c.status, c.prize_pool,
+		       c.final_date_mode, c.final_date, c.final_offset_days,
 		       wc.name, wc.code, wr.name, r.format, r.is_home_and_away,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'teams', '0')::int,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'enter_when_survivors', '0')::int
@@ -388,6 +478,7 @@ func (s *Service) GetCup(ctx context.Context, worldID uuid.UUID, cupID uuid.UUID
 func (s *Service) getCup(ctx context.Context, q rowQueryer, cupID uuid.UUID) (*Cup, error) {
 	cup, err := scanCup(q.QueryRow(ctx, `
 		SELECT c.id, c.world_id, c.country_id, c.region_id, c.tier, c.name, c.competition_type, c.status, c.prize_pool,
+		       c.final_date_mode, c.final_date, c.final_offset_days,
 		       wc.name, wc.code, wr.name, r.format, r.is_home_and_away,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'teams', '0')::int,
 		       COALESCE(r.qualification_rules->'first_tier_late_entry'->>'enter_when_survivors', '0')::int
@@ -417,12 +508,20 @@ func scanCup(row cupRow) (*Cup, error) {
 		countryID, regionID                  *uuid.UUID
 		countryName, countryCode, regionName *string
 		tier                                 *int
+		finalDate                            *time.Time
+		offset                               int
 	)
 	if err := row.Scan(&cup.ID, &cup.WorldID, &countryID, &regionID, &tier, &cup.Name,
 		&cup.CompetitionType, &cup.Status, &cup.PrizePool,
+		&cup.FinalDateMode, &finalDate, &offset,
 		&countryName, &countryCode, &regionName, &cup.Format, &cup.IsHomeAndAway,
 		&cup.FirstTierBye, &cup.SurvivorThreshold); err != nil {
 		return nil, fmt.Errorf("scan cup: %w", err)
+	}
+	cup.FinalOffsetDays = &offset
+	if finalDate != nil {
+		fd := finalDate.Format("2006-01-02")
+		cup.FinalDate = &fd
 	}
 	if countryID != nil {
 		name, code := "", ""
@@ -762,43 +861,84 @@ func findCupRoundDay(target, next time.Time, leagueDays []time.Time, weekdays []
 	return best
 }
 
+// cupFinalDatePolicy reads a cup's IM10 final-date declaration for the
+// calendar planner: the mode ('calculated' defaulting otherwise), the fixed
+// date (nil unless fixed mode pins one), and the normalized offset.
+func (s *Service) cupFinalDatePolicy(ctx context.Context, q rowQueryer, cupID uuid.UUID) (mode string, fixed *time.Time, offset int, err error) {
+	var fixedRaw *time.Time
+	var off int
+	if err := q.QueryRow(ctx, `
+		SELECT final_date_mode, final_date, final_offset_days
+		FROM competition.competitions WHERE id = $1`, cupID).Scan(&mode, &fixedRaw, &off); err != nil {
+		return "", nil, 0, fmt.Errorf("load cup final-date policy: %w", err)
+	}
+	if mode != cupFinalModeFixed {
+		mode = cupFinalModeCalculated
+	}
+	if mode == cupFinalModeFixed && fixedRaw == nil {
+		return "", nil, 0, fmt.Errorf("%w: fixed cup is missing a final_date", ErrCupFinalDateInvalid)
+	}
+	return mode, fixedRaw, off, nil
+}
+
+// resolveCupFinalDate derives a cup's final-round date from its IM10 policy
+// (pure). 'fixed' returns the declared date; 'calculated' returns the first
+// allowed weekday at least offset days after the scope's latest league fixture
+// (no weekday snap when the set is empty). ok is false in 'calculated' mode
+// with no league fixtures to anchor against — the ladder then stays unstamped
+// and materialization keeps the legacy weekly pace.
+func resolveCupFinalDate(mode string, fixed *time.Time, offset int, leagueDays []time.Time, weekdays []int) (final time.Time, ok bool) {
+	if mode == cupFinalModeFixed {
+		if fixed == nil {
+			return time.Time{}, false
+		}
+		return daysTruncate(*fixed), true
+	}
+	if len(leagueDays) == 0 {
+		return time.Time{}, false
+	}
+	final = leagueDays[len(leagueDays)-1].AddDate(0, 0, offset)
+	if len(weekdays) > 0 {
+		final = nextAllowedWeekday(final, weekdays)
+	}
+	return final, true
+}
+
 // planCupCalendar derives the anchored calendar slot of every cup round
-// (IM05). The final lands the first allowed weekday at least three game-days
-// after the latest league fixture in the anchor days — a country's league
-// days for domestic cups; the union over participating countries' league days
-// for regional cups (IM08) — then each earlier round walks backward on a
-// seeded 2-3-day gap (cupGap) and snaps onto the best league-free day
-// (findCupRoundDay). Rounds are stamped onto the ladder, which the campaign
-// caller persists so lazy materialization reproduces them. Empty anchor days
-// (no participating league fixtures) stamp nothing and materializeRound keeps
-// the legacy weekly placement; the region caller surfaces that as a warning.
+// (IM05/IM10). The final lands the first allowed weekday at least the policy
+// offset after the latest league fixture in the anchor days — a country's
+// league days for domestic cups; the union over participating countries'
+// league days for regional cups (IM08) — or, for a fixed cup, exactly on its
+// declared date. Each earlier round then walks backward on a seeded 2-3-day
+// gap (cupGap) and snaps onto the best league-free day (findCupRoundDay).
+// Rounds are stamped onto the ladder, which the campaign caller persists so
+// lazy materialization reproduces them. Empty anchor days with no fixed date
+// stamp nothing and materializeRound keeps the legacy weekly placement; the
+// region caller surfaces that as a warning.
 func (s *Service) planCupCalendar(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, leagueDays []time.Time, cupID uuid.UUID, seed int64, ladder []roundPlan) ([]roundPlan, error) {
 	k := len(ladder)
 	if k == 0 {
 		return ladder, nil
 	}
-	if len(leagueDays) == 0 {
-		return ladder, nil
+	mode, fixed, offset, err := s.cupFinalDatePolicy(ctx, tx, cupID)
+	if err != nil {
+		return nil, err
 	}
-	leagueEnd := leagueDays[len(leagueDays)-1]
 
 	p, err := s.scheduleParams(ctx, tx, cupID, worldID)
 	if err != nil {
 		return nil, err
 	}
 
-	finalDate := leagueEnd.AddDate(0, 0, 3)
-	if len(p.allowedWeekdays) > 0 {
-		finalDate = nextAllowedWeekday(finalDate, p.allowedWeekdays)
-	}
-	ladder[k-1].Date = &finalDate
-
-	for idx := k - 2; idx >= 0; idx-- {
-		next := *ladder[idx+1].Date
-		round := idx + 1 // 1-based round
-		target := next.AddDate(0, 0, -cupGap(seed, cupID, round, k))
-		date := findCupRoundDay(target, next, leagueDays, p.allowedWeekdays)
-		ladder[idx].Date = &date
+	if finalDate, ok := resolveCupFinalDate(mode, fixed, offset, leagueDays, p.allowedWeekdays); ok {
+		ladder[k-1].Date = &finalDate
+		for idx := k - 2; idx >= 0; idx-- {
+			next := *ladder[idx+1].Date
+			round := idx + 1 // 1-based round
+			target := next.AddDate(0, 0, -cupGap(seed, cupID, round, k))
+			date := findCupRoundDay(target, next, leagueDays, p.allowedWeekdays)
+			ladder[idx].Date = &date
+		}
 	}
 	return ladder, nil
 }
@@ -871,6 +1011,252 @@ func (s *Service) publishCupRoundNews(ctx context.Context, tx pgx.Tx, worldID, c
 	return s.publishSchedulingNews(ctx, tx, worldID, cupID,
 		fmt.Sprintf("%s: round %d schedule set", name, round),
 		fmt.Sprintf("The %s round %d ties are set for %s.", name, round, day.Format("Mon 2 Jan 2006")))
+}
+
+// ---------------------------------------------------------------------------
+// Final-date policy (IM10)
+// ---------------------------------------------------------------------------
+
+// regionCountries returns the countries of the region a continental cup scopes
+// to (the league-day union set its calendar anchors on).
+func (s *Service) regionCountries(ctx context.Context, tx pgx.Tx, regionID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx, `SELECT id FROM world.countries WHERE region_id = $1`, regionID)
+	if err != nil {
+		return nil, fmt.Errorf("region countries: %w", err)
+	}
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan region country: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// cupScopeLeagueDays returns the league-day union a cup's calendar anchors to
+// (IM08): a country's league days for domestic cups; the region-wide union for
+// continental cups.
+func (s *Service) cupScopeLeagueDays(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, cup *Cup) ([]time.Time, error) {
+	if cup.Region != nil {
+		countries, err := s.regionCountries(ctx, tx, cup.Region.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.unionLeagueDays(ctx, tx, worldID, countries)
+	}
+	return s.countryLeagueDays(ctx, tx, worldID, cup.Country.ID)
+}
+
+// SetCupFinalDate edits a cup's final-date policy (IM10). It updates the
+// declaration for future seasons and, when the cup has a live campaign,
+// re-stamps only the rounds that have not materialized yet — the fixture
+// history never moves. On a 'fixed' cup only final_date may be edited (offset
+// edits are rejected). On a 'calculated' cup final_offset_days updates the
+// declaration and clears any override, re-deriving from the live league
+// calendar; a final_date stamps a per-campaign override onto the live ladder,
+// and final_date:null clears it. Any edit that lands on or behind an
+// already-scheduled round is rejected with ErrCupFinalDateLocked. A moved
+// campaign final publishes a scheduling story. Returns the refreshed cup.
+func (s *Service) SetCupFinalDate(ctx context.Context, cupID uuid.UUID, finalDate *string, finalDateSet bool, finalOffsetDays *int) (*Cup, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin cup final-date edit: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	cup, err := s.getCup(ctx, tx, cupID)
+	if err != nil {
+		return nil, err
+	}
+
+	var parsedFinalDate *time.Time
+	if finalDateSet && finalDate != nil {
+		d, err := parseDateOnly(*finalDate)
+		if err != nil {
+			return nil, fmt.Errorf("%w: final_date must be a calendar date (YYYY-MM-DD)", ErrCupFinalDateInvalid)
+		}
+		d = daysTruncate(d)
+		parsedFinalDate = &d
+	}
+
+	newMode := cup.FinalDateMode
+	newDeclDate := cup.FinalDate
+	newDeclOffset := cup.FinalOffsetDays
+
+	if newMode != cupFinalModeFixed {
+		// 'calculated' tolerates a missing/invalid mode string by defaulting.
+		newMode = cupFinalModeCalculated
+	}
+	switch newMode {
+	case cupFinalModeFixed:
+		if finalOffsetDays != nil {
+			return nil, fmt.Errorf("%w: fixed cups ignore offsets", ErrCupFinalDateInvalid)
+		}
+		if parsedFinalDate == nil {
+			return nil, fmt.Errorf("%w: fixed cups require a final_date", ErrCupFinalDateInvalid)
+		}
+		d := parsedFinalDate.Format("2006-01-02")
+		newDeclDate = &d
+	default: // calculated
+		if finalOffsetDays != nil {
+			if *finalOffsetDays < 0 {
+				return nil, fmt.Errorf("%w: final_offset_days must be >= 0", ErrCupFinalDateInvalid)
+			}
+			newDeclOffset = finalOffsetDays
+		}
+	}
+
+	// Load the live campaign plan (nil unless a campaign exists).
+	var qual json.RawMessage
+	if err := tx.QueryRow(ctx,
+		`SELECT qualification_rules FROM competition.competition_rules WHERE competition_id = $1`, cupID).Scan(&qual); err != nil {
+		return nil, fmt.Errorf("load cup rules: %w", err)
+	}
+	plan, hasPlan := planFromQual(qual)
+
+	// How much of the bracket is already played: the highest materialized
+	// matchday and its latest fixture date (the hard, never-movable history).
+	var frontierRound int
+	var frontierDate *time.Time
+	if hasPlan {
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(MAX(matchday), 0), MAX(scheduled_at)::date
+			FROM match.fixtures WHERE competition_id = $1 AND status <> 'cancelled'`, cupID).
+			Scan(&frontierRound, &frontierDate); err != nil {
+			return nil, fmt.Errorf("cup frontier: %w", err)
+		}
+		if len(plan.Ladder) > 0 && frontierRound >= len(plan.Ladder) {
+			return nil, ErrCupFinalDateLocked
+		}
+	}
+
+	var ladder []roundPlan
+	if hasPlan {
+		ladder = plan.Ladder
+		k := len(ladder)
+		if k == 0 {
+			hasPlan = false
+		} else if newMode == cupFinalModeFixed || newMode == cupFinalModeCalculated {
+			var newFinal *time.Time
+			switch {
+			case newMode == cupFinalModeFixed:
+				newFinal = parsedFinalDate
+				d := parsedFinalDate.Format("2006-01-02")
+				newDeclDate = &d
+			case finalDateSet:
+				// Calculated + a body date: per-campaign override only (the
+				// declaration does not change mode or gain a date). An explicit
+				// null leaves newFinal nil and re-derives below (clears it).
+				newFinal = parsedFinalDate
+			}
+
+			leagueDays, err := s.cupScopeLeagueDays(ctx, tx, cup.WorldID, cup)
+			if err != nil {
+				return nil, err
+			}
+			p, err := s.scheduleParams(ctx, tx, cupID, cup.WorldID)
+			if err != nil {
+				return nil, err
+			}
+			weekdays := p.allowedWeekdays
+
+			if newFinal == nil {
+				// Re-derive (or clear): the override dies, the declaration
+				// offset rules again.
+				if derived, ok := resolveCupFinalDate(newMode, newFinal, *newDeclOffset, leagueDays, weekdays); ok {
+					newFinal = &derived
+				}
+			}
+
+			if newFinal != nil {
+				// Reject edits that land on/behind the materialized history or
+				// when the final is already played.
+				if frontierDate != nil && !newFinal.After(*frontierDate) {
+					return nil, ErrCupFinalDateLocked
+				}
+				var seed int64
+				if err := tx.QueryRow(ctx,
+					`SELECT COALESCE(world_seed, 0) FROM world.worlds WHERE id = $1`, cup.WorldID).Scan(&seed); err != nil {
+					return nil, fmt.Errorf("load world seed: %w", err)
+				}
+				ladder[k-1].Date = newFinal
+				for idx := k - 2; idx >= frontierRound; idx-- {
+					next := *ladder[idx+1].Date
+					round := idx + 1 // 1-based round
+					target := next.AddDate(0, 0, -cupGap(seed, cupID, round, k))
+					date := findCupRoundDay(target, next, leagueDays, weekdays)
+					ladder[idx].Date = &date
+				}
+				// The earliest re-stamped round must still clear the frontier.
+				if frontierDate != nil {
+					earliest := ladder[frontierRound].Date
+					if earliest == nil || !earliest.After(*frontierDate) {
+						return nil, ErrCupFinalDateLocked
+					}
+				}
+			} else {
+				// Nothing to anchor against: un-stamp the unfrozen tail so
+				// those rounds fall back to the legacy weekly pace.
+				for idx := k - 1; idx >= frontierRound && idx >= 0; idx-- {
+					ladder[idx].Date = nil
+				}
+			}
+		}
+	}
+
+	moved := 0
+	if hasPlan {
+		for idx := frontierRound; idx < len(ladder); idx++ {
+			a, b := plan.Ladder[idx].Date, ladder[idx].Date
+			if (a == nil) != (b == nil) || (a != nil && !a.Equal(*b)) {
+				moved++
+			}
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE competition.competitions
+		SET final_date_mode = $2, final_date = $3, final_offset_days = $4
+		WHERE id = $1`,
+		cupID, newMode, finalDateParam(newDeclDate), newDeclOffset); err != nil {
+		return nil, fmt.Errorf("update cup final-date policy: %w", err)
+	}
+
+	if moved > 0 {
+		ladderJSON, err := json.Marshal(ladder)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE competition.competition_rules
+			SET qualification_rules = jsonb_set(qualification_rules, '{campaign,ladder}', $2::jsonb)
+			WHERE competition_id = $1`, cupID, ladderJSON); err != nil {
+			return nil, fmt.Errorf("persist cup ladder: %w", err)
+		}
+		if final := ladder[len(ladder)-1].Date; final != nil {
+			name, err := s.competitionName(ctx, tx, cupID)
+			if err != nil {
+				return nil, err
+			}
+			if err := s.publishSchedulingNews(ctx, tx, cup.WorldID, cupID,
+				fmt.Sprintf("%s: final date set", name),
+				fmt.Sprintf("The %s final now takes place on %s.", name, final.Format("Mon 2 Jan 2006"))); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	cup, err = s.getCup(ctx, tx, cupID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit cup final-date edit: %w", err)
+	}
+	return cup, nil
 }
 
 // ---------------------------------------------------------------------------
