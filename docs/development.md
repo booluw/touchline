@@ -183,6 +183,17 @@ integration tests use the same in-process broker.
   `offer: null` otherwise). No session is minted; duplicate email → 409.
 - `POST /api/auth/refresh` — rotates the refresh-token session in
   `auth.sessions` (tokens stored hashed only) and sets a fresh cookie pair.
+- `POST /api/auth/logout` — server-side logout (IM13): deletes the session row
+  identified by the `refresh_token` cookie and clears both auth cookies. No auth
+  middleware — logout must work even after the access token expired. Idempotent:
+  a missing/expired/already-used token matches no row and the endpoint still
+  returns 200.
+- **One session per account (IM13):** `uq_sessions_one_live_per_user` is a
+  partial unique index on `auth.sessions(user_id)` over live rows; logging in
+  hard-deletes the account's prior live session in the same transaction, so the
+  previous device is kicked and its refresh token dies instantly. The
+  already-issued stateless access JWT keeps authenticating until its own TTL
+  (a documented ≤15m grace window) — `requireAuth` stays DB-free.
 - `GET /api/dashboard` — protected demo route; returns the empty
   `{urgent,important,interesting}` shape until S07-01.
 

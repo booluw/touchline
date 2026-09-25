@@ -117,6 +117,24 @@ func (s *server) handleRefresh(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "club": res.Club})
 }
 
+// handleLogout ends the session server-side (IM13): the refresh-token session
+// row is deleted and both cookies are cleared, regardless of whether a session
+// actually matched. Deliberately unauthenticated — a logged-out user's access
+// token may already be expired, so logout must never depend on requireAuth.
+// The already-issued access JWT stays valid until its own TTL (a documented
+// grace window; it can no longer be refreshed).
+func (s *server) handleLogout(c *gin.Context) {
+	raw, err := c.Cookie(refreshCookie)
+	if err == nil && raw != "" {
+		if err := s.svc.Logout(c.Request.Context(), raw); err != nil {
+			internalError(c, err)
+			return
+		}
+	}
+	s.clearAuthCookies(c)
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
 type registerRequest struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
@@ -199,6 +217,26 @@ func (s *server) setAuthCookies(c *gin.Context, pair *pkgjwt.TokenPair) {
 		Secure:   s.cookiesSecure,
 		MaxAge:   refreshMaxAge,
 	})
+}
+
+// clearAuthCookies deletes both auth cookies. The Path values must mirror
+// setAuthCookies exactly (access "/", refresh "/api/auth"), or the browser
+// keeps a stale cookie that silently shadows the deletion.
+func (s *server) clearAuthCookies(c *gin.Context) {
+	clear := &http.Cookie{
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   s.cookiesSecure,
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+	}
+	access := *clear
+	access.Name, access.Path = accessCookie, "/"
+	http.SetCookie(c.Writer, &access)
+
+	refresh := *clear
+	refresh.Name, refresh.Path = refreshCookie, "/api/auth"
+	http.SetCookie(c.Writer, &refresh)
 }
 
 // clientIP parses the request's client IP for auth.sessions.ip_address.

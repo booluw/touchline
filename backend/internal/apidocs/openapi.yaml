@@ -333,6 +333,43 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               example: { error: "missing refresh token" }
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: End the session server-side
+      operationId: logout
+      security: []
+      description: |
+        Deletes the session row identified by the `refresh_token` cookie and
+        clears both auth cookies. Idempotent and deliberately unauthenticated: a
+        missing, expired, or already-consumed refresh token simply matches no
+        session and the endpoint still returns 200 with the cookies cleared —
+        logout must work even when the access token has already expired.
+
+        A user account holds ONE live session (IM13): logging in again deletes
+        the previous session, so a session logged out here (or replaced by a
+        fresh login elsewhere) can no longer be refreshed. The already-issued
+        stateless access JWT keeps authenticating until its own short TTL.
+      responses:
+        "200":
+          description: Session deleted (if any) and auth cookies cleared.
+          headers:
+            Set-Cookie:
+              description: access_token + refresh_token deletion cookies.
+              schema: { type: string, example: "access_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, example: ok }
+              example: { status: ok }
+        "500":
+          description: Session deletion failed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/dashboard:
     get:
       tags: [dashboard]

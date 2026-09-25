@@ -209,6 +209,97 @@ func TestHTTPLogin_Validation(t *testing.T) {
 	}
 }
 
+func TestHTTPLogout_RevokesAndClearsCookies(t *testing.T) {
+	ts, pool := testHTTPServer(t)
+	w := testdb.CreateWorld(t, pool, "W-HTTP-LOGOUT")
+	userID := testdb.CreateUser(t, pool, "out@example.com", "s3cret", []testdb.Join{{WorldID: w}})
+	client := ts.Client()
+
+	cookies := login(t, ts, client, "out@example.com", "s3cret")
+
+	resp := post(t, ts, client, "/api/auth/logout", "", cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("logout = %d, want 200", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read logout body: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode logout: %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("logout body = %v, want status ok", body)
+	}
+
+	// Both auth cookies must be cleared (empty value) with matching paths.
+	cleared := map[string]*http.Cookie{}
+	for _, c := range resp.Cookies() {
+		cleared[c.Name] = c
+	}
+	for _, name := range []string{"access_token", "refresh_token"} {
+		c, ok := cleared[name]
+		if !ok {
+			t.Errorf("logout did not clear %s", name)
+			continue
+		}
+		if c.Value != "" {
+			t.Errorf("%s cleared with value %q, want empty", name, c.Value)
+		}
+		if c.MaxAge >= 0 && !c.Expires.Before(time.Now()) {
+			t.Errorf("%s deletion cookie must be expired or Max-Age<0 (got MaxAge=%d)", name, c.MaxAge)
+		}
+		if c.Path != "/api/auth" && c.Path != "/" {
+			t.Errorf("%s deletion path = %q, want /api/auth or /", name, c.Path)
+		}
+	}
+
+	// Server-side logout must actually be effective: the session row is gone
+	// and the refresh token that identified it no longer refreshes.
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM auth.sessions WHERE user_id = $1`, userID).Scan(&n); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("sessions after logout = %d, want 0", n)
+	}
+	resp = post(t, ts, client, "/api/auth/refresh", "", cookies)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("refresh with logged-out cookie = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestHTTPLogout_NoSessionIdempotent(t *testing.T) {
+	ts, _ := testHTTPServer(t)
+	client := ts.Client()
+
+	// Logging out with no session at all is not an error: 200 + cookies cleared.
+	resp := post(t, ts, client, "/api/auth/logout", "", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("logout without session = %d, want 200", resp.StatusCode)
+	}
+	names := cookieNames(resp)
+	if !containsString(names, "access_token") || !containsString(names, "refresh_token") {
+		t.Errorf("logout must clear both auth cookies, got %v", names)
+	}
+
+	// A garbage refresh cookie is likewise a no-op (idempotent).
+	if resp := post(t, ts, client, "/api/auth/logout", "", "refresh_token=garbage; access_token=garbage"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("logout with garbage token = %d, want 200", resp.StatusCode)
+	}
+}
+
+func containsString(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
 // login returns the cookie header for an account that resolves to a single
 // session context (no world picker).
 func login(t *testing.T, ts *httptest.Server, client *http.Client, email, password string) string {

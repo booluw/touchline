@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/auth"
 	"github.com/touchline/backend/internal/testdb"
@@ -443,6 +445,115 @@ func TestRefresh_RejectsGarbage(t *testing.T) {
 
 	if _, err := svc.Refresh(context.Background(), "not-a-jwt", nil, ""); !errors.Is(err, auth.ErrInvalidRefresh) {
 		t.Errorf("garbage refresh: got %v, want ErrInvalidRefresh", err)
+	}
+}
+
+// liveSessions returns the LIVE (not yet revoked/deleted) session count for one
+// account — the one-session-per-user invariant (IM13).
+func liveSessions(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM auth.sessions WHERE user_id = $1 AND revoked_at IS NULL`, userID).Scan(&n); err != nil {
+		t.Fatalf("count live sessions: %v", err)
+	}
+	return n
+}
+
+func TestLogin_ReplacesPriorSession(t *testing.T) {
+	pool := testdb.New(t)
+	svc := auth.NewService(pool, testCfg())
+
+	userID := testdb.CreateUser(t, pool, "one@example.com", "s3cret", nil)
+	testdb.MakeAdmin(t, pool, userID)
+
+	first, err := svc.Login(context.Background(), auth.LoginParams{Email: "one@example.com", Password: "s3cret"})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if n := liveSessions(t, pool, userID); n != 1 {
+		t.Fatalf("live sessions after first login = %d, want 1", n)
+	}
+
+	// Logging in again must invalidate AND delete the previous session: the old
+	// refresh token can no longer refresh, and only one live row remains.
+	second, err := svc.Login(context.Background(), auth.LoginParams{Email: "one@example.com", Password: "s3cret"})
+	if err != nil {
+		t.Fatalf("second login: %v", err)
+	}
+	if n := liveSessions(t, pool, userID); n != 1 {
+		t.Errorf("live sessions after second login = %d, want 1", n)
+	}
+	var total int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM auth.sessions WHERE user_id = $1`, userID).Scan(&total); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("total sessions = %d, want 1 (prior session hard-deleted, not tombstoned)", total)
+	}
+	if _, err := svc.Refresh(context.Background(), first.TokenPair.RefreshToken, nil, ""); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Errorf("refreshing replaced session: got %v, want ErrInvalidRefresh", err)
+	}
+	if _, err := svc.Refresh(context.Background(), second.TokenPair.RefreshToken, nil, ""); err != nil {
+		t.Errorf("refreshing current session: %v", err)
+	}
+
+	// The partial unique index is the DB-level guarantee; a raw INSERT of a
+	// second live row must fail (23505) even bypassing the service.
+	_, err = pool.Exec(context.Background(),
+		`INSERT INTO auth.sessions (user_id, refresh_token_hash, expires_at)
+		 VALUES ($1, $2, now() + interval '1 day')`,
+		userID, pkgauth.HashRefreshToken("duplicate"))
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Errorf("inserting a second live session: got %v, want unique_violation 23505", err)
+	}
+}
+
+func TestLogout_DeletesServingSession(t *testing.T) {
+	pool := testdb.New(t)
+	svc := auth.NewService(pool, testCfg())
+
+	userID := testdb.CreateUser(t, pool, "out@example.com", "s3cret", nil)
+	testdb.MakeAdmin(t, pool, userID)
+
+	first, err := svc.Login(context.Background(), auth.LoginParams{Email: "out@example.com", Password: "s3cret"})
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if n := liveSessions(t, pool, userID); n != 1 {
+		t.Fatalf("live sessions before logout = %d, want 1", n)
+	}
+
+	if err := svc.Logout(context.Background(), first.TokenPair.RefreshToken); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+
+	// The server-side session is gone: no session remains, and the refresh
+	// token that identified it is rejected.
+	var total int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM auth.sessions WHERE user_id = $1`, userID).Scan(&total); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("sessions after logout = %d, want 0 (row deleted, not tombstoned)", total)
+	}
+	if _, err := svc.Refresh(context.Background(), first.TokenPair.RefreshToken, nil, ""); !errors.Is(err, auth.ErrInvalidRefresh) {
+		t.Errorf("refresh after logout: got %v, want ErrInvalidRefresh", err)
+	}
+
+	// Logout must be idempotent: repeating it, or logging out a session that
+	// never existed (or with no token at all), is never an error.
+	if err := svc.Logout(context.Background(), first.TokenPair.RefreshToken); err != nil {
+		t.Errorf("repeat logout: %v", err)
+	}
+	if err := svc.Logout(context.Background(), "not-a-real-refresh-token"); err != nil {
+		t.Errorf("logout unknown token: %v", err)
+	}
+	if err := svc.Logout(context.Background(), ""); err != nil {
+		t.Errorf("logout empty token: %v", err)
 	}
 }
 

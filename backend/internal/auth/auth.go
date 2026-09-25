@@ -16,8 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
-	pkgauth "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/apiref"
+	pkgauth "github.com/touchline/backend/pkg/auth"
 )
 
 // Sentinel errors. Handlers map these to HTTP status codes; all other errors
@@ -262,6 +262,13 @@ func (s *Service) completeLogin(ctx context.Context, userID uuid.UUID, identity 
 	if _, err := tx.Exec(ctx, `UPDATE auth.users SET last_login_at = now() WHERE id = $1`, userID); err != nil {
 		return nil, fmt.Errorf("touch last_login: %w", err)
 	}
+	// One live session per account (IM13): logging in invalidates and deletes
+	// any prior session. Hard delete happens BEFORE the insert, in the same
+	// transaction, so the partial unique index uq_sessions_one_live_per_user is
+	// never violated and no two live rows can ever coexist.
+	if _, err := tx.Exec(ctx, `DELETE FROM auth.sessions WHERE user_id = $1`, userID); err != nil {
+		return nil, fmt.Errorf("clear prior session: %w", err)
+	}
 	if err := insertSession(ctx, tx, userID, pair.RefreshToken, s.cfg.RefreshTTL, ip, deviceFingerprint); err != nil {
 		return nil, err
 	}
@@ -365,6 +372,23 @@ func (s *Service) Refresh(ctx context.Context, rawRefresh string, ip *netip.Addr
 	}
 
 	return &LoginResult{TokenPair: pair, Identity: identity, Club: club}, nil
+}
+
+// Logout deletes the session matching the presented refresh token (IM13). The
+// plaintext token is hashed the same way insertSession stores it. Logout is
+// idempotent by design: an absent, already-consumed, or already-logged-out
+// token simply matches no row and returns nil — there is never anything for
+// the caller to distinguish.
+func (s *Service) Logout(ctx context.Context, rawRefresh string) error {
+	if rawRefresh == "" {
+		return nil
+	}
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM auth.sessions WHERE refresh_token_hash = $1`,
+		pkgauth.HashRefreshToken(rawRefresh)); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	return nil
 }
 
 // insertSession records a rotating refresh session. The plaintext token is

@@ -51,6 +51,7 @@ func (s *server) router() *gin.Engine {
 		api.POST("/auth/login", s.handleLogin)
 		api.POST("/auth/register", s.handleRegister)
 		api.POST("/auth/refresh", s.handleRefresh)
+		api.POST("/auth/logout", s.handleLogout)
 		api.GET("/dashboard", s.requireAuth, s.handleDashboard)
 		api.GET("/news", s.requireAuth, s.handleNews)
 
