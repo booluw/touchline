@@ -101,8 +101,11 @@ export interface CountryRef {
 }
 
 export interface StandingRow {
-  club_name: string;
-  club_short: string;
+  club: {
+    id: string
+    name: string
+    short: string
+  }
   played: number;
   won: number;
   drawn: number;

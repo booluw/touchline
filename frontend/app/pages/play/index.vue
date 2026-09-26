@@ -12,12 +12,14 @@ const financeStore = useFinanceStore()
 const clubStore = useClubStore()
 
 const club = {
-  competitions: computed(() => clubStore.competitions).value,
+  competitions: clubStore.competitions,
   club: computed(() => clubStore.club).value,
   game: ref<NextFixture>().value,
   dynamics: ref().value,
   board: computed(() => clubStore.board).value
 }
+
+const competitions = computed(() => clubStore.competitions)
 
 const finance = {
   summary: computed(() => financeStore.summary)
@@ -198,7 +200,7 @@ onMounted(() => init())
         <UiLoader v-if="loading.competitions === 'loading'" />
         <template v-else-if="loading.competitions === 'loaded'">
           <div class="carousel h-70 p-0 m-0 overflow-hidden">
-            <div v-for="(competition, key) in club.competitions" :key class="carousel__item w-full h-full font-mono">
+            <div v-for="(competition, key) in competitions" :key="key" class="carousel__item w-full h-full font-mono">
               <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800 mb-3">
                 <h3 class="uppercase heading heading--small">
                   {{ competition[competition.competition_type as 'league']?.competition.name }}
@@ -212,11 +214,45 @@ onMounted(() => init())
               <!-- League Competitions -->
               <template v-if="competition[competition.competition_type as 'league']">
                 <template v-if="competition[competition.competition_type as 'league']?.started">
-                  <div v-if="competition.league?.standings?.rows.length === 0" class="pt-5 uppercase text-xs text-void-400">
+                  <div v-if="competition.league!.standings!.rows.length === 0" class="pt-5 uppercase text-xs text-void-400">
                     League has not yet started
                   </div>
-                  <div v-else class="h-60 overflow-auto">
-                    {{ competition.league?.standings?.rows }}
+                  <div v-else>
+                    <div class="grid grid-cols-10">
+                      <h4 class="col-span-4 heading heading--small">club</h4>
+                      <h4 class="heading heading--small text-center">mp</h4>
+                      <h4 class="heading heading--small text-center">w</h4>
+                      <h4 class="heading heading--small text-center">d</h4>
+                      <h4 class="heading heading--small text-center">l</h4>
+                      <h4 class="heading heading--small text-center">gd</h4>
+                      <h4 class="heading heading--small text-center">pts</h4>
+                    </div>
+                    <div class="h-55 overflow-auto">
+                      <div
+                        class="grid grid-cols-10 text-sm py-1 border-b border-void-500"
+                        :class="{
+                          'bg-void-600': row.club.short === club!.club!.short,
+                          'bg-loss-500/10 text-loss-500 border-loss-500!' : [17, 18, 19].includes(index),
+                          'bg-win-500/10 text-win-500 border-win-500!': [0, 1, 2].includes(index)
+                        }"
+                        v-for="(row, index) in competition.league?.standings?.rows"
+                        :key="index"
+                      >
+                        <div class="col-span-4 grid grid-cols-7">
+                          {{ index+1 }}
+                          <span class="col-span-6 line-clamp-1" :title="row.club.name">
+                            <span class="heading heading--small border px-1">{{ row.club.short }}</span>
+                            {{ row.club.name }}
+                          </span>
+                        </div>
+                        <div class="text-center">{{ row.played }}</div>
+                        <div class="text-center">{{ row.won }}</div>
+                        <div class="text-center">{{ row.drawn }}</div>
+                        <div class="text-center">{{ row.lost }}</div>
+                        <div class="text-center">{{ row.goals_for - row.goals_against }}</div>
+                        <div class="text-center">{{ row.points }}</div>
+                      </div>
+                    </div>
                   </div>
                 </template>
               </template>

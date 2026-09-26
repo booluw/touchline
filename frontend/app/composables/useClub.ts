@@ -37,8 +37,8 @@ export function useClub() {
 
   async function getCompetitions(): Promise<void> {
     try {
-      const { competitions } = await $api.get(`${apiBase}/api/managers/me/competitions`)
-      clubStore.setCompetitions(competitions)
+      const resp = await $api.get(`${apiBase}/api/managers/me/competitions`)
+      clubStore.setCompetitions(resp.competitions)
     } catch (error) {
       console.error(error)
       notify({
