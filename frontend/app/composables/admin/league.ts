@@ -1,4 +1,5 @@
 import { useToast } from "~/components/ui/Toast"
+import type { Competition } from "~/types"
 
 interface MatchDayMovedResponse {
   calendar_updated: boolean,
@@ -22,9 +23,22 @@ export function useAdminLeague({ leagueId }: { leagueId: string }) {
   const { $api } = useNuxtApp()
   const { notify } = useToast()
 
+  async function getLeagueDetails(): Promise<Competition> {
+    try {
+      return await $api.get(`${apiBase}/api/admin/competitions/${leagueId}/detail`)
+    } catch (error) {
+      console.error(error)
+      notify({
+        title: "Error",
+        description: "An Error Occurred While Loading League",
+        type: "danger"
+      })
+      throw error
+    }
+  }
   async function setLeagueStartDate({ kickoff_date, worldId }: { kickoff_date: string, worldId: string }) {
     try {
-      const res: StartLeagueResponse = $api.post(`${apiBase}/api/admin/worlds/${worldId}/leagues/${leagueId}/season`, { kickoff_date })
+      const res: StartLeagueResponse = await $api.post(`${apiBase}/api/admin/worlds/${worldId}/leagues/${leagueId}/season`, { kickoff_date })
 
       notify({
         title: "Success",
@@ -41,9 +55,9 @@ export function useAdminLeague({ leagueId }: { leagueId: string }) {
       throw error
     }
   }
-  async function setLeagueMatchDays() {
+  async function setLeagueMatchDays(allowed_weekdays: number[]) {
     try {
-      const { calendar_updated, matchdays_re_paced, fixtures_moved }: MatchDayMovedResponse = await $api.post<MatchDayMovedResponse>(`${apiBase}/api/admin/leagues/${leagueId}/scheduling`)
+      const { calendar_updated, matchdays_re_paced, fixtures_moved }: MatchDayMovedResponse = await $api.patch<MatchDayMovedResponse>(`${apiBase}/api/admin/leagues/${leagueId}/scheduling`, { allowed_weekdays })
       if (calendar_updated) {
         notify({
           type: "success",
@@ -72,6 +86,7 @@ export function useAdminLeague({ leagueId }: { leagueId: string }) {
 
   return {
     setLeagueMatchDays,
-    setLeagueStartDate
+    setLeagueStartDate,
+    getLeagueDetails
   }
 }

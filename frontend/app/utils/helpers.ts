@@ -43,3 +43,69 @@ const usdCompactFormatter = new Intl.NumberFormat("en-US", {
 export function formatMoneyCompact(amountInCents: number): string {
   return usdCompactFormatter.format(amountInCents / 100);
 }
+
+
+/**
+ * Formats fixture kickoff times for display. Fixtures come back from the
+ * API as UTC ISO strings (e.g. "2026-06-07T19:00:00Z") — Intl.DateTimeFormat
+ * converts these to the VIEWER's local time zone automatically, which is
+ * what you want for a global player base watching the same kickoff.
+ */
+
+const dateFormatter = new Intl.DateTimeFormat("en-US", {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+});
+
+const dateFormatterCompact = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+});
+
+const timeFormatter = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/**
+ * Full display, for a fixture detail page or match header.
+ * formatFixtureDateTime("2026-06-07T19:00:00Z") -> "Sat, Jun 7 · 7:00 PM"
+ */
+export function formatFixtureDateTime(iso: string): string {
+  const date = new Date(iso);
+  return `${dateFormatter.format(date)} · ${timeFormatter.format(date)}`;
+}
+
+/**
+ * Compact display, for dense fixture lists/tables — drops the weekday.
+ * formatFixtureDateTimeCompact("2026-06-07T19:00:00Z") -> "Jun 7 · 7:00 PM"
+ */
+export function formatFixtureDateTimeCompact(iso: string): string {
+  const date = new Date(iso);
+  return `${dateFormatterCompact.format(date)} · ${timeFormatter.format(date)}`;
+}
+
+/**
+ * Smart relative label for "today/tomorrow" fixtures, falling back to the
+ * full format otherwise — the common pattern for a schedule/fixtures screen.
+ * formatFixtureDateTimeSmart(<today's kickoff>)    -> "Today · 7:00 PM"
+ * formatFixtureDateTimeSmart(<tomorrow's kickoff>) -> "Tomorrow · 7:00 PM"
+ * formatFixtureDateTimeSmart(<next week's kickoff>) -> "Sat, Jun 14 · 7:00 PM"
+ */
+export function formatFixtureDateTimeSmart(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+
+  if (isSameDay(date, now)) return `Today · ${timeFormatter.format(date)}`;
+  if (isSameDay(date, tomorrow)) return `Tomorrow · ${timeFormatter.format(date)}`;
+  return formatFixtureDateTime(iso);
+}

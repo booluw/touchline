@@ -406,9 +406,11 @@ body {
 
   .pill {
     --variant: var(--color-cyan-500);
+    --bg: transparent;
     @apply px-2 py-1 text-xs rounded-tag border uppercase font-mono;
     color: var(--variant);
     border-color: var(--variant);
+    background-color: var(--bg);
 
     &.pill--success {
       --variant: var(--color-win-500);

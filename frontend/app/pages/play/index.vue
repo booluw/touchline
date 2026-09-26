@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { useManagerOffer } from '~/composables/manager/offer';
 import type { NextFixture, Offer } from '~/types';
-import { formatMoneyCompact } from '../../utils/helpers';
+import { formatMoneyCompact, formatFixtureDateTimeSmart } from '../../utils/helpers';
 import { useManagerDashboard } from '~/composables/manager/dashboard';
 
 const { getOffers } = useManagerOffer()
@@ -124,21 +124,28 @@ onMounted(() => init())
           <h3 class="heading heading--small">Overview</h3>
         </div>
         <div class="mt-5 space-y-10">
-          <div class="flex items-center gap-3">
+          <div v-if="club.game" class="flex items-center gap-3">
+            <!-- {{ club.game }} -->
             <div class="flex items-end">
-              <h3 class="heading text-sm text-void-300 w-15">{{ club.club?.name }}</h3>
-              <h2 class="heading text-7xl">3</h2>
+              <h3 class="heading"
+                :class="[club.game.fixture.status !== 'scheduled' ? 'text-sm text-void-300 w-15' : 'text-3xl']">{{ club.game.fixture.home_club.name }}</h3>
+              <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
             </div>
             <div class="flex flex-col items-center">
               <span class="heading heading--big text-void-400">-</span>
               <div class="pill pill--live flex items-center gap-2">
-                <div class="h-2 w-2 bg-live-500 rounded-full" />
-                78'
+                <div v-if="club.game.fixture.status === 'scheduled'" class="">
+                  {{ formatFixtureDateTimeSmart(club.game.fixture.scheduled_at) }}
+                </div>
+                <template>
+                  <div class="h-2 w-2 bg-live-500 rounded-full" />
+                  78'
+                </template>
               </div>
             </div>
             <div class="flex items-end gap-2">
-              <h2 class="heading text-7xl">3</h2>
-              <h3 class="heading text-sm text-void-300 w-15">{{ club.club?.short }}</h3>
+              <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
+              <h3 class="heading" :class="[club.game.fixture.status !== 'scheduled'? 'text-sm text-void-300 w-15' : 'text-3xl']">{{ club.game.fixture.away_club.name }}</h3>
             </div>
           </div>
           <div class="pt-5 border-t border-void-800 grid grid-cols-2 gap-5">
