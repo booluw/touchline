@@ -491,6 +491,12 @@ body {
       transform: translate(0, 0);
     }
 
+    &.carousel--hide {
+      &::scroll-marker-group {
+        display: none!important;
+      }
+    }
+
     @media screen and (min-width: 760px) {
       width: 100%;
 

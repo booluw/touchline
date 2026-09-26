@@ -184,7 +184,7 @@ export interface ClubCupView {
   next_fixture?: CompetitionFixture | null;
 }
 
-export interface Competition {
+export interface ManagerCompetition {
   role: string;
   joined_at: string;           // ISO timestamp
   competition_type: CompetitionType;

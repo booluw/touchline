@@ -124,86 +124,66 @@ onMounted(() => init())
           <h3 class="heading heading--small">Overview</h3>
         </div>
         <div class="mt-5 space-y-10">
-          <div v-if="club.game" class="flex items-center gap-3">
-            <!-- {{ club.game }} -->
-            <div class="flex items-end">
-              <h3 class="heading"
-                :class="[club.game.fixture.status !== 'scheduled' ? 'text-sm text-void-300 w-15' : 'text-3xl']">{{ club.game.fixture.home_club.name }}</h3>
-              <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
-            </div>
-            <div class="flex flex-col items-center">
-              <span class="heading heading--big text-void-400">-</span>
-              <div class="pill pill--live flex items-center gap-2">
-                <div v-if="club.game.fixture.status === 'scheduled'" class="">
-                  {{ formatFixtureDateTimeSmart(club.game.fixture.scheduled_at) }}
+          <UiLoader v-if="loading.fixtures === 'loading'" />
+          <div v-else-if="loading.fixtures === 'loaded'">
+            <template v-if="club.game">
+              <div class="flex items-center gap-3">
+                <div class="flex items-end">
+                  <h3 class="heading"
+                    :class="[club.game.fixture.status !== 'scheduled' ? 'text-sm text-void-300 w-15' : 'text-2xl w-40 text-center']">
+                    {{ club.game.fixture.home_club.name }}</h3>
+                  <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
                 </div>
-                <template>
-                  <div class="h-2 w-2 bg-live-500 rounded-full" />
-                  78'
-                </template>
-              </div>
-            </div>
-            <div class="flex items-end gap-2">
-              <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
-              <h3 class="heading" :class="[club.game.fixture.status !== 'scheduled'? 'text-sm text-void-300 w-15' : 'text-3xl']">{{ club.game.fixture.away_club.name }}</h3>
-            </div>
-          </div>
-          <div class="pt-5 border-t border-void-800 grid grid-cols-2 gap-5">
-            <div class="">
-              <h3 class="heading heading--small">board & fans</h3>
-
-              <div class="">
-                <div class="" v-if="loading.board === 'loading'">Please wait</div>
-                <div class="mt-5 flex gap-5" v-else-if="loading.board === 'loaded'">
-                  <div class="flex flex-col gap-1">
-                    <div class="flex gap-2 items-center">
-                      <h4 class="heading heading--medium">{{ club.board?.confidence }}</h4>
-                      <IconsHappy class="w-10" v-if="club.board?.confidence! > 50" />
-                      <IconsNeutral class="w-10" v-else-if="club.board?.confidence! === 50" />
-                      <IconsSad class="w-10" v-else-if="club.board?.confidence! < 45" />
-                      <IconsBlanked class="w-10" v-else />
+                <div v-if="club.game.fixture.status === 'scheduled'" class="flex flex-col items-center gap-2">
+                  <span class="heading heading--medium text-void-400">vs</span>
+                  <div class="pill flex items-center gap-2">
+                    <div class="">
+                      {{ formatFixtureDateTimeSmart(club.game.fixture.scheduled_at) }}
                     </div>
-                    <h5 class="heading heading--small">confidence</h5>
-                  </div>
-
-                  <div class="flex flex-col gap-1">
-                    <div class="flex gap-2 items-center">
-                      <h4 class="heading heading--medium">{{ club.board?.snapshot.scores.performance_score }}</h4>
-                      <IconsHappy class="w-10" v-if="club.board?.snapshot.scores.performance_score! > 50" />
-                      <IconsNeutral class="w-10" v-else-if="club.board?.snapshot.scores.performance_score! === 50" />
-                      <IconsSad class="w-10" v-else-if="club.board?.snapshot.scores.performance_score! < 45" />
-                      <IconsBlanked class="w-10" v-else />
-                    </div>
-                    <h5 class="heading heading--small">performance rating</h5>
-                  </div>
-
-                  <div class="flex flex-col gap-1">
-                    <div class="flex gap-2 items-center">
-                      <h4 class="heading heading--medium">{{ club.board?.snapshot.scores.supporter_sentiment_score }}
-                      </h4>
-                      <IconsHappy class="w-10" v-if="club.board?.snapshot.scores.supporter_sentiment_score! > 50" />
-                      <IconsNeutral class="w-10"
-                        v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! === 50" />
-                      <IconsSad class="w-10" v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! < 45" />
-                      <IconsBlanked class="w-10" v-else />
-                    </div>
-                    <h5 class="heading heading--small">fans score</h5>
                   </div>
                 </div>
-                <div v-else class="uppercase text-xs flex gap-3 mt-3">
-                  <div class="text-loss-500">
-                    An Error Occurred
+                <div v-else class="flex flex-col items-center gap-2">
+                  <span class="heading heading--medium text-void-400">-</span>
+                  <div class="pill pill--live flex items-center gap-2">
+                    <div class="h-2 w-2 bg-live-500 rounded-full" /> 78'
                   </div>
-                  <button class="uppercase text-cyan-300" @click="getClubFinance()">Retry</button>
+                </div>
+                <div class="flex items-end gap-2">
+                  <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
+                  <h3 class="heading"
+                    :class="[club.game.fixture.status !== 'scheduled' ? 'text-sm text-void-300 w-15' : 'text-2xl w-40 text-center']">
+                    {{ club.game.fixture.away_club.name }}</h3>
                 </div>
               </div>
 
-            </div>
+              <div class="mt-5 grid grid-cols-2 gap-5">
+                <div class="">
+                  <div class="flex items-center justify-between pb-3">
+                    <h3 class="heading heading--small">Scout Report</h3>
+                  </div>
+                  <div class="carousel carousel--hide mt-0 max-h-32.5 overflow-y-hidden">
+                    <div class="carousel__item w-1/2 bg-void-700 p-1"
+                      v-for="(player, key) in club.game.opponent.top_players" :key>
+                      <h2 class="font-bold uppercase p-3">
+                        {{ player.first_name }} {{ player.last_name }}
+                        <br />
+                        ({{ player.primary_position }}) {{ player.rating }}
+                      </h2>
+                    </div>
+                  </div>
+                </div>
+                <div class="h-32.5 overflow-auto">
+                  <!-- {{ club.game.opponent }} -->
+                </div>
+              </div>
+            </template>
           </div>
-          <!-- Current Match / Last Match Report / Next Match Report
-          <br /><br />
-          // cyan if there's a current match
-          // normal for past or next match -->
+          <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+            <div class="text-loss-500">
+              An Error Occurred
+            </div>
+            <button class="uppercase text-cyan-300" @click="getClubNextFixtures()">Retry</button>
+          </div>
         </div>
       </div>
       <div class="border-brutal border-void-500 p-5">
@@ -217,9 +197,9 @@ onMounted(() => init())
 
         <UiLoader v-if="loading.competitions === 'loading'" />
         <template v-else-if="loading.competitions === 'loaded'">
-          <div class="carousel h-50 p-0 m-0">
+          <div class="carousel h-70 p-0 m-0 overflow-hidden">
             <div v-for="(competition, key) in club.competitions" :key class="carousel__item w-full h-full font-mono">
-              <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
+              <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800 mb-3">
                 <h3 class="uppercase heading heading--small">
                   {{ competition[competition.competition_type as 'league']?.competition.name }}
                 </h3>
@@ -229,14 +209,23 @@ onMounted(() => init())
                   {{ competition.competition_type.split("_").join(" ") }}
                 </nuxt-link>
               </div>
-              <template v-if="competition[competition.competition_type as 'league']?.started">
-                League Has started, show table or next fixture
+              <!-- League Competitions -->
+              <template v-if="competition[competition.competition_type as 'league']">
+                <template v-if="competition[competition.competition_type as 'league']?.started">
+                  <div v-if="competition.league?.standings?.rows.length === 0" class="pt-5 uppercase text-xs text-void-400">
+                    League has not yet started
+                  </div>
+                  <div v-else class="h-60 overflow-auto">
+                    {{ competition.league?.standings?.rows }}
+                  </div>
+                </template>
               </template>
-              <div v-else class="uppercase text-xs flex flex-col items-start gap-2 py-5">
-                <div class="text-draw-500">
-                  {{ competition.competition_type.split("_").join(" ") }} has not yet started
-                </div>
-              </div>
+              <!-- Cup Competitions -->
+              <template v-else>
+                <template v-if="competition[competition.competition_type as 'cup']?.started">
+                  League Has started, show table or next fixture
+                </template>
+              </template>
             </div>
           </div>
         </template>
@@ -253,8 +242,17 @@ onMounted(() => init())
         </div>
 
         <UiLoader v-if="loading.dashboard === 'loading'" />
-        <div class="mt-5" v-else-if="loading.dashboard === 'loaded'">
-          {{ dashboard }}
+        <div class="mt-5 hidden" v-else-if="loading.dashboard === 'loaded'">
+          <!-- {{ dashboard }} -->
+          <div class="">
+            <div class=""></div>
+          </div>
+        </div>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="getManagerDashboardData()">Retry</button>
         </div>
       </div>
       <div class="border-brutal p-5 space-y-5"
@@ -294,6 +292,54 @@ onMounted(() => init())
             An Error Occurred
           </div>
           <button class="uppercase text-cyan-300" @click="getClubFinance()">Retry</button>
+        </div>
+
+        <div class="border-t-brutal border-void-700 pt-3">
+          <div class="flex items-center justify-between">
+            <h3 class="heading heading--small">Board</h3>
+          </div>
+          <div class="" v-if="loading.board === 'loading'">Please wait</div>
+          <div class="mt-3 flex gap-5" v-else-if="loading.board === 'loaded'">
+            <div class="flex flex-col gap-1">
+              <div class="flex gap-2 items-center">
+                <h4 class="heading text-2xl">{{ club.board?.confidence }}</h4>
+                <IconsHappy class="w-6" v-if="club.board?.confidence! > 50" />
+                <IconsNeutral class="w-6" v-else-if="club.board?.confidence! === 50" />
+                <IconsSad class="w-6" v-else-if="club.board?.confidence! < 45" />
+                <IconsBlanked class="w-6" v-else />
+              </div>
+              <h5 class="heading heading--small">confidence</h5>
+            </div>
+
+            <div class="flex flex-col gap-1">
+              <div class="flex gap-2 items-center">
+                <h4 class="heading text-2xl">{{ club.board?.snapshot.scores.performance_score }}</h4>
+                <IconsHappy class="w-6" v-if="club.board?.snapshot.scores.performance_score! > 50" />
+                <IconsNeutral class="w-6" v-else-if="club.board?.snapshot.scores.performance_score! === 50" />
+                <IconsSad class="w-6" v-else-if="club.board?.snapshot.scores.performance_score! < 45" />
+                <IconsBlanked class="w-6" v-else />
+              </div>
+              <h5 class="heading heading--small">performance rating</h5>
+            </div>
+
+            <div class="flex flex-col gap-1">
+              <div class="flex gap-2 items-center">
+                <h4 class="heading text-2xl">{{ club.board?.snapshot.scores.supporter_sentiment_score }}
+                </h4>
+                <IconsHappy class="w-6" v-if="club.board?.snapshot.scores.supporter_sentiment_score! > 50" />
+                <IconsNeutral class="w-6" v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! === 50" />
+                <IconsSad class="w-6" v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! < 45" />
+                <IconsBlanked class="w-6" v-else />
+              </div>
+              <h5 class="heading heading--small">fans score</h5>
+            </div>
+          </div>
+          <div v-else class="uppercase text-xs flex gap-3 mt-3">
+            <div class="text-loss-500">
+              An Error Occurred
+            </div>
+            <button class="uppercase text-cyan-300" @click="getBoardManagerStatus()">Retry</button>
+          </div>
         </div>
       </div>
       <div class="col-span-2 row-span-2 border-brutal border-void-700 p-5">
