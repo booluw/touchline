@@ -189,6 +189,27 @@ func (s *Service) ApplyResult(ctx context.Context, fixtureID uuid.UUID, homeScor
 	return tx.Commit(ctx)
 }
 
+// seedStandings materializes the full table for a season at its creation:
+// one zeroed row per member, so every club appears from the very first day
+// (even with zero fixtures played) instead of only after its first result.
+// Idempotent — the UNIQUE (season_id, club_id) guard absorbs re-seeding, and
+// rows carrying real results are never overwritten.
+func (s *Service) seedStandings(ctx context.Context, tx pgx.Tx, seasonID uuid.UUID, clubIDs []uuid.UUID) error {
+	if len(clubIDs) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO competition.standings
+			(season_id, club_id, played, won, drawn, lost, goals_for, goals_against, points)
+		SELECT $1, unnest($2::uuid[]), 0, 0, 0, 0, 0, 0, 0
+		ON CONFLICT (season_id, club_id) DO NOTHING`,
+		seasonID, clubIDs)
+	if err != nil {
+		return fmt.Errorf("seed standings: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) upsertStanding(ctx context.Context, tx pgx.Tx, seasonID, clubID uuid.UUID,
 	goalsFor, goalsAgainst, points int) error {
 	won, drawn, lost := 0, 0, 0

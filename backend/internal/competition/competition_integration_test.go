@@ -201,13 +201,18 @@ func TestStartSeasonAndApplyResultAndRollover(t *testing.T) {
 		t.Fatalf("start champ: %v", err)
 	}
 
-	// Standings start empty for the started season.
+	// The table is formulated at season start: every member at 0 played.
 	standing, err := svc.GetStandings(ctx, premier.ID, worldID)
 	if err != nil {
 		t.Fatalf("standings: %v", err)
 	}
-	if len(standing.Rows) != 0 {
-		t.Fatalf("initial standings rows = %d, want 0", len(standing.Rows))
+	if len(standing.Rows) != 4 {
+		t.Fatalf("initial standings rows = %d, want 4", len(standing.Rows))
+	}
+	for i, r := range standing.Rows {
+		if r.Played != 0 || r.Won != 0 || r.Drawn != 0 || r.Lost != 0 || r.GoalsFor != 0 || r.GoalsAgainst != 0 || r.Points != 0 {
+			t.Fatalf("initial standing row %d = %+v, want all zeros", i, r)
+		}
 	}
 
 	// Play every fixture: 6 matchdays x 2 leagues x 2 fixtures.
@@ -1065,7 +1070,8 @@ func TestMyClubCompetitions(t *testing.T) {
 		t.Fatalf("no-membership overview = %+v, want empty", loner)
 	}
 
-	// In season: started flips, standings rows appear once a result is in.
+	// In season: started flips and the full table is formulated at start —
+	// every member has a zeroed row before any result.
 	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
 		t.Fatalf("start season: %v", err)
 	}
@@ -1077,8 +1083,13 @@ func TestMyClubCompetitions(t *testing.T) {
 	if !lg.Started || lg.Season == nil || lg.Season.Number != 1 {
 		t.Fatalf("in-season started=%v season=%+v, want started + season 1", lg.Started, lg.Season)
 	}
-	if lg.Standings == nil || len(lg.Standings.Rows) != 0 {
-		t.Fatalf("standings before results = %+v, want empty rows", lg.Standings)
+	if lg.Standings == nil || len(lg.Standings.Rows) != 4 {
+		t.Fatalf("standings before results = %+v, want 4 zeroed rows", lg.Standings)
+	}
+	for i, r := range lg.Standings.Rows {
+		if r.Played != 0 || r.Points != 0 {
+			t.Fatalf("standing row %d before results = %+v, want all zeros", i, r)
+		}
 	}
 	if lg.NextFixture == nil {
 		t.Fatal("in-season league next fixture must be scheduled")
@@ -1105,8 +1116,8 @@ func TestMyClubCompetitions(t *testing.T) {
 		t.Fatalf("overview after result: %v", err)
 	}
 	lg = items[0].League
-	if lg.Standings == nil || len(lg.Standings.Rows) != 1 {
-		t.Fatalf("standings after one result = %+v, want one row", lg.Standings)
+	if lg.Standings == nil || len(lg.Standings.Rows) != 4 {
+		t.Fatalf("standings after one result = %+v, want 4 rows", lg.Standings)
 	}
 	found := false
 	for _, r := range lg.Standings.Rows {

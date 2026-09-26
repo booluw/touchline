@@ -143,6 +143,12 @@ func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, count
 		if err != nil {
 			return err
 		}
+		// The next season's table is formulated at its creation too (zeroed
+		// rows for every entrant), so the off-season and the very first matchday
+		// already read a full table.
+		if err := s.seedStandings(ctx, tx, next.ID, entries); err != nil {
+			return err
+		}
 		if err := s.emitNextSeason(ctx, tx, worldID, l.ID, next, entries, count); err != nil {
 			return err
 		}

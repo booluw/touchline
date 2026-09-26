@@ -406,6 +406,11 @@ func (s *Service) startSeason(ctx context.Context, worldID, competitionID uuid.U
 	if err != nil {
 		return nil, err
 	}
+	// Formulate the full table at start: every member gets a zeroed standings
+	// row in the same tx as the season, entries and fixtures it describes.
+	if err := s.seedStandings(ctx, tx, season.ID, members); err != nil {
+		return nil, err
+	}
 
 	var seedPtr *int64
 	if err := tx.QueryRow(ctx, `SELECT world_seed FROM world.worlds WHERE id = $1`, worldID).Scan(&seedPtr); err != nil {

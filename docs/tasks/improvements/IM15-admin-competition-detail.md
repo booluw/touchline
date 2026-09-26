@@ -113,9 +113,12 @@ dossier without chasing a dozen read calls.
   every query keys on it alone.
 - **The season of interest is the latest season, whatever its status.** During
   the off-season gap the latest season is `upcoming`: the dossier shows its
-  scheduled fixtures (streak/next), an empty table and empty current scorers,
-  past winners from the older completed years, and the movement that produced
-  it — all self-consistent. Force-completing a season never rolls it into the
-  "current" slot.
+  scheduled fixtures (streak/next), a full subscriber table at zero played (the
+  table is **formulated at season creation** — every entrant gets a zeroed
+  `competition.standings` row in the same tx that creates the season, entries
+  and fixtures — so an upcoming season reads a complete table, not an empty
+  one), empty current scorers, past winners from the older completed years, and
+  the movement that produced it — all self-consistent. Force-completing a
+  season never rolls it into the "current" slot.
 - **No migration and no frontend.** Pure read path on top of existing schema;
   the frontend work is a separate task (out of scope per sprint rules).

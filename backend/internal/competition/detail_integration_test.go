@@ -258,8 +258,21 @@ func TestCompetitionDetailLeagueMovement(t *testing.T) {
 	if lg.Season.FixturesPlayed != 0 || lg.Season.FixturesTotal != 12 {
 		t.Fatalf("latest fixture progress = %d/%d, want 0/12", lg.Season.FixturesPlayed, lg.Season.FixturesTotal)
 	}
-	if len(lg.Standings) != 0 {
-		t.Fatalf("standings = %+v, want empty for an upcoming season", lg.Standings)
+	// The upcoming season's table is formulated at creation: all 4 members at
+	// zero played, enriched with country and next fixture, no streak yet.
+	if len(lg.Standings) != 4 {
+		t.Fatalf("standings = %+v, want 4 rows for the upcoming season", lg.Standings)
+	}
+	for i, r := range lg.Standings {
+		if r.Country.Name == "" {
+			t.Fatalf("standing row %d country = %+v, want enriched", i, r.Country)
+		}
+		if r.Played != 0 || r.Points != 0 || r.Streak.Length != 0 {
+			t.Fatalf("standing row %d = %+v, want 0 played/points and no streak", i, r)
+		}
+		if r.NextFixture == nil {
+			t.Fatalf("standing row %d has no next fixture for the upcoming season", i)
+		}
 	}
 
 	if !sameClubs(wantJoined, lg.Movement.PromotedIn) {

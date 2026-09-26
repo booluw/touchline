@@ -39,6 +39,14 @@ informational (`SEASON_STARTED` event) and guarantees the season reads
 
 One season per league at a time (`ErrLeagueAlreadySeeded`).
 
+**The table is formulated when a season starts.** Season creation (start-season
+or rollover) also writes one zeroed `competition.standings` row per entrant in
+the same transaction, so every club appears in the table from day one — even
+before a single fixture is played. The status flip stays cosmetic; the table
+just gains real numbers as results land. (Existing worlds started before this
+change can be backfilled with the idempotent `INSERT…SELECT…ON CONFLICT DO
+NOTHING` standings query.)
+
 ## 2. Season #1: the admin start-season endpoint
 
 `POST /api/admin/worlds/:id/leagues/:leagueID/season` (admin-only) starts a
