@@ -194,6 +194,7 @@ func (s *server) router() *gin.Engine {
 			admin.PATCH("/cups/:id/scheduling", s.handleUpdateCupScheduling)
 			admin.PATCH("/cups/:id/final-date", s.handleSetCupFinalDate)
 			admin.GET("/worlds/:id/news", s.handleAdminWorldNews)
+			admin.GET("/competitions/:id/detail", s.handleAdminGetCompetitionDetail)
 		}
 
 		// Competition reads (S04-01): always scoped to the caller's world.

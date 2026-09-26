@@ -407,6 +407,27 @@ func (s *server) handleGetCompetition(c *gin.Context) {
 	c.JSON(http.StatusOK, league)
 }
 
+// handleAdminGetCompetitionDetail returns the full admin dossier for one
+// competition — league or cup, discriminated by competition_type (IM15). This
+// is a global admin read; unlike the manager-facing gets it is not world-scoped.
+func (s *server) handleAdminGetCompetitionDetail(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid competition id"})
+		return
+	}
+	detail, err := s.compSvc.CompetitionDetail(c.Request.Context(), id)
+	switch {
+	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		return
+	case err != nil:
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
 func (s *server) handleGetFixtures(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {

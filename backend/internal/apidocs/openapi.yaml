@@ -2806,6 +2806,45 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/admin/competitions/{id}/detail:
+    get:
+      tags: [admin]
+      summary: Competition detail dossier
+      operationId: getCompetitionDetail
+      description: >-
+        The full admin dossier for one competition (league or cup), global
+        (not world-scoped). Bundles the base identity and scope, past winners,
+        top scorers (current/latest season + all-time), and per-type data:
+        the league table with per-club country/streak/next fixture and the
+        latest season's movement, or the cup bracket with per-entrant
+        progress.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Competition id.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The competition dossier.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompetitionDetail" }
+        "400":
+          description: Invalid competition id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Competition not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/admin/worlds:
     get:
       tags: [admin]
@@ -5584,35 +5623,126 @@ components:
         attempted_at: { type: string, format: date-time, nullable: true }
         finished_at: { type: string, format: date-time, nullable: true }
         last_error: { type: string, nullable: true }
-    CompetitionSummary:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        world_id: { type: string, format: uuid }
-        code: { type: string }
-        name: { type: string }
-        country_id: { type: string, format: uuid }
-        country_name: { type: string }
-        tier: { type: integer }
-        team_count: { type: integer }
-        status: { type: string }
     CompetitionDetail:
       type: object
+      description: >-
+        One competition's full admin dossier (IM15): the shared base identity
+        and history plus the type-specific dossier. League and Cup are mutually
+        exclusive, discriminated by competition_type.
+      required: [id, name, competition_type, status, seasons_total, past_winners, top_scorers]
       properties:
         id: { type: string, format: uuid }
         world_id: { type: string, format: uuid }
-        country_id: { type: string, format: uuid }
-        country_name: { type: string }
         name: { type: string }
-        tier: { type: integer }
-        team_count: { type: integer }
-        season:
-          type: object
-          properties:
-            season_id: { type: string, format: uuid }
-            season_label: { type: string }
-            season_number: { type: integer }
-            status: { type: string }
+        competition_type: { type: string, enum: [league, domestic_cup, continental] }
+        status: { type: string }
+        country: { $ref: "#/components/schemas/CountryRef", description: "League country or cup country scope." }
+        region: { $ref: "#/components/schemas/RegionRef", description: "Regional cup scope." }
+        tier: { type: integer, nullable: true }
+        team_count: { type: integer, description: "League size; 0 for cups." }
+        reputation: { type: integer, description: "League reputation; absent for cups." }
+        seasons_total: { type: integer }
+        past_winners:
+          type: array
+          items: { $ref: "#/components/schemas/PastWinner" }
+        top_scorers: { $ref: "#/components/schemas/ScorerList" }
+        league: { $ref: "#/components/schemas/LeagueDetail" }
+        cup: { $ref: "#/components/schemas/CupDetail" }
+    PastWinner:
+      type: object
+      description: "One completed season's champion."
+      properties:
+        season: { $ref: "#/components/schemas/SeasonRef" }
+        champion: { $ref: "#/components/schemas/ClubRef" }
+    ScorerList:
+      type: object
+      description: "Top-goalscorer history: current/latest season and all-time, ranks 1..10. Goals includes penalties scored in; penalties is the subset."
+      properties:
+        current_season:
+          type: array
+          items: { $ref: "#/components/schemas/TopScorer" }
+        all_time:
+          type: array
+          items: { $ref: "#/components/schemas/TopScorer" }
+    TopScorer:
+      type: object
+      properties:
+        rank: { type: integer }
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        club: { $ref: "#/components/schemas/ClubRef", description: "The player's current club; null for free agents." }
+        goals: { type: integer }
+        penalties: { type: integer }
+    StreakInfo:
+      type: object
+      description: "A club's leading result streak."
+      properties:
+        outcome: { type: string, enum: [W, D, L] }
+        length: { type: integer }
+    LeagueDetail:
+      type: object
+      description: "The league half of a competition dossier."
+      properties:
+        season: { $ref: "#/components/schemas/SeasonDetail" }
+        seasons:
+          type: array
+          items: { $ref: "#/components/schemas/SeasonRef" }
+        standings:
+          type: array
+          items: { $ref: "#/components/schemas/StandingRowExt" }
+        movement: { $ref: "#/components/schemas/LeagueMovement" }
+    SeasonDetail:
+      type: object
+      description: "The current (latest) season with its fixture progress."
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        number: { type: integer }
+        status: { type: string }
+        fixtures_played: { type: integer }
+        fixtures_total: { type: integer }
+    StandingRowExt:
+      type: object
+      description: "A league-table line enriched with the club's country, result streak, and next fixture."
+      allOf:
+        - $ref: "#/components/schemas/StandingRow"
+      properties:
+        country: { $ref: "#/components/schemas/CountryRef" }
+        streak: { $ref: "#/components/schemas/StreakInfo" }
+        next_fixture: { $ref: "#/components/schemas/Fixture" }
+    LeagueMovement:
+      type: object
+      description: "The current season's membership churn versus its immediate predecessor."
+      properties:
+        promoted_in:
+          type: array
+          items: { $ref: "#/components/schemas/ClubRef" }
+        relegated_out:
+          type: array
+          items: { $ref: "#/components/schemas/ClubRef" }
+    CupDetail:
+      type: object
+      description: "The cup half of a competition dossier."
+      properties:
+        season: { $ref: "#/components/schemas/SeasonRef" }
+        late_entry_round: { type: integer }
+        total_rounds: { type: integer }
+        champion: { $ref: "#/components/schemas/ClubRef" }
+        rounds:
+          type: array
+          items: { $ref: "#/components/schemas/CupRound" }
+        clubs:
+          type: array
+          items: { $ref: "#/components/schemas/CupClubRow" }
+    CupClubRow:
+      type: object
+      description: "One cup entrant's progress in the current campaign."
+      properties:
+        club: { $ref: "#/components/schemas/ClubRef" }
+        country: { $ref: "#/components/schemas/CountryRef" }
+        eliminated: { type: boolean }
+        current_round: { type: integer }
+        streak: { $ref: "#/components/schemas/StreakInfo" }
+        next_fixture: { $ref: "#/components/schemas/Fixture" }
     Fixture:
       type: object
       properties:
