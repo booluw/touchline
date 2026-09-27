@@ -30,6 +30,36 @@ func playerStatus(c *gin.Context, err error) {
 	}
 }
 
+// handleGetPlayerProfile returns one player's card: identity, current club,
+// ability (six attribute means + the position-weighted overall), the career
+// record, and the weekly wage when the player is at the caller's own club
+// (GET /api/players/:playerID).
+//
+// World-scoped, not club-scoped: a manager may open any player in their own
+// world — a cup opponent, a rival's star, a signing target — so this is the
+// entry point for the player detail page. A player in another world is a plain
+// 404, identical to a player that does not exist, so the endpoint never
+// confirms another world's players.
+func (s *server) handleGetPlayerProfile(c *gin.Context) {
+	playerID, err := uuid.Parse(c.Param("playerID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		return
+	}
+	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
+	profile, err := s.playerSvc.GetPlayerDetail(c.Request.Context(), worldID, ident.ManagerID, playerID)
+	if err != nil {
+		playerStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, profile)
+}
+
 // handleListClubPlayers returns the calling manager's roster with morale,
 // playing time and any open transfer request (GET /api/clubs/:id/players).
 func (s *server) handleListClubPlayers(c *gin.Context) {

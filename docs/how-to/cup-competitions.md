@@ -160,6 +160,17 @@ If a cup tie is level after its regulation 90 minutes:
 Regulation-state matches and league fixtures are unaffected: golden-goal mode
 only engages for knockout fixtures that are level at 90'.
 
+**A live golden-goal tie costs one extra step, not its true length.** A live
+match paces one simulated minute per `tick.match_cadence` (see
+[cadences-and-time.md](cadences-and-time.md) §7), and with the shipped scoring
+rates a level tie can need hundreds of extra minutes to find a goal. So the live
+step past 90 flushes the engine's whole extra-time block at once: the tie ends
+after one extra `tick.match_cadence`, and the deciding goal and the final
+full-time event — carrying its true deciding minute, so the feed still reads
+e.g. `2-1 (133')` — arrive together on that last tick. The engine's extra-time
+loop is additionally bounded, so a tie that cannot be broken still returns
+instead of running forever.
+
 ## 5. Reading cups
 
 | Endpoint | Who | Returns |

@@ -330,3 +330,181 @@ func TestRunnerNoFixturesIsNoop(t *testing.T) {
 		t.Fatalf("noop run matchdays=%d kicked=%d skipped=%d, want 0/0/0", sum.Matchdays, sum.Kicked, sum.Skipped)
 	}
 }
+
+// TestRunnerResumesStalledLiveMatch is the regression test for "matches never
+// end". A pacing loop that dies mid-match (transient error, worker restart) used
+// to strand the fixture: the worker's poll only started RunLive right after a
+// kickoff, and the no-overlap gate then blocked every later matchday, so the
+// match sat at its last persisted minute forever. RunLive is resumable by
+// design — every step is durable per simulated minute — and the poll now enters
+// it for every world on every pass, so a fresh call must carry a stalled match
+// the rest of the way to a completed fixture.
+func TestRunnerResumesStalledLiveMatch(t *testing.T) {
+	pool, worldID, compSvc := runnerWorld(t)
+	ctx := context.Background()
+
+	matches := match.NewService(pool, nil, squad.NewStore(pool), form.NewStore(pool))
+	runner := NewRunner(pool, matches, compSvc)
+
+	waitForNextDue(t, pool, worldID)
+	if _, err := runner.KickoffDue(ctx, worldID); err != nil {
+		t.Fatalf("kickoff: %v", err)
+	}
+
+	// Stall the match the way a dead loop would: pace a handful of minutes and
+	// then walk away, with the fixture still 'live'.
+	sessions, err := matches.LoadLiveSessions(ctx, worldID)
+	if err != nil {
+		t.Fatalf("load live sessions: %v", err)
+	}
+	if len(sessions) == 0 {
+		t.Fatal("no live sessions after kickoff")
+	}
+	const stalledAt = 30
+	for _, sess := range sessions {
+		for m := 1; m <= stalledAt; m++ {
+			if _, _, err := matches.PaceMinute(ctx, sess); err != nil {
+				t.Fatalf("pace minute %d: %v", m, err)
+			}
+		}
+		if got := sess.NextMinute(); got != stalledAt+1 {
+			t.Fatalf("next minute after stalling = %d, want %d", got, stalledAt+1)
+		}
+		// The real-time cost of a match is 90 x pacing; the configured 10ms
+		// cadence is what makes this test fast, and the same arithmetic is
+		// 30 minutes at the seeded 20s.
+		if got := sess.Pacing(); got != 10*time.Millisecond {
+			t.Fatalf("pacing = %s, want 10ms", got)
+		}
+	}
+
+	// A fresh call — exactly what the kickoff poll now does on every pass —
+	// resumes and finishes the stalled match.
+	done := make(chan error, 1)
+	go func() { done <- runner.RunLive(ctx, worldID) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("resume live: %v", err)
+		}
+	case <-time.After(2 * time.Minute):
+		t.Fatal("RunLive did not return: the match never ended")
+	}
+
+	// Every match the world kicked must be completed, parked exactly on the
+	// regulation bound, and still carrying the pacing frozen at kickoff.
+	var total, completed, atFullTime, atPacing int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*),
+		       COUNT(*) FILTER (WHERE m.status = 'completed'),
+		       COUNT(*) FILTER (WHERE m.current_minute = $2),
+		       COUNT(*) FILTER (WHERE m.pacing_millis = 10)
+		FROM match.matches m JOIN match.fixtures f ON f.id = m.fixture_id
+		WHERE f.world_id = $1`, worldID, match.RegulationMinutes).
+		Scan(&total, &completed, &atFullTime, &atPacing); err != nil {
+		t.Fatalf("match status: %v", err)
+	}
+	if total == 0 {
+		t.Fatal("no matches in the world to resume")
+	}
+	if completed != total || atFullTime != total || atPacing != total {
+		t.Fatalf("of %d matches: completed=%d at full time=%d at 10ms pacing=%d",
+			total, completed, atFullTime, atPacing)
+	}
+
+	// The feed is complete and structurally sound: every match has exactly one
+	// kickoff (1'), one half-time (45') and one full-time (90'), nothing outside
+	// 1..90, and a gapless 1..N run of sequences.
+	//
+	// Note what is deliberately NOT asserted: distinct minutes == 90, and "no
+	// minute holds two events". Most simulated minutes produce no event at all,
+	// and several events in one minute is ordinary football, so both would fail
+	// on a healthy match. The real double-pacing canary is the next check.
+	var brokenSpine, offRange, brokenSeq int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM match.matches m
+		JOIN match.fixtures f ON f.id = m.fixture_id
+		JOIN LATERAL (
+			SELECT COUNT(*) FILTER (WHERE e.event_type = 'kickoff')    AS ko,
+			       COUNT(*) FILTER (WHERE e.event_type = 'half_time')  AS ht,
+			       COUNT(*) FILTER (WHERE e.event_type = 'full_time')  AS ft,
+			       COALESCE(MIN(e.minute) FILTER (WHERE e.event_type = 'kickoff'), -1)   AS ko_min,
+			       COALESCE(MIN(e.minute) FILTER (WHERE e.event_type = 'half_time'), -1) AS ht_min,
+			       COALESCE(MIN(e.minute) FILTER (WHERE e.event_type = 'full_time'), -1)  AS ft_min
+			FROM match.match_events e WHERE e.match_id = m.id
+		) s ON true
+		WHERE f.world_id = $1
+		  AND (s.ko <> 1 OR s.ht <> 1 OR s.ft <> 1
+		       OR s.ko_min <> 1 OR s.ht_min <> 45 OR s.ft_min <> 90)`, worldID).Scan(&brokenSpine); err != nil {
+		t.Fatalf("feed spine: %v", err)
+	}
+	if brokenSpine != 0 {
+		t.Fatalf("%d matches lack a single kickoff/half-time/full-time at 1'/45'/90'", brokenSpine)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM match.match_events e
+		JOIN match.matches m ON m.id = e.match_id
+		WHERE m.world_id = $1 AND (e.minute < 1 OR e.minute > $2)`,
+		worldID, match.RegulationMinutes).Scan(&offRange); err != nil {
+		t.Fatalf("feed minutes in range: %v", err)
+	}
+	if offRange != 0 {
+		t.Fatalf("%d events persisted outside regulation minutes 1..%d", offRange, match.RegulationMinutes)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT e.match_id FROM match.match_events e
+			JOIN match.matches m ON m.id = e.match_id
+			WHERE m.world_id = $1
+			GROUP BY e.match_id
+			HAVING COUNT(*) <> COUNT(DISTINCT e.sequence)
+			    OR MIN(e.sequence) <> 1
+			    OR MAX(e.sequence) <> COUNT(*)
+		) g`, worldID).Scan(&brokenSeq); err != nil {
+		t.Fatalf("feed sequences: %v", err)
+	}
+	if brokenSeq != 0 {
+		t.Fatalf("%d matches have a gapped or duplicated event sequence", brokenSeq)
+	}
+
+	// The double-pacing canary: the goals the manager watched in the feed must add
+	// up to the scoreline on the record. Finalize re-runs the engine once over the
+	// same seed and input stream, so this only holds if the paced feed holds
+	// exactly one event per engine event — a resumed loop that re-persisted a
+	// minute would write that minute's events a second time under *fresh*
+	// sequence numbers (the (match_id, sequence) unique index would never fire)
+	// and the feed's goal tally would outrun the recorded score.
+	var scoreDisagree int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT m.id
+			FROM match.matches m
+			JOIN match.fixtures f ON f.id = m.fixture_id
+			LEFT JOIN match.match_events e ON e.match_id = m.id
+			WHERE f.world_id = $1
+			GROUP BY m.id, m.home_score, m.away_score, f.home_club_id, f.away_club_id
+			HAVING COUNT(*) FILTER (WHERE e.event_type IN ('goal', 'penalty_scored')
+			                         AND e.club_id = f.home_club_id) <> m.home_score
+			    OR COUNT(*) FILTER (WHERE e.event_type IN ('goal', 'penalty_scored')
+			                         AND e.club_id = f.away_club_id) <> m.away_score
+		) d`, worldID).Scan(&scoreDisagree); err != nil {
+		t.Fatalf("feed goals vs recorded score: %v", err)
+	}
+	if scoreDisagree != 0 {
+		t.Fatalf("%d matches have a feed whose goals disagree with the recorded scoreline (a resumed loop double-paced)", scoreDisagree)
+	}
+
+	// Nothing live is left, so the poll's repeated RunLive calls are a no-op
+	// rather than a hot loop.
+	rest, err := matches.LoadLiveSessions(ctx, worldID)
+	if err != nil {
+		t.Fatalf("reload live sessions: %v", err)
+	}
+	if len(rest) != 0 {
+		t.Fatalf("%d live sessions after completion", len(rest))
+	}
+	if err := runner.RunLive(ctx, worldID); err != nil {
+		t.Fatalf("idle run live: %v", err)
+	}
+}

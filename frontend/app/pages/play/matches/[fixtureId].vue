@@ -105,7 +105,12 @@ onUnmounted(() => matchStore.disconnect())
                     ev.type === 'half_time' || ev.type === 'full_time' ? 'text-indigo-300' :
                       'text-slate-300'">
                 {{ labels[ev.type] }}</span>
-              <span class="text-slate-300/90">{{ ev.detail?.commentary ?? ev.detail?.detail ?? ev.type }}</span>
+              <span class="text-slate-300/90">{{ ev.detail?.commentary ?? ev.detail?.detail ?? ev.type }}
+                <NuxtLink v-if="ev.player?.id" :to="`/play/players/${ev.player.id}`"
+                  class="ml-2 text-xs text-slate-500 hover:text-slate-300 underline-offset-2 hover:underline">
+                  player card
+                </NuxtLink>
+              </span>
             </li>
           </ul>
           <p v-else-if="match.status === 'in_progress'" class="text-slate-500 text-sm">

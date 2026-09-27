@@ -462,6 +462,10 @@ func resolveEventRefs(ctx context.Context, conn interface {
 			e.RelatedPlayer.Name = names[e.RelatedPlayer.ID]
 		}
 	}
+	// Names in hand, the engine's role placeholders ("{player}", "{assist}",
+	// "{sub}") become real names in the wire text — last, because it needs the
+	// names resolveEventRefs just looked up.
+	resolveCommentary(rows)
 }
 
 // uuidSet flattens a set of ids into a stable slice for ANY() parameters.

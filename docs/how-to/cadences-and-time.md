@@ -175,3 +175,64 @@ themselves are unchanged (graded by season progress; see
 **Do the daily passes need a playable world?** Yes; the scheduler only registers
 a cadence for playable worlds, and the worker dispatch filters on the same. This
 is why the launch guide's Step 8 launches the world *before* the ticks matter.
+
+## 7. Live matches: how long a match really takes (IM18)
+
+A live match is **not** paced by the world clock. It paces itself on
+`tick.match_cadence`, which is read **once at kickoff** and frozen into
+`match.matches.pacing_millis`. So the real-time cost of a match is exactly:
+
+```
+real minutes ≈ 90 × tick.match_cadence
+```
+
+| `tick.match_cadence` | Real time for a 90-minute match |
+| --- | --- |
+| `20s` (default) | ~30 minutes |
+| `10s` | ~15 minutes |
+| `60s` | ~90 minutes |
+| `10ms` (lab worlds) | under a second |
+
+A golden-goal cup tie (a knockout fixture still level after 90) takes **one extra
+step**, so add one `tick.match_cadence` to those numbers. See
+[cup-competitions.md](cup-competitions.md).
+
+**A match always finishes.** Since IM18 the worker's kickoff poll re-enters the
+pacing loop for every world on **every** pass, not only right after a kickoff, and
+a single flaky write is retried three times before the loop hands the world back.
+Either way the next poll adopts the match and carries it on from its last persisted
+minute — the pacing loop is resumable by design (one transaction per simulated
+minute, `Finalize` idempotent). Before IM18 a match whose loop died mid-way was
+never re-entered, and because the no-overlap rule refuses to start a later matchday
+while one is live, that fixture could sit at the same minute forever.
+
+**Diagnosing a long match.** Two numbers tell you which it was:
+
+```sql
+-- 1. What pace is this world running at, and what is a live match actually frozen at?
+SELECT w.id, c.config_value AS match_cadence
+FROM world.world_config c JOIN world.worlds w ON w.id = c.world_id
+WHERE c.config_key = 'tick.match_cadence';
+
+SELECT f.id AS fixture_id, m.id AS match_id, m.status, m.current_minute,
+       m.pacing_millis, m.started_at
+FROM match.matches m JOIN match.fixtures f ON f.id = m.fixture_id
+WHERE m.status = 'in_progress'
+ORDER BY m.started_at;
+
+-- 2. Has the live match been going longer than 90 × pacing?
+SELECT current_minute, pacing_millis,
+       pacing_millis * 90 / 1000 AS expected_seconds,
+       EXTRACT(EPOCH FROM (now() - started_at))::int AS live_seconds
+FROM match.matches WHERE status = 'in_progress';
+```
+
+- `pacing_millis` ≈ 60000 and `current_minute` climbing at one per minute is not a
+  stall — the world is simply configured for a 90-minute pace. Lower
+  `tick.match_cadence` (§5) to shorten matches; the change applies to the **next**
+  matchday, since a running match keeps its frozen pacing.
+- A `current_minute` that stays put for minutes of real time, or a `live_seconds`
+  far beyond `expected_seconds`, is a stall. The worker log now brackets every
+  match with `live …: fixture … kicked off …` and `live …: full time …`, and a
+  resumed match logs `resuming … from minute N … live for …`, so a stalled loop
+  is visible without running queries.

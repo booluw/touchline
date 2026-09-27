@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -111,12 +112,25 @@ func (r *Runner) KickoffDue(ctx context.Context, worldID uuid.UUID) (*Summary, e
 // yet applied). It runs until no in-progress matches remain, sleeping the
 // smallest pacing across pending matches between simulated minutes. Only one
 // goroutine per world runs at a time (claim guard).
+//
+// Resumability is the contract: every step is durable per simulated minute, so
+// returning early — on a transient error, or because another goroutine already
+// holds the claim — never loses a match. A later call (the worker's kickoff
+// poll, or the startup sweep) picks the world up from the last persisted
+// minute. That is why the worker re-enters this loop for every playable world
+// on every poll instead of only right after a kickoff: a loop that died must
+// resume on its own, and a stranded live match would otherwise block the
+// world's whole matchday ladder behind the no-overlap gate.
 func (r *Runner) RunLive(ctx context.Context, worldID uuid.UUID) error {
 	if !r.claim(ctx, worldID) {
 		return nil // another goroutine already paces this world
 	}
 	defer r.release(worldID)
 
+	// Resume diagnostics are logged once per entry, not once per minute: the
+	// entry itself is the interesting event (a poll pass or a restart adopting
+	// a match mid-flight), and the loop may run for hundreds of steps.
+	resumed := false
 	for {
 		if err := r.reconcileApplied(ctx, worldID); err != nil {
 			return err
@@ -128,21 +142,27 @@ func (r *Runner) RunLive(ctx context.Context, worldID uuid.UUID) error {
 		if len(sessions) == 0 {
 			return nil
 		}
+		if !resumed {
+			resumed = true
+			for _, sess := range sessions {
+				logResumed(sess)
+			}
+		}
 
 		pending := 0
 		minPacing := time.Duration(1<<63 - 1)
 		for _, sess := range sessions {
-			rows, finished, err := r.matches.PaceMinute(ctx, sess)
+			rows, finished, err := paceWithRetry(ctx, r.matches, sess)
 			if err != nil {
-				return err
+				return fmt.Errorf("live %s: match %s minute %d: %w", worldID, sess.MatchID, sess.NextMinute(), err)
 			}
 			if err := r.publishTick(ctx, sess, sess.NextMinute()-1, rows); err != nil {
 				return err
 			}
 			if finished {
-				res, err := r.matches.Finalize(ctx, sess)
+				res, err := finalizeWithRetry(ctx, r.matches, sess)
 				if err != nil {
-					return err
+					return fmt.Errorf("live %s: match %s full time: %w", worldID, sess.MatchID, err)
 				}
 				if err := r.publishCompleted(ctx, sess, res); err != nil {
 					return err
@@ -161,6 +181,65 @@ func (r *Runner) RunLive(ctx context.Context, worldID uuid.UUID) error {
 			return err
 		}
 	}
+}
+
+// liveRetryBackoff is the retry schedule for a single pacing step. One flaky
+// write (a dropped connection, a restarted database) must not strand a live
+// match, so the step is retried in place before the loop gives the world back
+// to the poll. PaceMinute and Finalize are both safe to retry: a failed
+// transaction rolls back whole minutes, and Finalize is idempotent.
+var liveRetryBackoff = []time.Duration{0, 2 * time.Second, 10 * time.Second}
+
+// paceWithRetry paces one simulated minute, retrying transient failures.
+func paceWithRetry(ctx context.Context, matches *match.Service, sess *match.LiveSession) ([]*match.MatchEventRow, bool, error) {
+	var (
+		rows     []*match.MatchEventRow
+		finished bool
+		err      error
+	)
+	for i, wait := range liveRetryBackoff {
+		if err = sleepCtx(ctx, wait); err != nil {
+			return nil, false, err
+		}
+		if rows, finished, err = matches.PaceMinute(ctx, sess); err == nil {
+			return rows, finished, nil
+		}
+		logLiveRetry("pace minute", sess, i+1, len(liveRetryBackoff), err)
+	}
+	return nil, false, err
+}
+
+// finalizeWithRetry completes a match at full time, retrying transient
+// failures. Idempotent, so a retry after a partial failure is a no-op.
+func finalizeWithRetry(ctx context.Context, matches *match.Service, sess *match.LiveSession) (*match.MatchFinalized, error) {
+	var (
+		res *match.MatchFinalized
+		err error
+	)
+	for i, wait := range liveRetryBackoff {
+		if err = sleepCtx(ctx, wait); err != nil {
+			return nil, err
+		}
+		if res, err = matches.Finalize(ctx, sess); err == nil {
+			return res, nil
+		}
+		logLiveRetry("finalize", sess, i+1, len(liveRetryBackoff), err)
+	}
+	return nil, err
+}
+
+func logLiveRetry(step string, sess *match.LiveSession, attempt, of int, err error) {
+	log.Printf("live %s: match %s: %s at minute %d failed (attempt %d/%d): %v",
+		sess.WorldID, sess.MatchID, step, sess.NextMinute(), attempt, of, err)
+}
+
+// logResumed reports where each live match of a resumed world stands: the minute
+// already persisted and how long it has been live. A match that has been live
+// far longer than pacing × minute is the signature of a pacing loop that was not
+// running (stalled worker, restart) — the "match never ends" symptom.
+func logResumed(sess *match.LiveSession) {
+	log.Printf("live %s: resuming fixture %s match %s from minute %d (pacing %s/minute, live for %s)",
+		sess.WorldID, sess.FixtureID, sess.MatchID, sess.NextMinute(), sess.Pacing(), sess.LiveFor().Round(time.Second))
 }
 
 // publishTick pushes one match_tick envelope for a paced minute (S04-03).
@@ -193,7 +272,11 @@ func (r *Runner) publishTick(ctx context.Context, sess *match.LiveSession, minut
 }
 
 // publishCompleted emits the final match_tick after Finalize so clients see the
-// authoritative completion (final score, status completed).
+// authoritative completion (final score, status completed). The minute is the one
+// the match actually ended on — the last minute PaceMinute persisted, i.e. 90 for
+// a league match but 91 for a golden-goal tie, whose deciding goal arrived in the
+// extra-time flush. Hardcoding 90 would walk the clock backwards for exactly the
+// matches whose last event is the one that mattered.
 func (r *Runner) publishCompleted(ctx context.Context, sess *match.LiveSession, res *match.MatchFinalized) error {
 	if r.rt == nil {
 		return nil
@@ -201,7 +284,7 @@ func (r *Runner) publishCompleted(ctx context.Context, sess *match.LiveSession, 
 	ev := realtime.MustEvent(realtime.EventMatchTick, sess.WorldID, match.MatchTickPayload{
 		Match:     apiref.MatchRef{ID: sess.MatchID},
 		Fixture:   apiref.FixtureRef{ID: sess.FixtureID},
-		Minute:    90,
+		Minute:    sess.NextMinute() - 1,
 		Status:    match.MatchStatusCompleted,
 		HomeClub:  apiref.ClubRef{ID: sess.HomeClubID, Name: sess.HomeClubName},
 		AwayClub:  apiref.ClubRef{ID: sess.AwayClubID, Name: sess.AwayClubName},

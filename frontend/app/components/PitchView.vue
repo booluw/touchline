@@ -23,7 +23,7 @@
       :class="{ empty: !slot.player, selected: slot.slot === props.selectedSlot, 'cursor-pointer': clickable }"
       :style="{ left: slot.x + '%', top: slot.y + '%' }" @click="clickable ? $emit('select', slot.slot) : undefined">
       <span class="token-number">{{ slot.player?.squad_number ?? '' }}</span>
-      <span class="token-name">{{ slot.player?.display_name ?? 'Empty' }}</span>
+      <span class="token-name">{{ slot.player?.display_name ?? slot.player.name ?? 'Empty' }}</span>
     </button>
   </div>
 </template>
@@ -31,7 +31,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-type SquadPlayer = { squad_number?: number; display_name: string }
+type SquadPlayer = { squad_number?: number; display_name?: string; name?: string }
 type LineupSlot = { slot: number; player?: SquadPlayer | null }
 
 const props = defineProps<{

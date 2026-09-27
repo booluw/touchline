@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,6 +48,30 @@ var (
 // ignores it (OPD-17(2)); only the live match runner consumes it.
 const liveCadenceKey = "tick.match_cadence"
 
+// RegulationMinutes is the regulation length a live match paces to before full
+// time. With the seeded tick.match_cadence of 20s a regulation match therefore
+// takes 90 × 20s = 30 minutes of real time; the bound is the engine's, not the
+// runner's, so a rehydrated match resumes on the same clock.
+const RegulationMinutes = matchsim.RegulationMinutes
+
+// liveMinuteBound is the last minute-step a live match takes. Regulation ends at
+// 90; a golden-goal tie (IM04) takes exactly one extra step, which flushes the
+// engine's whole sudden-death block — every extra-time minute plus the deciding
+// goal — in a single transaction.
+//
+// That single step is what keeps a level cup tie from stretching the match. The
+// engine simulates extra time until someone scores, which with the shipped
+// scoring rates can run for hundreds of minutes; the live match must not, or a
+// single cup tie would hold the world's matchday ladder (and a manager's evening)
+// open for hours. The trade-off is deliberate and recorded: the deciding goal
+// arrives in the completion tick rather than streaming minute by minute.
+func liveMinuteBound(goldenGoal bool) int {
+	if goldenGoal {
+		return matchsim.RegulationMinutes + 1
+	}
+	return matchsim.RegulationMinutes
+}
+
 // simInputs is the fully frozen simulation input persisted on kickoff
 // (match.matches.sim_inputs). It captures everything the engine reads from the
 // live database at kickoff time so the live stream and a rehydrated worker
@@ -67,8 +92,9 @@ type simInputs struct {
 }
 
 // LiveSession is one in-progress live match bound to a pacing goroutine.
-// nextMinute is the next simulated minute to produce (1..90); a value above 90
-// means full time was reached and Finalize is pending.
+// nextMinute is the next simulated minute to produce (1..90, up to
+// liveMinuteBound for a golden-goal tie); a value above that bound means full
+// time was reached and Finalize is pending.
 type LiveSession struct {
 	MatchID      uuid.UUID
 	FixtureID    uuid.UUID
@@ -78,6 +104,7 @@ type LiveSession struct {
 	AwayClubID   uuid.UUID
 	AwayClubName string
 	ScheduledAt  time.Time
+	StartedAt    time.Time
 	Seed         int64
 	Home         matchsim.Team
 	Away         matchsim.Team
@@ -100,6 +127,21 @@ func (s *LiveSession) NextMinute() int { return s.nextMinute }
 
 // Pacing reports the world cadence resolved at kickoff (per simulated minute).
 func (s *LiveSession) Pacing() time.Duration { return s.pacing }
+
+// LiveFor reports how long the match has been live in real time, measured from
+// its kickoff stamp. At the seeded 20s cadence a finished regulation match
+// reports ~30m; a much larger value means the pacing loop was not running for
+// part of the match. It returns 0 when the stamp is missing or in the future.
+func (s *LiveSession) LiveFor() time.Duration {
+	if s.StartedAt.IsZero() {
+		return 0
+	}
+	d := time.Since(s.StartedAt)
+	if d < 0 {
+		return 0
+	}
+	return d
+}
 
 // MatchFinalized is the result of a live match at full time, ready for
 // standings application by the matchday runner.
@@ -231,12 +273,13 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 	}
 
 	var matchID uuid.UUID
+	startedAt := time.Now().UTC()
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO match.matches
 			(fixture_id, world_id, seed, engine_version, status, started_at, sim_inputs, pacing_millis)
 		VALUES ($1, $2, $3, $4, 'in_progress', $5, $6, $7)
 		RETURNING id`,
-		fixtureID, f.WorldID, seed, matchsim.EngineVersion, time.Now().UTC(), raw, int(pacing.Milliseconds()),
+		fixtureID, f.WorldID, seed, matchsim.EngineVersion, startedAt, raw, int(pacing.Milliseconds()),
 	).Scan(&matchID); err != nil {
 		return nil, fmt.Errorf("kickoff fixture: insert match: %w", err)
 	}
@@ -258,6 +301,11 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 		return nil, fmt.Errorf("kickoff fixture: commit: %w", err)
 	}
 
+	// Log the resolved pacing and its projection: this is the number that makes
+	// a match's real-time length auditable (90 × pacing).
+	log.Printf("live kickoff: world %s fixture %s %s v %s — pacing %s per simulated minute, ~%s for %d regulation minutes",
+		f.WorldID, fixtureID, homeClub.Name, awayClub.Name, pacing, RegulationMinutes*pacing, RegulationMinutes)
+
 	return &LiveSession{
 		MatchID:      matchID,
 		FixtureID:    fixtureID,
@@ -267,6 +315,7 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 		AwayClubID:   f.AwayClub.ID,
 		AwayClubName: awayClub.Name,
 		ScheduledAt:  f.ScheduledAt,
+		StartedAt:    startedAt,
 		Seed:         seed,
 		Home:         homePlan.team,
 		Away:         awayPlan.team,
@@ -317,11 +366,10 @@ func (s *Service) resolveMatchPacing(ctx context.Context, worldID uuid.UUID) tim
 // are exactly the persisted feed for this minute (S04-03 publishes them as the
 // live match_tick envelope). finished reports that full time was reached.
 func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEventRow, bool, error) {
-	// A golden-goal cup tie (IM04) keeps pacing past 90 while the tie is still
-	// level so the deciding goal streams like a live minute; every other match
-	// reports full time as soon as the clock passes 90.
-	levelAt90 := sess.fc.GoldenGoal && sess.nextMinute <= 90
-	if sess.nextMinute > 90 && !levelAt90 {
+	// liveMinuteBound is the hard stop that guarantees termination: regulation
+	// reports full time once the clock passes 90, and a golden-goal tie takes
+	// exactly one further step (the extra-time flush) before finishing.
+	if sess.nextMinute > liveMinuteBound(sess.fc.GoldenGoal) {
 		return nil, true, nil
 	}
 	m := sess.nextMinute
@@ -341,13 +389,22 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 	})
 
 	// Persist only this minute's events: everything up to m is already on
-	// disk (sequences < the tail), so filter keeps one minute per tx and the
-	// identical match resumes from seed + snapshot + inputs.
+	// disk (sequences < the tail), so the filter keeps one minute per tx and
+	// the identical match resumes from seed + snapshot + inputs. The golden-goal
+	// flush step is the one exception: it persists the engine's entire extra-time
+	// block (every minute past 90 plus the deciding goal) so the tie ends on
+	// time instead of streaming minutes the engine may need hundreds of to find.
+	flushExtra := sess.fc.GoldenGoal && m == matchsim.RegulationMinutes+1
+	from, to := m, m
+	if flushExtra {
+		to = matchsim.GoldenGoalMaxMinute
+	}
 	minuteEvents := make([]matchsim.MatchEvent, 0, 8)
 	for _, e := range res.Events {
-		if e.Minute == m {
-			minuteEvents = append(minuteEvents, e)
+		if e.Minute < from || e.Minute > to {
+			continue
 		}
+		minuteEvents = append(minuteEvents, e)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -386,22 +443,18 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 	sess.nextMinute = m + 1
 	resolveEventRefs(ctx, s.pool, rows)
 
-	finished := sess.nextMinute > 90
-	if finished && sess.fc.GoldenGoal {
-		// A golden-goal tie stays "in progress" while the score is level: the
-		// engine's sudden-death minutes continue to stream until a goal lands
-		// (then Finalize resolves the identical outcome).
-		scored := 0
-		for _, e := range res.Events {
-			if e.Minute <= m && (e.Type == matchsim.EventGoal || e.Type == matchsim.EventPenaltyScored) {
-				scored++
-			}
-		}
-		if scored%2 == 0 {
-			finished = false
-		}
+	return rows, liveFinished(sess, m), nil
+}
+
+// liveFinished reports whether the match is over once minute m has been
+// persisted. Regulation is over as soon as the clock passes 90. A golden-goal
+// tie level after 90 owes one more step — the extra-time flush, which carries
+// the deciding goal — and is only finished once that has been written.
+func liveFinished(sess *LiveSession, m int) bool {
+	if m < matchsim.RegulationMinutes {
+		return false
 	}
-	return rows, finished, nil
+	return !sess.fc.GoldenGoal || m > matchsim.RegulationMinutes
 }
 
 // Finalize completes a fully-paced live match: it re-runs the engine over the
@@ -410,7 +463,7 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 // Idempotent: a match already 'completed' (redelivery) loads its persisted
 // result instead of writing again.
 func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinalized, error) {
-	if sess.nextMinute <= 90 {
+	if sess.nextMinute <= RegulationMinutes {
 		return nil, fmt.Errorf("finalize %s: match not at full time (next minute %d)", sess.MatchID, sess.nextMinute)
 	}
 
@@ -513,6 +566,14 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		s.social.PublishRelationshipChange(ctx, socialPush)
 	}
 
+	// The real-time cost of the match, from the live wall clock. At the seeded
+	// cadence this lands on ~30 minutes; a much larger number means the pacing
+	// loop was not running for a stretch (a stalled worker, a restart), which is
+	// exactly the "match never ends" symptom this log makes visible.
+	log.Printf("live full time: world %s fixture %s match %s — %d paced minute(s) in %s (pacing %s/minute), final %d–%d",
+		sess.WorldID, sess.FixtureID, sess.MatchID, sess.nextMinute-1,
+		sess.LiveFor().Round(time.Second), sess.pacing, res.HomeGoals, res.AwayGoals)
+
 	return &MatchFinalized{
 		FixtureID: sess.FixtureID, MatchID: sess.MatchID, WorldID: sess.WorldID, Seed: sess.Seed,
 		HomeGoals: res.HomeGoals, AwayGoals: res.AwayGoals, HomePossession: res.HomePossession, EndedAt: now,
@@ -526,7 +587,7 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.world_id, f.home_club_id, f.away_club_id, f.scheduled_at,
 		       hc.name, ac.name,
-		       m.id, m.seed, m.sim_inputs, COALESCE(m.pacing_millis, 0), m.current_minute
+		       m.id, m.seed, m.sim_inputs, COALESCE(m.pacing_millis, 0), m.current_minute, m.started_at
 		FROM match.fixtures f
 		JOIN match.matches m ON m.fixture_id = f.id
 		JOIN club.clubs hc ON hc.id = f.home_club_id
@@ -543,14 +604,14 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 		var (
 			fixtureID, matchID, homeClubID, awayClubID, worldIDX uuid.UUID
 			homeClubName, awayClubName                           string
-			scheduledAt                                          time.Time
+			scheduledAt, startedAt                               time.Time
 			seed                                                 int64
 			raw                                                  []byte
 			pacingMillis, currentMinute                          int
 		)
 		if err := rows.Scan(&fixtureID, &worldIDX, &homeClubID, &awayClubID, &scheduledAt,
 			&homeClubName, &awayClubName,
-			&matchID, &seed, &raw, &pacingMillis, &currentMinute); err != nil {
+			&matchID, &seed, &raw, &pacingMillis, &currentMinute, &startedAt); err != nil {
 			return nil, fmt.Errorf("load live sessions: scan: %w", err)
 		}
 		snap := &simInputs{}
@@ -570,6 +631,7 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 			AwayClubID:   awayClubID,
 			AwayClubName: awayClubName,
 			ScheduledAt:  scheduledAt,
+			StartedAt:    startedAt,
 			Seed:         seed,
 			Home:         snap.HomeTeam,
 			Away:         snap.AwayTeam,

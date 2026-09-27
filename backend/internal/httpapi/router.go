@@ -145,6 +145,12 @@ func (s *server) router() *gin.Engine {
 		api.POST("/clubs/:id/players/:playerID/transfer-request/approve", s.requireAuth, s.handleApproveTransferRequest)
 		api.POST("/clubs/:id/players/:playerID/transfer-request/deny", s.requireAuth, s.handleDenyTransferRequest)
 
+		// One player's card (IM20), the player detail page's read. Scoped to
+		// the caller's own world — NOT to the caller's club, so a manager can
+		// open a cup opponent or a rival's star; the weekly wage is the one
+		// field withheld unless the player is at the caller's own club.
+		api.GET("/players/:playerID", s.requireAuth, s.handleGetPlayerProfile)
+
 		// Admin: world lifecycle (S02-02), whole-world seeding (clubs + players
 		// + memberships, launch model), media aid offers, country-scoped league
 		// administration (S04-01).

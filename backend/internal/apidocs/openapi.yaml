@@ -1291,6 +1291,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/players/{playerID}:
+    get:
+      tags: [player]
+      summary: One player's profile
+      operationId: getPlayerDetail
+      description: >-
+        The player detail card: identity, current club, ability (the six
+        attribute-category means and the position-weighted `overall` the squad
+        screen shows), and the career record (appearances, goals, assists,
+        average match rating). Scoped to the caller's own world, NOT to the
+        caller's club — a manager can open a cup opponent or a rival's star. The
+        player's `weekly_wage` is included **only** when the player is at the
+        caller's own club, and is omitted otherwise. A player in another world is
+        a 404, identical to a player that does not exist.
+      parameters:
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000000c" }
+      responses:
+        "200":
+          description: The player's profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlayerDetail" }
+        "400":
+          description: Malformed player id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such player in the caller's world.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/players/{playerID}/release:
     post:
       tags: [player]
@@ -4593,6 +4628,45 @@ components:
         squad_number: { type: integer, nullable: true }
         attributes: { $ref: "#/components/schemas/PlayerAttributes" }
         overall: { type: integer, minimum: 1, maximum: 99 }
+    PlayerDetail:
+      type: object
+      description: >-
+        One player's card (IM20): identity, current club, ability, and career
+        record. Ability is the same two numbers the squad roster carries — the
+        six attribute-category means of the EAV and the position-weighted
+        `overall` — so a profile and a squad row never disagree.
+      properties:
+        player: { $ref: "#/components/schemas/NestedPlayer" }
+        club: { $ref: "#/components/schemas/ClubRef" }
+        first_name: { type: string }
+        last_name: { type: string }
+        display_name: { type: string }
+        nationality: { type: string, example: eng }
+        date_of_birth: { type: string, example: "2001-04-17" }
+        position: { type: string, example: ST }
+        squad_number: { type: integer }
+        attributes: { $ref: "#/components/schemas/PlayerAttributes" }
+        overall: { type: integer, minimum: 1, maximum: 99 }
+        career: { $ref: "#/components/schemas/PlayerCareer" }
+        weekly_wage:
+          type: integer
+          format: int64
+          description: >-
+            The player's active weekly contract wage, in whole units. Present
+            **only** when the player is at the caller's own club; omitted for any
+            other club (a free agent has no contract and no wage).
+    PlayerCareer:
+      type: object
+      description: >-
+        All-time record in the world, from `player.player_appearances`, which the
+        match-completion transaction writes — so it holds completed matches only.
+        `average_rating` averages the per-match 1..10 ratings that exist: a
+        pre-attribution match counts as an appearance but not as a rating.
+      properties:
+        appearances: { type: integer, minimum: 0 }
+        goals: { type: integer, minimum: 0 }
+        assists: { type: integer, minimum: 0 }
+        average_rating: { type: number, format: float, minimum: 0, maximum: 10 }
     PlayerMorale:
       type: object
       description: One player's full morale picture with the "why" (S06-03).
@@ -5921,6 +5995,12 @@ components:
         detail:
           type: object
           additionalProperties: true
+          description: >-
+            Engine commentary for the event. The engine stores role
+            placeholders ({player}, {assist}, {sub}); the API always renders them
+            with the resolved player names from `player` / `related_player`
+            (IM19), and falls back to neutral wording ("the player", "a
+            teammate", "a substitute") when the attribution pass resolved nobody.
     Policy:
       type: object
       properties:

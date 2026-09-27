@@ -4,6 +4,8 @@ package match
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -380,5 +382,205 @@ func TestTacticChangeRecorded(t *testing.T) {
 	}
 	if club != homeID.String() {
 		t.Fatalf("tactic club = %q, want %s", club, homeID)
+	}
+}
+
+// TestLiveGoldenGoalTieEndsOneStepPastFullTime pins IM04's live contract. The
+// engine decides a level tie by simulating sudden death until someone scores,
+// which with the shipped scoring rates can take hundreds of extra minutes. A
+// live cup tie must not pace that out in real time — it would hold the matchday
+// ladder open for hours — so the step past 90 flushes the engine's whole
+// extra-time block in one transaction and the match is finished, with the
+// deciding goal and its full-time summary in the feed.
+func TestLiveGoldenGoalTieEndsOneStepPastFullTime(t *testing.T) {
+	pool, worldID, _, _, fixtureID, _ := liveWorld(t)
+	ctx := context.Background()
+
+	// Arm knockout rules: only format='knockout' fixtures are golden-goal ties.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competition.competition_rules (competition_id, format)
+		SELECT competition_id, 'knockout' FROM match.fixtures WHERE id = $1
+		ON CONFLICT (competition_id) DO UPDATE SET format = excluded.format`, fixtureID); err != nil {
+		t.Fatalf("arm knockout rules: %v", err)
+	}
+
+	svc := newMatchService(pool)
+	sess := kickoff(t, svc, pool, worldID)
+	if !sess.fc.GoldenGoal {
+		t.Fatal("fixture context is not a golden-goal tie")
+	}
+
+	// Pin a seed that is level after 90, since kickoff seeds at random and only
+	// a level tie arms sudden death. Persist it too: matches.seed is what a
+	// crashed worker rehydrates from, so leaving the row on the kickoff seed
+	// would make the rehydrated match replay a different tie than the one paced
+	// here — the exact divergence this test exists to rule out.
+	sess.Seed = levelSeedFor(t, sess)
+	if _, err := pool.Exec(ctx, `UPDATE match.matches SET seed = $2 WHERE id = $1`,
+		sess.MatchID, sess.Seed); err != nil {
+		t.Fatalf("pin seed %d on the match row: %v", sess.Seed, err)
+	}
+
+	// Regulation paces normally: 90 steps, none of them reported finished.
+	for m := 1; m <= matchsim.RegulationMinutes; m++ {
+		if _, finished, err := svc.PaceMinute(ctx, sess); err != nil {
+			t.Fatalf("pace minute %d: %v", m, err)
+		} else if finished {
+			t.Fatalf("minute %d reported full time during regulation", m)
+		}
+	}
+
+	// One step past 90, and the tie is over.
+	rows, finished, err := svc.PaceMinute(ctx, sess)
+	if err != nil {
+		t.Fatalf("pace extra time: %v", err)
+	}
+	if !finished {
+		t.Fatal("the golden-goal flush step did not report full time")
+	}
+	if sess.NextMinute() != matchsim.RegulationMinutes+2 {
+		t.Fatalf("next minute = %d, want %d", sess.NextMinute(), matchsim.RegulationMinutes+2)
+	}
+	if len(rows) == 0 {
+		t.Fatal("the flush step returned no events to publish")
+	}
+
+	// Past the bound there is nothing left to pace.
+	if _, finished, err := svc.PaceMinute(ctx, sess); err != nil {
+		t.Fatalf("pace past the bound: %v", err)
+	} else if !finished {
+		t.Fatal("a paced past-the-bound step did not report full time")
+	}
+
+	// The feed is the engine's whole output for this seed: the deciding goal
+	// past 90 and a full-time summary, matching a single instant Simulate.
+	expected := matchsim.Simulate(matchsim.Options{
+		Seed: sess.Seed, Home: sess.Home, Away: sess.Away,
+		Tuning: matchsim.DefaultTuning(), GoldenGoal: true,
+	})
+	if expected.HomeGoals == expected.AwayGoals {
+		t.Fatalf("seed %d decided in regulation, not a golden-goal tie", sess.Seed)
+	}
+	assertReplaysExpected(t, pool, sess.MatchID, expected.Events)
+
+	if _, err := svc.Finalize(ctx, sess); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	var status string
+	var minute, homeScore, awayScore int
+	if err := pool.QueryRow(ctx,
+		`SELECT status, current_minute, home_score, away_score FROM match.matches WHERE id = $1`, sess.MatchID).
+		Scan(&status, &minute, &homeScore, &awayScore); err != nil {
+		t.Fatalf("match status: %v", err)
+	}
+	if status != "completed" {
+		t.Fatalf("match status = %q, want completed", status)
+	}
+	if minute > matchsim.GoldenGoalMaxMinute {
+		t.Fatalf("final clock = %d, past the extra-time bound", minute)
+	}
+	// The tie is decided: the stamped scoreline is the engine's, and it is not a
+	// draw (otherwise nothing decided this cup tie).
+	if homeScore != expected.HomeGoals || awayScore != expected.AwayGoals {
+		t.Fatalf("final score %d–%d, engine %d–%d", homeScore, awayScore, expected.HomeGoals, expected.AwayGoals)
+	}
+	if homeScore == awayScore {
+		t.Fatalf("final score %d–%d is still a draw", homeScore, awayScore)
+	}
+}
+
+// levelSeedFor returns the first seed (from a bounded scan) whose match is still
+// level after 90 for the session's own frozen teams — the only condition that
+// arms sudden death. The probe is a regulation-only Simulate: the engine reads
+// Options.GoldenGoal only *after* the 90-minute ladder, so that ladder is
+// bit-identical with the flag on or off, and a level regulation-only result is
+// exactly the level-at-90 state. A golden-goal Simulate would be the wrong probe:
+// sudden death always ends it, so it can never report a tie. Pure engine, so the
+// scan is deterministic and writes nothing.
+func levelSeedFor(t *testing.T, sess *LiveSession) int64 {
+	t.Helper()
+	for seed := int64(1); seed <= 200; seed++ {
+		reg := matchsim.Simulate(matchsim.Options{
+			Seed: seed, Home: sess.Home, Away: sess.Away, Tuning: matchsim.DefaultTuning(),
+		})
+		if reg.HomeGoals == reg.AwayGoals {
+			return seed
+		}
+	}
+	t.Fatal("no level-at-90 seed in 1..200 — engine generator drift")
+	return 0
+}
+
+// TestFeedCommentaryNamesPlayers is the read-path half of the commentary fix
+// (IM19). The engine stores role placeholders; the API must always hand the feed
+// real names, on the live tick and on the REST read, and never leak a raw
+// "{player}" into the UI. It also checks the substitution sentence end to end,
+// which is the case with two different people in one line.
+func TestFeedCommentaryNamesPlayers(t *testing.T) {
+	pool, worldID, _, _, _, managerID := liveWorld(t)
+	ctx := context.Background()
+	svc := newMatchService(pool)
+	sess := kickoff(t, svc, pool, worldID)
+	if len(sess.homeXI) != 11 || len(sess.homeBench) == 0 {
+		t.Fatalf("home squad not materialised (xi=%d bench=%d)", len(sess.homeXI), len(sess.homeBench))
+	}
+
+	// Guarantee the two-name case rather than hoping the random seed draws one:
+	// the manager's own substitution at the 60' window always emits the
+	// "{sub} on for {player}" line, which must name both people. (The engine's
+	// random sub draw is 0.85 per side per window, so a naked random match would
+	// leave this case unexercised roughly once in two thousand runs.)
+	for sess.NextMinute() < 60 {
+		if _, _, err := svc.PaceMinute(ctx, sess); err != nil {
+			t.Fatalf("pace to 60: %v", err)
+		}
+	}
+	if err := svc.Substitute(ctx, sess.MatchID, managerID, 60,
+		sess.homeXI[0].PlayerID, sess.homeBench[0].PlayerID); err != nil {
+		t.Fatalf("substitute: %v", err)
+	}
+	paceToFullTime(t, svc, sess)
+
+	liveFeed, err := svc.GetMatchEvents(ctx, sess.MatchID)
+	if err != nil {
+		t.Fatalf("match events: %v", err)
+	}
+	if len(liveFeed) == 0 {
+		t.Fatal("no events persisted")
+	}
+
+	// Every player reference is named, and every commentary line is placeholder
+	// free; a named event's line must actually contain that name.
+	var named, substitutions int
+	for _, e := range liveFeed {
+		var text map[string]string
+		if err := json.Unmarshal(e.Detail, &text); err != nil {
+			t.Fatalf("unmarshal detail of %s: %v", e.Type, err)
+		}
+		commentary := text["commentary"]
+		if strings.ContainsRune(commentary, '{') {
+			t.Fatalf("%s at %d' leaked a placeholder: %s", e.Type, e.Minute, commentary)
+		}
+		if e.Player != nil {
+			if e.Player.Name == "" {
+				t.Fatalf("%s at %d' has an unnamed player", e.Type, e.Minute)
+			}
+			if !strings.Contains(commentary, e.Player.Name) {
+				t.Fatalf("%s at %d' commentary does not name %s: %s", e.Type, e.Minute, e.Player.Name, commentary)
+			}
+			named++
+		}
+		if e.Type == matchsim.EventSubstitution {
+			substitutions++
+			if e.RelatedPlayer == nil || e.RelatedPlayer.Name == "" {
+				t.Fatalf("substitution at %d' has no named player coming off", e.Minute)
+			}
+			if !strings.Contains(commentary, e.RelatedPlayer.Name) {
+				t.Fatalf("substitution commentary omits the player coming off: %s", commentary)
+			}
+		}
+	}
+	if named == 0 || substitutions == 0 {
+		t.Fatalf("feed had %d named events and %d substitutions; the fixture is not exercising attribution", named, substitutions)
 	}
 }

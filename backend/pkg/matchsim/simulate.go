@@ -54,6 +54,21 @@ import (
 // After a red card or substitution the affected side's effective Attack/Defense
 // is recomputed for all remaining minutes (PM Part 5 §4). Half/full time are
 // synthesized at minutes 45/90 after the minute's draws.
+//
+// RegulationMinutes is the regulation length every match reaches, and
+// GoldenGoalMaxMinute bounds sudden death. The bound is a termination guarantee,
+// not a design rule: the extra-time loop's exit condition is a goal, and with
+// the shipped scoring rates a level tie can need hundreds of extra minutes to
+// find one (the worst of 10,000 sampled seeds decides by minute 613), so no
+// bound low enough to be a product rule would keep every tie decided. The live
+// path therefore never streams extra time (it flushes the whole block in one
+// step, see internal/match) and a tie still level at the bound simply finishes
+// level, which no seeded match in the suite reaches.
+const (
+	RegulationMinutes   = 90
+	GoldenGoalMaxMinute = 1000
+)
+
 func Simulate(opts Options) MatchResult {
 	tuning := opts.Tuning
 	if tuning.Version == "" {
@@ -218,25 +233,30 @@ func Simulate(opts Options) MatchResult {
 		}
 	}
 
-	for minute := 1; minute <= 90; minute++ {
+	for minute := 1; minute <= RegulationMinutes; minute++ {
 		step(minute)
 	}
 
-	res.HomePossession = math.Round(float64(homeMinutes) / 90 * 100)
+	res.HomePossession = math.Round(float64(homeMinutes) / RegulationMinutes * 100)
 
 	goldenGoal := opts.GoldenGoal && res.HomeGoals == res.AwayGoals
 	if goldenGoal {
-		emit(90, EventFullTime, "",
+		emit(RegulationMinutes, EventFullTime, "",
 			fmt.Sprintf("Ninety minutes. Level at %d–%d — sudden-death golden goal decides the tie.", res.HomeGoals, res.AwayGoals), "")
-		minute := 91
-		for res.HomeGoals == res.AwayGoals {
+		minute := RegulationMinutes + 1
+		for res.HomeGoals == res.AwayGoals && minute <= GoldenGoalMaxMinute {
 			step(minute)
 			minute++
 		}
-		emit(minute-1, EventFullTime, "",
-			fmt.Sprintf("GOLDEN GOAL! Full time %d–%d. %s.", res.HomeGoals, res.AwayGoals, goldenWinnerName(res, home, away)), "")
+		if res.HomeGoals == res.AwayGoals {
+			emit(GoldenGoalMaxMinute, EventFullTime, "",
+				fmt.Sprintf("Still level %d–%d after extra time — the tie is decided off the pitch.", res.HomeGoals, res.AwayGoals), "")
+		} else {
+			emit(minute-1, EventFullTime, "",
+				fmt.Sprintf("GOLDEN GOAL! Full time %d–%d. %s.", res.HomeGoals, res.AwayGoals, goldenWinnerName(res, home, away)), "")
+		}
 	} else {
-		emit(90, EventFullTime, "",
+		emit(RegulationMinutes, EventFullTime, "",
 			fmt.Sprintf("Full-time! %d–%d. %s.", res.HomeGoals, res.AwayGoals, winnerName(res, home, away)), "")
 	}
 

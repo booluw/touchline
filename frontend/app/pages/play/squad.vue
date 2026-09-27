@@ -135,6 +135,10 @@ onMounted(async () => {
               v-for="(player, key) in playersBySelectedSlotPosition" :key>
               <div class="col-span-2 heading">
                 {{ player.first_name }} {{ player.last_name }}
+                <!-- <NuxtLink :to="`/play/players/${player.player.id}`"
+                  class="hover:text-slate-100 underline-offset-2 hover:underline">
+                  {{ player.first_name }} {{ player.last_name }}
+                </NuxtLink> -->
               </div>
               <div class="heading">{{ player.position }}</div>
               <div class="heading text-center">{{ player.overall }}</div>
@@ -162,6 +166,7 @@ onMounted(async () => {
           </div>
         </div>
         <div class="overflow-auto">
+          {{ slots[0] }}
           <!-- {{ squad[0] }} -->
           <!-- {{ playersInLineup }} -->
         </div>

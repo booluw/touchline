@@ -594,6 +594,15 @@ func (a *App) RunAll(ctx context.Context) error {
 // kicked. Idempotent: KickoffDue's status guard + no-overlap gate make a
 // concurrent pass (the daily tick handler and this poll both call it) safe.
 // Shared by the daily-tick handler and the IM16 intra-day kickoff poll.
+//
+// The pacing loop is started on every pass, not only when something new kicked
+// off. RunLive returns immediately when the world has nothing live and the
+// claim guard keeps a second copy from double-pacing, so this is a cheap no-op
+// in the common case — but it is what makes a live match self-heal: a loop that
+// died on a transient error (or a worker restart) resumes within one poll
+// interval instead of stranding the match at its last persisted minute, which
+// the no-overlap gate would otherwise keep at the head of the world's whole
+// matchday ladder forever.
 func (a *App) kickDueWorld(ctx context.Context, worldID uuid.UUID) error {
 	if activated, err := a.CompSvc.ActivateDueSeasons(ctx, worldID); err != nil {
 		return fmt.Errorf("activate seasons: %w", err)
@@ -606,12 +615,12 @@ func (a *App) kickDueWorld(ctx context.Context, worldID uuid.UUID) error {
 	}
 	if sum != nil && sum.Kicked > 0 {
 		log.Printf("world %s: kicked %d matchday(s), %d fixture(s)", worldID, sum.Matchdays, sum.Kicked)
-		go func() {
-			if err := a.Runner.RunLive(ctx, worldID); err != nil {
-				log.Printf("world %s live runner: %v", worldID, err)
-			}
-		}()
 	}
+	go func() {
+		if err := a.Runner.RunLive(ctx, worldID); err != nil {
+			log.Printf("world %s live runner: %v", worldID, err)
+		}
+	}()
 	return nil
 }
 

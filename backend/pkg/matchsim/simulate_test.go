@@ -834,3 +834,37 @@ func TestGoldenGoalScansManySeeds(t *testing.T) {
 		t.Fatal("no level-at-90 seed found in range — level generator drift")
 	}
 }
+
+// TestGoldenGoalExtraTimeIsBounded pins the termination guarantee on the
+// sudden-death loop. Its exit condition is a goal, so a tie that cannot be
+// broken (here: no chances at all, so no goals in extra time either) would spin
+// forever. The loop must stop at GoldenGoalMaxMinute, emit an explicit
+// still-level full time, and never write an event past the bound.
+func TestGoldenGoalExtraTimeIsBounded(t *testing.T) {
+	tuning := DefaultTuning()
+	tuning.ChancesPerMatchMin = 0 // no chance, therefore no goal, ever
+
+	opts := sampleOptions(1)
+	opts.Tuning = tuning
+	opts.GoldenGoal = true
+	res := Simulate(opts)
+
+	if res.HomeGoals != 0 || res.AwayGoals != 0 {
+		t.Fatalf("expected a 0-0 match, got %d-%d", res.HomeGoals, res.AwayGoals)
+	}
+	var stillLevel int
+	for _, ev := range res.Events {
+		if ev.Minute > GoldenGoalMaxMinute {
+			t.Fatalf("event at minute %d past the extra-time bound %d", ev.Minute, GoldenGoalMaxMinute)
+		}
+		if ev.Type == EventFullTime && strings.HasPrefix(ev.Description, "Still level") {
+			stillLevel++
+			if ev.Minute != GoldenGoalMaxMinute {
+				t.Fatalf("still-level summary at minute %d, want the bound %d", ev.Minute, GoldenGoalMaxMinute)
+			}
+		}
+	}
+	if stillLevel != 1 {
+		t.Fatalf("want exactly one still-level full-time summary, got %d", stillLevel)
+	}
+}
