@@ -69,8 +69,8 @@ func (s *Service) GetPlayer(ctx context.Context, id uuid.UUID) (*Player, error) 
 
 // GetPlayerAttributes returns the zero-value record until the attribute model
 // lands (S05).
-func (s *Service) GetPlayerAttributes(ctx context.Context, playerID uuid.UUID) (*PlayerAttributes, error) {
-	return &PlayerAttributes{PlayerID: playerID}, nil
+func (s *Service) GetPlayerAttributes(ctx context.Context, playerID uuid.UUID) (*PlayerAttributesRecord, error) {
+	return &PlayerAttributesRecord{PlayerID: playerID}, nil
 }
 
 // GetPlayerPersonality returns the zero-value record until S09-01.

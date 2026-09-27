@@ -22,6 +22,7 @@ import (
 
 	"github.com/touchline/backend/internal/competition"
 	"github.com/touchline/backend/internal/match"
+	"github.com/touchline/backend/internal/world"
 	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/realtime"
 )
@@ -67,7 +68,7 @@ type Summary struct {
 // on redelivery only fixtures still marked scheduled kick off again, and the
 // no-overlap gate defers a matchday while an earlier one is still live.
 func (r *Runner) KickoffDue(ctx context.Context, worldID uuid.UUID) (*Summary, error) {
-	asOf, err := r.worldDate(ctx, worldID)
+	asOf, err := r.worldNow(ctx, worldID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +288,30 @@ func (r *Runner) release(worldID uuid.UUID) {
 	delete(r.active, worldID)
 }
 
+// PlayableWorlds lists every playable world id, for the worker's intra-day
+// kickoff poll (IM16: kickoffs happen at scheduled_at moments, between daily
+// ticks, so the worker scans playable worlds on its own cadence).
+func (r *Runner) PlayableWorlds(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id FROM world.worlds WHERE status IN ('active', 'open_beta') ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("matchday: playable worlds: %w", err)
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("matchday: playable worlds: scan: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("matchday: playable worlds: iterate: %w", err)
+	}
+	return out, nil
+}
+
 // worldHasLive reports whether any fixture of the world is currently live.
 func (r *Runner) worldHasLive(ctx context.Context, worldID uuid.UUID) (bool, error) {
 	var n int
@@ -320,39 +345,34 @@ func (r *Runner) WorldsWithLiveMatches(ctx context.Context) ([]uuid.UUID, error)
 	return out, nil
 }
 
-// worldDate maps the world's calendar day counter to its date: launch day
-// (launched_at or created_at) plus current_day days. only WORLD_TICK{daily}
-// emissions advance current_day (the scheduler does both in one tx, OPD-24), so
-// hourly/weekly/monthly/seasonal ticks never move the fixture calendar and the
-// mapping is deterministic and wall-clock-independent for tests. current_tick
-// stays the monotonic ordering counter and is deliberately not used here.
-func (r *Runner) worldDate(ctx context.Context, worldID uuid.UUID) (time.Time, error) {
-	var (
-		ref time.Time
-		day int64
-	)
-	err := r.pool.QueryRow(ctx, `
-		SELECT COALESCE(launched_at, created_at), current_day
-		FROM world.worlds WHERE id = $1`, worldID).Scan(&ref, &day)
+// worldNow maps the real clock to the world's continuous current moment at the
+// world's fixed scale (IM16): with the default tick.day_length of one game-day
+// per real day it is real UTC time, so a fixture's scheduled_at ("Sep 27
+// 20:00") matures at that exact moment — the kickoff time is real, not just its
+// calendar date.
+func (r *Runner) worldNow(ctx context.Context, worldID uuid.UUID) (time.Time, error) {
+	_, epoch, dayLength, err := world.LoadScale(ctx, r.pool, worldID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, fmt.Errorf("matchday: world %s not found", worldID)
 	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("matchday: world date: %w", err)
+		return time.Time{}, fmt.Errorf("matchday: world clock: %w", err)
 	}
-	y, m, d := ref.UTC().Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(day)), nil
+	return world.ScaleNow(time.Now(), epoch, dayLength), nil
 }
 
 // dueMatchdays lists the distinct matchdays with scheduled fixtures whose
-// kickoff calendar day is at or before the world's current date, ascending.
+// scheduled kickoff moment (scheduled_at) the world clock has already reached,
+// ascending. IM16: this is a timestamp comparison against the continuous world
+// clock, so a matchday with a 20:00 kickoff only becomes due at 20:00 — its
+// fixtures never simulate on the date alone.
 func (r *Runner) dueMatchdays(ctx context.Context, worldID uuid.UUID, asOf time.Time) ([]int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT matchday FROM match.fixtures
 		WHERE world_id = $1
 		  AND matchday IS NOT NULL
 		  AND status = 'scheduled'
-		  AND scheduled_at::date <= $2::date
+		  AND scheduled_at <= $2
 		ORDER BY matchday`, worldID, asOf)
 	if err != nil {
 		return nil, fmt.Errorf("matchday: due matchdays: %w", err)

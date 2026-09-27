@@ -165,7 +165,7 @@ func persistEmotionalState(ctx context.Context, tx pgx.Tx, playerID uuid.UUID, e
 
 // daysTruncate strips the time component of the world's season reference date,
 // using the UTC calendar day so the anchor is timezone-independent and matches
-// the matchday world-day counter (see matchday.worldDate).
+// the matchday world-day counter (see matchday.worldNow / world.TargetDay, IM16).
 func daysTruncate(t time.Time) time.Time {
 	y, m, d := t.UTC().Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)

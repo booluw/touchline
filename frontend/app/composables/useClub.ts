@@ -97,13 +97,67 @@ export function useClub() {
     }
   }
 
-  // async
+  async function getTactics(): Promise<{ tactics: any, lineup: any, squad: any }> {
+    try {
+      const [tactics, lineup, squad] = await Promise.all([
+        $api.get(`${apiBase}/api/clubs/${clubId}/tactics`),
+        $api.get(`${apiBase}/api/clubs/${clubId}/lineup`),
+        $api.get(`${apiBase}/api/clubs/${clubId}/players`)
+      ])
+
+      return { tactics, lineup, squad }
+    } catch (error) {
+      notify({
+        title: "Error",
+        description: "An Error Occurred While Loading Tactics",
+        type: "danger"
+      })
+
+      console.error(error)
+      throw error
+    }
+  }
+
+  async function saveTactics(payload: { style: string, formation: string }) {
+    try {
+      await $api.post(`${apiBase}/api/clubs/${clubId}/tactics`, payload)
+      return
+    } catch (error) {
+      notify({
+        title: "Error",
+        description: "An Error Occurred While Saving Tactics",
+        type: "danger"
+      })
+
+      console.error(error)
+      throw error
+    }
+  }
+
+  async function saveLineup(payload: { slots: {slot: number, player_id: string }[]}) {
+    try {
+      await $api.put(`${apiBase}/api/clubs/${clubId}/lineup`, payload)
+      return
+    } catch (error) {
+      notify({
+        title: "Error",
+        description: "Error while saving lineup",
+        type: "danger"
+      })
+
+      console.error(error)
+      throw error
+    }
+  }
 
   return {
     getFinance,
     getCompetitions,
     getFixtures,
     getNextFixture,
-    getDynamics
+    getDynamics,
+    getTactics,
+    saveTactics,
+    saveLineup
   }
 }

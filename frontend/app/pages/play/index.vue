@@ -6,7 +6,7 @@ import { useManagerDashboard } from '~/composables/manager/dashboard';
 
 const { getOffers } = useManagerOffer()
 const { getDashboardData, getBoardStatus } = useManagerDashboard()
-const { getFinance, getCompetitions, getFixtures, getNextFixture, getDynamics } = useClub()
+const { getFinance, getCompetitions, getFixtures, getNextFixture, getDynamics, getTactics } = useClub()
 
 const financeStore = useFinanceStore()
 const clubStore = useClubStore()
@@ -20,6 +20,9 @@ const club = {
 }
 
 const competitions = computed(() => clubStore.competitions)
+const board = computed(() => clubStore.board)
+const tactics = ref()
+const lineup = ref()
 
 const finance = {
   summary: computed(() => financeStore.summary)
@@ -101,6 +104,20 @@ async function getBoardManagerStatus() {
   }
 }
 
+async function getClubTactics() {
+  loading.tactics = "loading"
+
+  try {
+    const resp = await getTactics()
+
+    // tactics.value = resp.tactics
+    lineup.value = resp.lineup
+    loading.tactics = "loaded"
+  } catch {
+    loading.tactics = "error"
+  }
+}
+
 async function init() {
   await Promise.all([
     getManagerDashboardData(),
@@ -110,6 +127,7 @@ async function init() {
     getClubNextFixtures(),
     getClubDynamics(),
     getBoardManagerStatus(),
+    getClubTactics()
     // getClubFixtures()
   ])
 }
@@ -250,7 +268,7 @@ onMounted(() => init())
                         <div class="text-center">{{ row.drawn }}</div>
                         <div class="text-center">{{ row.lost }}</div>
                         <div class="text-center">{{ row.goals_for - row.goals_against }}</div>
-                        <div class="text-center">{{ row.points }}</div>
+                        <div class="text-center font-bold">{{ row.points }}</div>
                       </div>
                     </div>
                   </div>
@@ -338,10 +356,10 @@ onMounted(() => init())
           <div class="mt-3 flex gap-5" v-else-if="loading.board === 'loaded'">
             <div class="flex flex-col gap-1">
               <div class="flex gap-2 items-center">
-                <h4 class="heading text-2xl">{{ club.board?.confidence }}</h4>
-                <IconsHappy class="w-6" v-if="club.board?.confidence! > 50" />
-                <IconsNeutral class="w-6" v-else-if="club.board?.confidence! === 50" />
-                <IconsSad class="w-6" v-else-if="club.board?.confidence! < 45" />
+                <h4 class="heading text-2xl">{{ board?.confidence }}</h4> 
+                <IconsHappy class="w-6" v-if="board?.confidence! > 50" />
+                <IconsNeutral class="w-6" v-else-if="board?.confidence! === 50" />
+                <IconsSad class="w-6" v-else-if="board?.confidence! < 45" />
                 <IconsBlanked class="w-6" v-else />
               </div>
               <h5 class="heading heading--small">confidence</h5>
@@ -349,10 +367,10 @@ onMounted(() => init())
 
             <div class="flex flex-col gap-1">
               <div class="flex gap-2 items-center">
-                <h4 class="heading text-2xl">{{ club.board?.snapshot.scores.performance_score }}</h4>
-                <IconsHappy class="w-6" v-if="club.board?.snapshot.scores.performance_score! > 50" />
-                <IconsNeutral class="w-6" v-else-if="club.board?.snapshot.scores.performance_score! === 50" />
-                <IconsSad class="w-6" v-else-if="club.board?.snapshot.scores.performance_score! < 45" />
+                <h4 class="heading text-2xl">{{ board?.snapshot.scores.performance_score }}</h4>
+                <IconsHappy class="w-6" v-if="board?.snapshot.scores.performance_score! > 50" />
+                <IconsNeutral class="w-6" v-else-if="board?.snapshot.scores.performance_score! === 50" />
+                <IconsSad class="w-6" v-else-if="board?.snapshot.scores.performance_score! < 45" />
                 <IconsBlanked class="w-6" v-else />
               </div>
               <h5 class="heading heading--small">performance rating</h5>
@@ -360,11 +378,11 @@ onMounted(() => init())
 
             <div class="flex flex-col gap-1">
               <div class="flex gap-2 items-center">
-                <h4 class="heading text-2xl">{{ club.board?.snapshot.scores.supporter_sentiment_score }}
+                <h4 class="heading text-2xl">{{ board?.snapshot.scores.supporter_sentiment_score }}
                 </h4>
-                <IconsHappy class="w-6" v-if="club.board?.snapshot.scores.supporter_sentiment_score! > 50" />
-                <IconsNeutral class="w-6" v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! === 50" />
-                <IconsSad class="w-6" v-else-if="club.board?.snapshot.scores.supporter_sentiment_score! < 45" />
+                <IconsHappy class="w-6" v-if="board?.snapshot.scores.supporter_sentiment_score! > 50" />
+                <IconsNeutral class="w-6" v-else-if="board?.snapshot.scores.supporter_sentiment_score! === 50" />
+                <IconsSad class="w-6" v-else-if="board?.snapshot.scores.supporter_sentiment_score! < 45" />
                 <IconsBlanked class="w-6" v-else />
               </div>
               <h5 class="heading heading--small">fans score</h5>
@@ -386,8 +404,33 @@ onMounted(() => init())
           </nuxt-link>
         </div>
 
-        <div class="mt-5">
-          // Red border if finance is in crisis
+        <UiLoader v-if="loading.tactics === 'loading'" />
+        <template v-else-if="loading.tactics === 'loaded'">
+          <div class="flex gap-5 mt-5">
+            <div class="w-120 shrink-0">
+              <PitchView
+                variant="half"
+                :formation="lineup.formation"
+                :slots="lineup.slots"
+              />
+            </div>
+            <div class="flex flex-col gap-3 capitalize">
+              <div class="">
+                <h3 class="heading heading--small">Style</h3>
+                {{ lineup.style }}
+              </div>
+              <div class="">
+                <h3 class="heading heading--small">formation</h3>
+                {{ lineup.formation }}
+              </div>
+            </div>
+          </div>
+        </template>
+        <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">
+          <div class="text-loss-500">
+            An Error Occurred
+          </div>
+          <button class="uppercase text-cyan-300" @click="getClubTactics()">Retry</button>
         </div>
       </div>
       <div class="border-brutal border-void-500 p-5">

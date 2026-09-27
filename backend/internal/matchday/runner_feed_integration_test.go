@@ -60,10 +60,10 @@ func (r *feedRecorder) ticks(matchID uuid.UUID) []match.MatchTickPayload {
 func TestRunnerPublishesMatchTickFeed(t *testing.T) {
 	pool, worldID, compSvc := runnerWorld(t)
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx,
-		`UPDATE world.worlds SET current_tick = current_tick + 1, current_day = current_day + 1 WHERE id = $1`, worldID); err != nil {
-		t.Fatalf("advance day: %v", err)
-	}
+	// IM16: kickoffs are gated on the continuous world clock; wait for the
+	// first matchday's scheduled_at to mature (compressed scale, ~2s) instead
+	// of bumping the integer day counter.
+	waitForNextDue(t, pool, worldID)
 
 	matches := match.NewService(pool, nil, squad.NewStore(pool), form.NewStore(pool))
 	broker := realtime.NewLocalBroker()

@@ -58,9 +58,26 @@ type Player struct {
 	SquadNumber     *int            `json:"squad_number"`
 }
 
-type PlayerAttributes struct {
+// PlayerAttributesRecord is the S05 placeholder for a per-player attribute
+// record: identity only, because GetPlayerAttributes still returns the
+// zero-value stub. The real attribute data is the six-category block below,
+// derived from the EAV at read time.
+type PlayerAttributesRecord struct {
 	ID       uuid.UUID `json:"id"`
 	PlayerID uuid.UUID `json:"player_id"`
+}
+
+// PlayerAttributes is one roster player's six persisted attribute-category
+// means ([1,100] each; 0 until seeded), rolled up round-half-up from the
+// player_attributes EAV exactly like internal/squad. The shape mirrors the
+// dynamics profile block so the roster and dressing-room payloads agree.
+type PlayerAttributes struct {
+	Technical   int `json:"technical"`
+	Physical    int `json:"physical"`
+	Mental      int `json:"mental"`
+	Tactical    int `json:"tactical"`
+	Goalkeeping int `json:"goalkeeping"`
+	Positional  int `json:"positional"`
 }
 
 type PlayerPersonality struct {
@@ -113,7 +130,9 @@ type Appearance struct {
 }
 
 // PlayerMoraleRow is one roster player's morale/role/request read model
-// (GET /api/clubs/:id/players).
+// (GET /api/clubs/:id/players). Attributes holds the six category means and
+// Overall the position-weighted rating (1..99), both derived by the roster
+// read path from the player_attributes EAV.
 type PlayerMoraleRow struct {
 	Player          *apiref.PlayerRef `json:"player"`
 	FirstName       string            `json:"first_name"`
@@ -124,6 +143,8 @@ type PlayerMoraleRow struct {
 	PlayingTimePct  float64           `json:"playing_time_pct"`
 	TransferRequest string            `json:"transfer_request_status,omitempty"`
 	SquadNumber     *int              `json:"squad_number,omitempty"`
+	Attributes      PlayerAttributes  `json:"attributes"`
+	Overall         int               `json:"overall"`
 }
 
 // TransferRequest is the read model of one player transfer request. Internal

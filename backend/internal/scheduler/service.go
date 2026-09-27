@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/robfig/cron/v3"
 
+	internalworld "github.com/touchline/backend/internal/world"
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
@@ -60,6 +61,12 @@ type Service struct {
 	mu      sync.RWMutex
 	entries map[ref]cron.EntryID
 	specs   map[ref]string
+
+	// fireMu serializes FireTick passes. Rollover-to-target (IM16) re-reads
+	// current_day then advances by up to maxDaysPerFire, so without this the
+	// poll-driven catch-up pass and a stale cron fire could each advance the
+	// same day. At most a few fires per world per minute, so the lock is free.
+	fireMu sync.Mutex
 }
 
 // NewService builds the world clock over robfig/cron.
@@ -109,6 +116,11 @@ func (s *Service) Run(ctx context.Context, poll time.Duration) error {
 			if err := s.sync(ctx); err != nil {
 				log.Printf("scheduler: sync: %v", err)
 			}
+			// IM16 rollover: converge each playable world's day counter to its
+			// fixed-scale target every poll, so a restarted (or resumed) world
+			// catches up on the days it missed promptly instead of waiting for
+			// the next midnight cron. Idempotent: fires nothing when caught up.
+			s.catchUp(ctx)
 		}
 	}
 }
@@ -231,18 +243,115 @@ func (s *Service) fireScheduledTick(worldID uuid.UUID, granularity string) {
 	}
 }
 
-// FireTick advances a world's monotonic tick counter, records the WORLD_TICK
-// event, and enqueues its dispatch in a single transaction. Worlds that are no
-// longer playable (paused/archived) are a no-op, so a stale cron entry can
-// never tick a world changed underneath the scheduler.
+// FireTick is the world-clock emission point. Two behaviors (IM16):
 //
-// Calendar semantics (OPD-24, IM02): the monotonic current_tick advances on
-// every emission for event ordering/audit; the world calendar
-// (world.worlds.current_day) is advanced by exactly one per WORLD_TICK{daily}
-// — the only registered granularity — so current_tick and current_day move in
-// lockstep. Periodic work (weekly/monthly/seasonal) is day-derived by the
-// worker from current_day, never from cron time.
+//   - daily (the only registered granularity): the world's day counter
+//     converges toward the fixed-scale target — the number of whole game-days
+//     the real clock has crossed since the world's epoch — emitting one
+//     WORLD_TICK{daily} per day advanced. A fire with nothing left to roll
+//     over is a no-op, so a stale cron fire or a concurrent poll pass can
+//     never tick the same day twice. Progress is capped at maxDaysPerFire per
+//     call so a long downtime is played back in bounded passes, day by day.
+//
+//   - legacy granularities (hourly/weekly/monthly/seasonal, only exercised by
+//     tests now): the monotonic current_tick advances per emission for event
+//     ordering/audit but the calendar (current_day) never moves (OPD-24).
+//
+// Worlds that are no longer playable (paused/archived) or unknown are a no-op,
+// so a stale cron entry can never tick a world changed underneath the
+// scheduler.
 func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity string) error {
+	s.fireMu.Lock()
+	defer s.fireMu.Unlock()
+
+	if granularity != dailyGranularity {
+		return s.emitTick(ctx, worldID, granularity)
+	}
+
+	playable, epoch, dayLength, err := internalworld.LoadScale(ctx, s.pool, worldID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // world gone; nothing to tick
+	}
+	if err != nil {
+		return fmt.Errorf("scheduler: load world clock: %w", err)
+	}
+	if !playable {
+		return nil // paused/archived world: frozen until playable again
+	}
+
+	var current int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT current_day FROM world.worlds WHERE id = $1`, worldID).Scan(&current); err != nil {
+		return fmt.Errorf("scheduler: load current day: %w", err)
+	}
+	target := internalworld.TargetDay(time.Now(), epoch, dayLength)
+	if target <= current {
+		return nil // caught up; nothing to roll over
+	}
+	days := target - current
+	if days > maxDaysPerFire {
+		days = maxDaysPerFire
+	}
+	return s.rolloverDays(ctx, worldID, days)
+}
+
+// maxDaysPerFire bounds how many game-days one FireTick pass consumes, keeping
+// a long downtime's replay in bounded chunks (a fresh server catches the rest
+// up on subsequent polls).
+const maxDaysPerFire = 7
+
+// rolloverDays emits `days` WORLD_TICK{daily} emissions in one transaction,
+// each advancing the world's monotonic tick counter and its calendar day.
+func (s *Service) rolloverDays(ctx context.Context, worldID uuid.UUID, days int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("scheduler: begin rollover tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	for d := int64(0); d < days; d++ {
+		// The status guard keeps a world that turns non-playable mid-pass from
+		// ticking; the caller's cap already bounds this to the scale target.
+		var tick int64
+		err = tx.QueryRow(ctx, `
+			UPDATE world.worlds SET current_tick = current_tick + 1, current_day = current_day + 1
+			WHERE id = $1 AND status IN ('active', 'open_beta')
+			RETURNING current_tick`, worldID).Scan(&tick)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // world became non-playable; nothing further to tick
+		}
+		if err != nil {
+			return fmt.Errorf("scheduler: advance world tick: %w", err)
+		}
+
+		payload, _ := json.Marshal(map[string]string{"granularity": dailyGranularity})
+		actor := "system"
+		ev := eventbus.Event{
+			ID:        uuid.New(),
+			WorldID:   worldID,
+			WorldTick: tick,
+			EventType: "WORLD_TICK",
+			ActorType: &actor,
+			Payload:   payload,
+		}
+		// Record + enqueue in the same tx (the transactional outbox): a
+		// committed tick is never left undispatched, even after a crash between
+		// commit and a hypothetical separate publish call.
+		if err := eventbus.WriteTx(ctx, s.bus, tx, &ev); err != nil {
+			return fmt.Errorf("scheduler: write WORLD_TICK event: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("scheduler: commit rollover: %w", err)
+	}
+	return nil
+}
+
+// emitTick is the legacy single-emission path (the pre-IM16 FireTick body):
+// current_tick advances on every emission for ordering/audit, the calendar
+// never moves (OPD-24: only the daily WORLD_TICK advances current_day, and
+// daily futures now route through the rollover path above).
+func (s *Service) emitTick(ctx context.Context, worldID uuid.UUID, granularity string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("scheduler: begin tick tx: %w", err)
@@ -261,14 +370,6 @@ func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity s
 		return fmt.Errorf("scheduler: advance world tick: %w", err)
 	}
 
-	if granularity == dailyGranularity {
-		if _, err := tx.Exec(ctx, `
-			UPDATE world.worlds SET current_day = current_day + 1
-			WHERE id = $1 AND status IN ('active', 'open_beta')`, worldID); err != nil {
-			return fmt.Errorf("scheduler: advance world calendar day: %w", err)
-		}
-	}
-
 	payload, _ := json.Marshal(map[string]string{"granularity": granularity})
 	actor := "system"
 	ev := eventbus.Event{
@@ -279,9 +380,7 @@ func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity s
 		ActorType: &actor,
 		Payload:   payload,
 	}
-	// Record + enqueue in the same tx (the transactional outbox): a committed
-	// tick is never left undispatched, even after a crash between commit and a
-	// hypothetical separate publish call.
+	// Record + enqueue in the same tx (the transactional outbox).
 	if err := eventbus.WriteTx(ctx, s.bus, tx, &ev); err != nil {
 		return fmt.Errorf("scheduler: write WORLD_TICK event: %w", err)
 	}
@@ -289,6 +388,32 @@ func (s *Service) FireTick(ctx context.Context, worldID uuid.UUID, granularity s
 		return fmt.Errorf("scheduler: commit tick: %w", err)
 	}
 	return nil
+}
+
+// catchUp rolls each playable world's day counter toward its fixed-scale target
+// (IM16). The scheduler holds the leader lock and FireTick serializes, so
+// concurrent cron fires cannot double-advance a day.
+func (s *Service) catchUp(ctx context.Context) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id FROM world.worlds WHERE status IN ('active', 'open_beta') ORDER BY id`)
+	if err != nil {
+		log.Printf("scheduler: catch-up scan: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var worldID uuid.UUID
+		if err := rows.Scan(&worldID); err != nil {
+			log.Printf("scheduler: catch-up scan: %v", err)
+			return
+		}
+		if err := s.FireTick(ctx, worldID, dailyGranularity); err != nil {
+			log.Printf("scheduler: catch-up world %s: %v", worldID, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("scheduler: catch-up iterate: %v", err)
+	}
 }
 
 // dailyGranularity is the only cadence that advances the world calendar

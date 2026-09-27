@@ -99,6 +99,18 @@ func currentDay(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) int64 {
 	return n
 }
 
+// backdateLaunch moves a world's launch into the past by `days` real days, so
+// the fixed-scale clock (IM16) reads `days` whole game-days elapsed: the
+// scale's target is deterministic and fireable without waiting.
+func backdateLaunch(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID, days int) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE world.worlds SET launched_at = launched_at - make_interval(days => $1::int) WHERE id = $2`,
+		days, worldID); err != nil {
+		t.Fatalf("backdate launch by %d days: %v", days, err)
+	}
+}
+
 // TestConfiguredDailyTickArrivesAtWorker proves AC5 end to end: a configured
 // daily cadence is read from world_config, registered by the scheduler, fired,
 // and delivered through the real river round-trip to a worker handler for the
@@ -130,6 +142,9 @@ func TestConfiguredDailyTickArrivesAtWorker(t *testing.T) {
 	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
 		t.Fatalf("launch world: %v", err)
 	}
+	// IM16: the daily fire rolls over to the fixed-scale target, so backdate
+	// the launch a day to make the first scheduled fire produce a tick.
+	backdateLaunch(t, pool, w.ID, 1)
 	// A dev-friendly daily cadence the test can wait for (the seeded default is
 	// a real daily cron; any valid spec works once the clock re-reads config).
 	if err := worldSvc.SetConfig(ctx, w.ID, "tick.daily_cadence", "0 0 * * *"); err != nil {
@@ -229,6 +244,9 @@ func TestFireTickAdvancesCounterAndRecordsPayload(t *testing.T) {
 	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
 		t.Fatalf("launch world: %v", err)
 	}
+	// IM16: the daily emission rolls the calendar over to the fixed-scale
+	// target only; backdate the launch so the scale has a game-day to catch up.
+	backdateLaunch(t, pool, w.ID, 1)
 
 	if err := clock.FireTick(ctx, w.ID, "daily"); err != nil {
 		t.Fatalf("fire daily: %v", err)
@@ -337,6 +355,9 @@ func TestFireTickAdvancesCalendarOnlyOnDaily(t *testing.T) {
 	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
 		t.Fatalf("launch world: %v", err)
 	}
+	// IM16: only the daily emission may advance the calendar, and only toward
+	// the fixed-scale target; give the scale one game-day to catch up.
+	backdateLaunch(t, pool, w.ID, 1)
 
 	for _, g := range []string{"hourly", "weekly", "monthly", "seasonal"} {
 		if err := clock.FireTick(ctx, w.ID, g); err != nil {
@@ -355,5 +376,75 @@ func TestFireTickAdvancesCalendarOnlyOnDaily(t *testing.T) {
 	}
 	if tick := currentTick(t, pool, w.ID); tick != 5 {
 		t.Fatalf("current_tick = %d, want 5 (all emissions count for ordering)", tick)
+	}
+}
+
+// TestFireTickRollsOverMissedDays is the IM16 pause/resume contract: a world
+// whose launch time is far in the past (server down, or paused then resumed)
+// catches up on its missed game-days in bounded passes — never in one burst,
+// and never while it is paused or archived.
+func TestFireTickRollsOverMissedDays(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t)
+
+	worldSvc := internalworld.NewService(pool, nil)
+	clock := NewService(pool, nil)
+
+	w, err := worldSvc.CreateWorld(ctx, "rollover-catchup")
+	if err != nil {
+		t.Fatalf("create world: %v", err)
+	}
+	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
+		t.Fatalf("launch world: %v", err)
+	}
+	// Thirty real days offline: the scale target is day 30.
+	backdateLaunch(t, pool, w.ID, 30)
+
+	// One fire catches up only maxDaysPerFire days per pass.
+	if err := clock.FireTick(ctx, w.ID, "daily"); err != nil {
+		t.Fatalf("first rollover fire: %v", err)
+	}
+	if day := currentDay(t, pool, w.ID); day != 7 {
+		t.Fatalf("first pass current_day = %d, want 7 (one capped pass)", day)
+	}
+	if events := countWorldTicks(t, pool, w.ID); events != 7 {
+		t.Fatalf("first pass WORLD_TICK events = %d, want 7", events)
+	}
+
+	// Continue passes complete the catch-up: three more capped passes reach 28
+	// and the fourth lands exactly on the scale target (30).
+	for i := 0; i < 4; i++ {
+		if err := clock.FireTick(ctx, w.ID, "daily"); err != nil {
+			t.Fatalf("rollover fire %d: %v", i+2, err)
+		}
+	}
+	if day := currentDay(t, pool, w.ID); day != 30 {
+		t.Fatalf("final current_day = %d, want 30 (scale target)", day)
+	}
+	if tick := currentTick(t, pool, w.ID); tick != 30 {
+		t.Fatalf("final current_tick = %d, want 30", tick)
+	}
+	if events := countWorldTicks(t, pool, w.ID); events != 30 {
+		t.Fatalf("total WORLD_TICK events = %d, want 30 (one per game-day)", events)
+	}
+
+	// A further fire with nothing left to roll over is a no-op.
+	if err := clock.FireTick(ctx, w.ID, "daily"); err != nil {
+		t.Fatalf("idempotent fire: %v", err)
+	}
+	if day := currentDay(t, pool, w.ID); day != 30 {
+		t.Fatalf("idempotent fire advanced current_day to %d, want 30", day)
+	}
+
+	// Pausing freezes the rollover: a stale fire must not catch the world up
+	// while it is not playable.
+	if _, err := worldSvc.SetStatus(ctx, w.ID, "paused"); err != nil {
+		t.Fatalf("pause world: %v", err)
+	}
+	if err := clock.FireTick(ctx, w.ID, "daily"); err != nil {
+		t.Fatalf("stale fire on paused world: %v", err)
+	}
+	if day := currentDay(t, pool, w.ID); day != 30 {
+		t.Fatalf("paused world current_day = %d, want 30 (frozen)", day)
 	}
 }

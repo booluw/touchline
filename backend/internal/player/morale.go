@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -49,7 +50,8 @@ func (s *Service) RecordMatchAppearances(ctx context.Context, tx pgx.Tx, matchID
 }
 
 // ListSquadMorale returns the club's active roster with each player's role,
-// morale, whole-season share and any open transfer request.
+// morale, whole-season share, six attribute-category means, position-weighted
+// overall and any open transfer request.
 func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.UUID) ([]PlayerMoraleRow, error) {
 	clubID, err := s.clubByManager(ctx, worldID, managerID)
 	if err != nil {
@@ -60,6 +62,10 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 		return nil, err
 	}
 	open, err := openRequestsByClub(ctx, s.pool, clubID)
+	if err != nil {
+		return nil, err
+	}
+	attrs, err := squadAttributeMeans(ctx, s.pool, clubID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +80,16 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 		if st, ok := byPlayer[rows[i].Player.ID]; ok {
 			rows[i].TransferRequest = st
 		}
+		att := attrs[rows[i].Player.ID]
+		rows[i].Attributes = att
+		rows[i].Overall = squad.PositionalOverall(rows[i].Position, squad.AttributeSnapshot{
+			Technical:   att.Technical,
+			Physical:    att.Physical,
+			Mental:      att.Mental,
+			Tactical:    att.Tactical,
+			Goalkeeping: att.Goalkeeping,
+			Positional:  att.Positional,
+		})
 	}
 	return rows, nil
 }

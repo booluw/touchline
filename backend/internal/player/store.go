@@ -3,6 +3,7 @@ package player
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -169,6 +170,67 @@ func squadRows(ctx context.Context, q dbtx, clubID uuid.UUID) ([]PlayerMoraleRow
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// squadAttributeMeans rolls the club's active-roster attribute EAV up into the
+// per-player six category means (integer mean, round-half-up — the same
+// arithmetic as internal/squad.attachAttributes) that back the roster's
+// attributes/overall block. Players without any attribute rows map to the
+// zero category set.
+func squadAttributeMeans(ctx context.Context, q dbtx, clubID uuid.UUID) (map[uuid.UUID]PlayerAttributes, error) {
+	rows, err := q.Query(ctx, `
+		SELECT a.player_id, a.attribute_category, a.value
+		FROM player.player_attributes a
+		JOIN player.players p ON p.id = a.player_id AND p.club_id = $1 AND p.status = 'active'`, clubID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	acc := make(map[uuid.UUID]map[string][]int)
+	for rows.Next() {
+		var (
+			pid uuid.UUID
+			cat string
+			val int
+		)
+		if err := rows.Scan(&pid, &cat, &val); err != nil {
+			return nil, err
+		}
+		if acc[pid] == nil {
+			acc[pid] = make(map[string][]int)
+		}
+		acc[pid][cat] = append(acc[pid][cat], val)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make(map[uuid.UUID]PlayerAttributes, len(acc))
+	for pid, byCat := range acc {
+		out[pid] = PlayerAttributes{
+			Technical:   categoryMean(byCat["technical"]),
+			Physical:    categoryMean(byCat["physical"]),
+			Mental:      categoryMean(byCat["mental"]),
+			Tactical:    categoryMean(byCat["tactical"]),
+			Goalkeeping: categoryMean(byCat["goalkeeping"]),
+			Positional:  categoryMean(byCat["positional"]),
+		}
+	}
+	return out, nil
+}
+
+// categoryMean is the integer mean of one attribute category, round-half-up
+// (mirrors internal/squad.categoryMean).
+func categoryMean(vals []int) int {
+	if len(vals) == 0 {
+		return 0
+	}
+	var sum int
+	for _, v := range vals {
+		sum += v
+	}
+	return int(math.Round(float64(sum) / float64(len(vals))))
 }
 
 // relationshipEvents returns a player's durable player↔manager memory.

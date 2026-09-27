@@ -262,6 +262,12 @@ func TestBootstrappedWorldReceivesDailyTick(t *testing.T) {
 	if _, err := worldSvc.SetStatus(ctx, w.ID, "active"); err != nil {
 		t.Fatalf("launch: %v", err)
 	}
+	// IM16: the daily fire rolls the day counter to the fixed-scale target, so
+	// backdate the launch a day to make this fire produce a tick.
+	if _, err := pool.Exec(ctx,
+		`UPDATE world.worlds SET launched_at = launched_at - make_interval(days => 1) WHERE id = $1`, w.ID); err != nil {
+		t.Fatalf("backdate launch: %v", err)
+	}
 	if err := scheduler.NewService(pool, nil).FireTick(ctx, w.ID, "daily"); err != nil {
 		t.Fatalf("fire daily tick: %v", err)
 	}

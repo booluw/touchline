@@ -130,6 +130,12 @@ func TestPhase0VerticalSlice(t *testing.T) {
 	}
 
 	// 4. A daily tick fires (deterministically, as the S02-03 scheduler does).
+	// IM16: the daily fire rolls to the fixed-scale target, so backdate the
+	// launch a day first to make this fire produce a tick.
+	if _, err := pool.Exec(ctx,
+		`UPDATE world.worlds SET launched_at = launched_at - make_interval(days => 1) WHERE id = $1`, world); err != nil {
+		t.Fatalf("backdate launch: %v", err)
+	}
 	if err := scheduler.NewService(pool, nil).FireTick(ctx, world, "daily"); err != nil {
 		t.Fatalf("fire daily tick: %v", err)
 	}

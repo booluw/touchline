@@ -438,6 +438,9 @@ func (a *App) RunWorker(ctx context.Context) error {
 	// Startup sweep (OPD-21): resume any in-progress match after a restart.
 	if runnerEnabled {
 		go a.rehydrate(ctx)
+		// IM16: kicks happen at scheduled_at moments, not just on daily ticks,
+		// so the worker polls every playable world on its own cadence.
+		go a.kickoffPoll(ctx)
 	}
 
 	<-ctx.Done()
@@ -478,25 +481,9 @@ func (a *App) handleWorldTick(ctx context.Context, ev eventbus.Event, granularit
 		// (and emits SEASON_STARTED) the moment its first fixture is due,
 		// before the kickoff pass so the season reads in_progress as its
 		// first matchday simulates.
-		if activated, err := a.CompSvc.ActivateDueSeasons(ctx, ev.WorldID); err != nil {
-			return fmt.Errorf("world %s daily tick: activate seasons: %w", ev.WorldID, err)
-		} else if activated > 0 {
-			log.Printf("world %s daily tick: activated %d season(s)", ev.WorldID, activated)
+		if err := a.kickDueWorld(ctx, ev.WorldID); err != nil {
+			return fmt.Errorf("world %s daily tick: %w", ev.WorldID, err)
 		}
-		sum, err := a.Runner.KickoffDue(ctx, ev.WorldID)
-		if err != nil {
-			log.Printf("world %s daily tick: kickoff: %v", ev.WorldID, err)
-			return err
-		}
-		if sum != nil && sum.Kicked > 0 {
-			log.Printf("world %s daily tick: kicked %d matchday(s), %d fixture(s)",
-				ev.WorldID, sum.Matchdays, sum.Kicked)
-		}
-		go func() {
-			if err := a.Runner.RunLive(ctx, ev.WorldID); err != nil {
-				log.Printf("world %s live runner: %v", ev.WorldID, err)
-			}
-		}()
 	}
 
 	if err := a.Policy.RespondToBidsForAbsent(ctx, ev.WorldID); err != nil {
@@ -599,6 +586,59 @@ func (a *App) RunAll(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// kickDueWorld activates any due 'upcoming' seasons then kicks every matchday
+// the world clock has matured, spawning the live pacing loop for whatever
+// kicked. Idempotent: KickoffDue's status guard + no-overlap gate make a
+// concurrent pass (the daily tick handler and this poll both call it) safe.
+// Shared by the daily-tick handler and the IM16 intra-day kickoff poll.
+func (a *App) kickDueWorld(ctx context.Context, worldID uuid.UUID) error {
+	if activated, err := a.CompSvc.ActivateDueSeasons(ctx, worldID); err != nil {
+		return fmt.Errorf("activate seasons: %w", err)
+	} else if activated > 0 {
+		log.Printf("world %s: activated %d season(s)", worldID, activated)
+	}
+	sum, err := a.Runner.KickoffDue(ctx, worldID)
+	if err != nil {
+		return fmt.Errorf("kickoff: %w", err)
+	}
+	if sum != nil && sum.Kicked > 0 {
+		log.Printf("world %s: kicked %d matchday(s), %d fixture(s)", worldID, sum.Matchdays, sum.Kicked)
+		go func() {
+			if err := a.Runner.RunLive(ctx, worldID); err != nil {
+				log.Printf("world %s live runner: %v", worldID, err)
+			}
+		}()
+	}
+	return nil
+}
+
+// kickoffPoll is the IM16 intra-day kickoff pass: the continuous world clock
+// matures scheduled_at moments between daily tick emissions, so the worker
+// scans every playable world on its own cadence and plays what is due. This is
+// what makes a "20:00" fixture simulate at 20:00 instead of whenever the daily
+// tick lands.
+func (a *App) kickoffPoll(ctx context.Context) {
+	ticker := time.NewTicker(a.Poll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			worlds, err := a.Runner.PlayableWorlds(ctx)
+			if err != nil {
+				log.Printf("kickoff poll: playable worlds: %v", err)
+				continue
+			}
+			for _, w := range worlds {
+				if err := a.kickDueWorld(ctx, w); err != nil {
+					log.Printf("kickoff poll: world %s: %v", w, err)
+				}
+			}
+		}
 	}
 }
 

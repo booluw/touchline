@@ -100,7 +100,7 @@ func roundRobin(n int) [][][]int {
 // fixture scheduling so matchdays land on whole days at KickoffHourUTC. The
 // UTC calendar day (not the local one) is used so the anchor is
 // wall-clock/timezone-independent and matches the world-day counter mapping in
-// matchday.worldDate.
+// matchday.worldNow.
 func daysTruncate(t time.Time) time.Time {
 	y, m, d := t.UTC().Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)

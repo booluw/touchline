@@ -115,9 +115,12 @@ Wraps the `Service.StartSeason` / `Service.StartSeasonKickoff` seams
     replay seed ⊕ the league id, so a season's kickoff times vary while replay
     stays deterministic.
 - Every fixture of one matchday shares the same `scheduled_at` (a whole day at
-  a UTC kickoff hour). Kickoffs stay **date-gated** on the world clock —
-  `KickoffDue` simulates a matchday once `scheduled_at::date ≤ current_day` —
-  so kickoff hours are calendar display, never wall-clock logic.
+  a UTC kickoff hour). Kickoffs are **time-gated on the world clock** (IM16):
+  `KickoffDue` simulates a matchday once `scheduled_at ≤ worldNow`, where
+  `worldNow` is the world's continuous fixed-scale time. At the default scale
+  (one game day per real day) `worldNow` is real UTC, so a 20:00 fixture
+  actually kicks off at 20:00 — kickoff hours are real wall-clock moments, not
+  calendar display.
 - The same parameters are re-read when the fixture calendar is served, so
   `GET /api/competitions/:id/calendar` reproduces the exact week grouping a
   season was built with: week = `game_day ÷ days_per_week` from the season's
@@ -161,7 +164,7 @@ event and announcements do not appear).
 Requires: a **seeded** league (clubs + members) and a world that will be
 playable when matchdays arrive. The world may be `provisioning` or even
 `paused` for the call itself — matches simply won't kick off until the world is
-playable and the daily tick fires (see cadences-and-time).
+playable and the world clock runs (see cadences-and-time).
 
 The integration suite has executable samples
 (`internal/competition/competition_integration_test.go`,
@@ -226,10 +229,10 @@ open, and no `SEASON_COMPLETED` survives
 
 - Every league in the country has its final fixture applied (a match only
   finishes when it is actually simulated).
-- The world is playable and the daily tick fires — that is what runs the
-  kickoff → simulation → result-application path. In practice: accelerate the
-  daily cadence and let the ticks run the matches to completion (see
-  cadences-and-time + the launch guide's Step 8).
+- The world is playable and the world clock runs — that is what drives the
+  kickoff → simulation → result-application path. In practice: compress
+  `tick.day_length` and let the intra-day kickoffs + daily ticks run the
+  matches to completion (see cadences-and-time + the launch guide's Step 8).
 
 ### Promotion / relegation rules (recap)
 
@@ -252,9 +255,10 @@ Summary of the fastest full path (detailed commands in
    `seed-status` until `world_seeded: true`.
 3. `POST /api/admin/worlds/:id/leagues/:leagueID/season` for each league.
 4. Launch the world (`provisioning → active`) so the clock starts.
-5. Accelerate `tick.daily_cadence` (e.g. to every minute) so matchdays kick
-   off quickly; the final result of the season trips the automatic rollover,
-   whose next season lands after `season.off_season_ticks`.
+5. Compress `tick.day_length` (e.g. to 60 = one game day per real minute) so
+   matchdays kick off quickly on the world clock; the final result of the
+   season trips the automatic rollover, whose next season lands after
+   `season.off_season_ticks`.
 
 To see season rollover smoke-tested without a manual main, the integration
 suite plays a full league end-to-end
@@ -293,11 +297,12 @@ nothing.
 the first rollover the loop is self-sustaining as long as the world stays
 playable and the daily tick fires.
 
-**When does the new season kick off?** Its fixtures are day-gated like any
-other: they kick off on the daily tick when the world's current day reaches
-their scheduled date, which is the last matchday of the old season plus the
-off-season gap. The `upcoming` season simultaneously flips to `in_progress`
-(`SEASON_STARTED`); creating it does not wait for a "season start" toggle.
+**When does the new season kick off?** Its fixtures are **time-gated on the
+world clock** like any other: they kick off once the world's continuous scale
+time (worldNow) passes their `scheduled_at`, which lands after the last
+matchday of the old season plus the off-season gap. The `upcoming` season
+simultaneously flips to `in_progress` (`SEASON_STARTED`); creating it does not
+wait for a "season start" toggle.
 
 **How do I change the off-season length?** Configure `season.off_season_ticks`
 world-wide via `POST /api/admin/worlds/:id/config`, or set a per-league

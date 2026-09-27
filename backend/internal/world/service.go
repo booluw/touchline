@@ -33,13 +33,16 @@ const (
 )
 
 // defaultConfigKeys are the runtime tuning defaults seeded at launch (IM02
-// single-daily clock: S02-03 reads tick.daily_cadence; the calendar/season keys
-// are gameplay steps read by the worker, competition, and academy engines).
-// Values are JSON-configurable per world, never compiled-in — the scheduling
-// contract lives in the DB, not the code.
-// tick.daily_cadence is the ONE world-clock cadence (default 00:00 UTC, i.e. 1
-// game-day per real day): each WORLD_TICK{daily} emission advances the calendar
-// by exactly one game day (world.worlds.current_day, OPD-24). Weeks and months
+// single-daily clock + IM16 fixed scale: the worker, scheduler, competition,
+// and academy engines read them; each is JSON-configurable per world, never
+// compiled-in — the pacing contract lives in the DB, not the code).
+// tick.day_length (IM16) is the fixed clock's scale in real seconds per game
+// day (default 86400 = 1 game-day per real day, so the world clock == real
+// UTC). The scheduler converges current_day toward the scale on every poll and
+// current_day-derived steps (below) therefore never drift from real time.
+// tick.daily_cadence is a legacy poll hint (default 00:00 UTC); the scale
+// rollover is poll-driven (the one action per game-day is the WORLD_TICK{daily}
+// emission that advances world.worlds.current_day by one). Weeks and months
 // are derived from the day counter via calendar.days_per_week/days_per_month.
 // season.off_season_ticks is the IM01 off-season gap in daily ticks the next
 // rollover anchors the new season after (fallback default in the competition
@@ -47,6 +50,7 @@ const (
 var defaultConfigKeys = map[string]any{
 	"tick.match_cadence":      "20s",
 	"tick.daily_cadence":      "0 0 * * *",
+	"tick.day_length":         86400,
 	"calendar.days_per_week":  DaysPerWeekDefault,
 	"calendar.days_per_month": DaysPerMonthDefault,
 	"season.off_season_ticks": 30,

@@ -2147,9 +2147,9 @@ paths:
   /api/clubs/{id}/players:
     get:
       tags: [player]
-      summary: My squad's morale and playing time
+      summary: My squad's morale, playing time and attributes
       operationId: listSquadPlayers
-      description: The calling manager's active roster with each player's agreed squad role, morale (0..1), whole-season playing-time share and any open transfer request. World-scoped to the caller's manager; only the owned club is returned.
+      description: The calling manager's active roster with each player's agreed squad role, morale (0..1), whole-season playing-time share, six attribute-category means, the position-weighted overall rating (1..99) and any open transfer request. World-scoped to the caller's manager; only the owned club is returned.
       parameters:
         - name: id
           in: path
@@ -2937,15 +2937,18 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorldID"
       description: |
-        Sets one world_config key. The clock-side keys since IM02:
-        `tick.daily_cadence` (the only granularity that advances the day counter;
-        default `0 0 * * *`) and `tick.match_cadence` (seeded, paces live
-        matches, ignored by the world clock — OPD-17(2)). The week/month
-        boundaries come from `calendar.days_per_week` / `calendar.days_per_month`
-        (JSON numbers, default 7 / 30). Legacy `tick.hourly_cadence`,
-        `tick.weekly_cadence`, `tick.monthly_cadence`, `tick.seasonal_cadence`
-        keys are retired. Re-read every `SCHEDULER_POLL_INTERVAL`,
-        so a change takes effect without a redeploy.
+        Sets one world_config key. The clock-side keys since IM02/IM16:
+        `tick.daily_cadence` (the fire cadence of the daily emission; default
+        `0 0 * * *`) and `tick.day_length` (the fixed game-time scale in real
+        seconds per game day — `86400` = one game day per real day, the
+        default, making world time equal real UTC time; `1` = one game day per
+        real second, for compressed lab worlds) and `tick.match_cadence`
+        (seeded, paces live matches, ignored by the world clock — OPD-17(2)).
+        The week/month boundaries come from `calendar.days_per_week` /
+        `calendar.days_per_month` (JSON numbers, default 7 / 30). Legacy
+        `tick.hourly_cadence`, `tick.weekly_cadence`, `tick.monthly_cadence`,
+        `tick.seasonal_cadence` keys are retired. Re-read every
+        `SCHEDULER_POLL_INTERVAL`, so a change takes effect without a redeploy.
       requestBody:
         required: true
         content:
@@ -4577,7 +4580,7 @@ components:
         explanation: { $ref: "#/components/schemas/Explanation" }
     SquadMorale:
       type: object
-      description: One roster player's morale/role/playing-time read model (S06-03).
+      description: One roster player's morale/role/playing-time read model (S06-03) with the attribute block (IM17). Attributes holds the six category means and overall the position-weighted rating; both are derived at read time from the player_attributes EAV and are always present.
       properties:
         player: { $ref: "#/components/schemas/NestedPlayer" }
         first_name: { type: string }
@@ -4588,6 +4591,8 @@ components:
         playing_time_pct: { type: number, format: float, description: Whole-season minutes / (90 x club matches), capped at 1. }
         transfer_request_status: { type: string, nullable: true, enum: [pending, approved, denied, withdrawn, auto_listed, reassured] }
         squad_number: { type: integer, nullable: true }
+        attributes: { $ref: "#/components/schemas/PlayerAttributes" }
+        overall: { type: integer, minimum: 1, maximum: 99 }
     PlayerMorale:
       type: object
       description: One player's full morale picture with the "why" (S06-03).

@@ -41,6 +41,24 @@ func TestHTTPPlayerSquadRoundTrip(t *testing.T) {
 	if _, ok := first["squad_role"].(string); !ok {
 		t.Fatalf("player squad_role missing in %v", first)
 	}
+	// IM17: every roster row carries the six attribute-category means and the
+	// position-weighted overall (1..99, capped).
+	attrs, ok := first["attributes"].(map[string]any)
+	if !ok {
+		t.Fatalf("player attributes missing in %v", first)
+	}
+	for _, cat := range []string{"technical", "physical", "mental", "tactical", "goalkeeping", "positional"} {
+		if _, ok := attrs[cat].(float64); !ok {
+			t.Fatalf("attribute %q missing in %v", cat, attrs)
+		}
+	}
+	overall, ok := first["overall"].(float64)
+	if !ok {
+		t.Fatalf("player overall missing in %v", first)
+	}
+	if overall < 1 || overall > 99 {
+		t.Fatalf("player overall = %v, want 1..99", overall)
+	}
 
 	// Individual morale detail exposes the explanation.
 	resp = get(t, ts, client, fmt.Sprintf("/api/clubs/%s/players/%s", tw.HumanClub, playerID), cookies)

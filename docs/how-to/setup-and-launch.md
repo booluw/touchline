@@ -461,22 +461,26 @@ compose:
 
 1. **Launch the world** (`provisioning → active`). The scheduler ignores
    non-playable worlds, so this is when the clock starts.
-2. **Daily ticks drive the matchday runner.** Every daily `WORLD_TICK` makes the
-   worker `KickoffDue` any matchday whose `scheduled_at` has arrived, then a
-   per-world `RunLive` paces those matches in real time and applies results. The
-   world's `current_day` also advances +1 per daily tick (OPD-24).
+2. **The world clock + intra-day kickoffs drive the matchday runner.** The
+   worker polls the world clock every ~15s and `KickoffDue`s any matchday whose
+   `scheduled_at` the clock has reached (IM16 — kickoffs are *time-gated*, not
+   day-gated), then a per-world `RunLive` paces those matches in real time and
+   applies results. A daily `WORLD_TICK` also rolls `current_day` toward the
+   clock's day target.
 3. **The season reference date** is the world's `launched_at`/`created_at`;
-   matchday *n* plays on day *n* — so to see football soon, accelerate the
-   daily cadence (default `0 0 * * *`, one game day per real day).
+   matchday *n* plays on game-day *n*. At the default `tick.day_length` (one
+   game day per real day) world time is real UTC time, so to see football
+   soon, **compress the scale** by lowering `tick.day_length`.
 
 ```bash
 # 1. launch
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/status \
   -H 'Content-Type: application/json' -d '{"status":"active"}'
 
-# 2. accelerate the cadence (takes effect on the next scheduler poll, ~15s)
+# 2. compress the world clock, e.g. one game day per real minute
+#    (takes effect on the next scheduler poll, ~15s)
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
-  -H 'Content-Type: application/json' -d '{"key":"tick.daily_cadence","value":"* * * * *"}'
+  -H 'Content-Type: application/json' -d '{"key":"tick.day_length","value":60}'
 
 # 3. retune the day-derived week/month boundaries, if desired (both optional)
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
@@ -485,9 +489,11 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/c
   -H 'Content-Type: application/json' -d '{"key":"calendar.days_per_month","value":30}'
 ```
 
-Since IM02 the world clock is a **single daily cadence**: every daily tick
-advances `current_day` by one, and the weekly/monthly passes fire on the day
-counter's boundaries, not their own cron jobs.
+Match kickoffs follow the **continuous world clock** (IM16): `scheduled_at ≤
+worldNow`, where `worldNow = epoch + (realNow − epoch) × 86400 / day_length`.
+Each daily `WORLD_TICK` rolls `current_day` toward the clock's day target in
+bounded passes (≤7 game-days per fire), and the weekly/monthly passes fire on
+the day counter's boundaries, not their own cron jobs.
 
 - **Weekly** (every `calendar.days_per_week` days, default 7): S05-01 training
   (plan archetypes take effect from the next week boundary) and the player
@@ -604,7 +610,7 @@ curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/transfers/bids/<bid-id>/
 | `go run ./cmd/touchline serve` exits immediately | `JWT_SECRET` unset | `export JWT_SECRET=…` (set in Step 1) |
 | Scheduler fires no ticks | world not `active`/`open_beta` | Launch via Step 8 (playable worlds only) |
 | Cadence change "does nothing" | next resample is up to 15s away | Wait one `SCHEDULER_POLL_INTERVAL`; `tick.match_cadence` is deliberately ignored by the world clock (`OPD-17`) |
-| Matches never start | no season started, or daily tick not firing | Run `POST /api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season` (Step 7); set `tick.daily_cadence=* * * * *`; fixtures are day-gated by the season reference date |
+| Matches never start | no season started, or the world clock hasn't reached `scheduled_at` | Run `POST /api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season` (Step 7); compress `tick.day_length` (kickoffs are time-gated on the world clock) |
 
 ---
 
@@ -635,7 +641,7 @@ until curl -s -c /tmp/jar -b /tmp/jar localhost:8080/api/admin/worlds/$WORLD_ID/
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/status \
   -H 'Content-Type: application/json' -d '{"status":"active"}'
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/config \
-  -H 'Content-Type: application/json' -d '{"key":"tick.daily_cadence","value":"* * * * *"}'
+  -H 'Content-Type: application/json' -d '{"key":"tick.day_length","value":60}'
 # then start season #1, per league (Step 7)
 curl -c /tmp/jar -b /tmp/jar -X POST localhost:8080/api/admin/worlds/$WORLD_ID/leagues/$LEAGUE_ID/season
 # optional: a domestic cup alongside it (Step 7a, IM04)
