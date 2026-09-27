@@ -162,12 +162,12 @@ onMounted(() => init())
                     </div>
                   </div>
                 </div>
-                <div v-else class="flex flex-col items-center gap-2">
+                <nuxt-link :to="`/play/matches/${club.game.fixture.id}`" v-else class="flex flex-col items-center gap-2">
                   <span class="heading heading--medium text-void-400">-</span>
                   <div class="pill pill--live flex items-center gap-2">
                     <div class="h-2 w-2 bg-live-500 rounded-full" /> 78'
                   </div>
-                </div>
+                </nuxt-link>
                 <div class="flex items-end gap-2">
                   <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
                   <h3 class="heading"
