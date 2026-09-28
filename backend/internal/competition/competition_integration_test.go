@@ -59,6 +59,19 @@ func twoTierLeague(t *testing.T, svc *Service, countryID uuid.UUID) (*League, *L
 	return premier, champ
 }
 
+// optOutStaggered pins a competition's scheduling_rules->'staggered' to false
+// so a test exercises the legacy single-day, single-kickoff calendars instead
+// of the IM22 staggered default (multi-day rounds, per-tie kickoff slots).
+func optOutStaggered(t *testing.T, pool *pgxpool.Pool, competitionID uuid.UUID) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE competition.competition_rules
+		SET scheduling_rules = COALESCE(scheduling_rules, '{}'::jsonb) || '{"staggered": false}'::jsonb
+		WHERE competition_id = $1`, competitionID); err != nil {
+		t.Fatalf("opt out of staggered scheduling: %v", err)
+	}
+}
+
 func TestSeedWorld(t *testing.T) {
 	pool, worldID, countryID := seedWorld(t)
 	ctx := context.Background()
@@ -317,6 +330,8 @@ func TestFixturePacing(t *testing.T) {
 	}
 
 	// Premier: default pacing (3 matchdays per 7 game-days, kickoffs 15/18/20).
+	// Opted out of IM22 staggering so the legacy day-map calendar is pinned.
+	optOutStaggered(t, pool, premier.ID)
 	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
 		t.Fatalf("start premier: %v", err)
 	}
@@ -328,7 +343,7 @@ func TestFixturePacing(t *testing.T) {
 	// Championship: per-league override — 4 matchdays per week at 16:00/20:00.
 	if _, err := pool.Exec(ctx, `
 		UPDATE competition.competition_rules
-		SET scheduling_rules = '{"matchdays_per_week": 4, "kickoff_hours": [16, 20]}'
+		SET scheduling_rules = '{"matchdays_per_week": 4, "kickoff_hours": [16, 20], "staggered": false}'
 		WHERE competition_id = $1`, champ.ID); err != nil {
 		t.Fatalf("override champ pacing: %v", err)
 	}
@@ -356,6 +371,9 @@ func TestFixturePacingWorldCalendarFallback(t *testing.T) {
 	if err := worldSvc.SetConfig(ctx, worldID, "calendar.days_per_week", 5); err != nil {
 		t.Fatalf("set calendar.days_per_week: %v", err)
 	}
+	// Staggering opted out so days_per_week (a legacy-path parameter) drives
+	// the day map; the weekdays default would otherwise take over.
+	optOutStaggered(t, pool, premier.ID)
 	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
 		t.Fatalf("start premier: %v", err)
 	}
@@ -373,6 +391,9 @@ func TestSeasonCalendar(t *testing.T) {
 	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	// Opted out of the staggered default: this read-model test pins the legacy
+	// single-day week grouping and matchday day offsets.
+	optOutStaggered(t, pool, premier.ID)
 	seg, err := svc.StartSeason(ctx, worldID, premier.ID)
 	if err != nil {
 		t.Fatalf("start premier: %v", err)
@@ -893,6 +914,10 @@ func TestWeekdayPacingAndRePace(t *testing.T) {
 	if !res.CalendarUpdated {
 		t.Fatal("country scheduling must report an update")
 	}
+	// This test pins the single-round-one-back-to-back calendar and the
+	// re-pacing mechanics; the IM22 staggered multi-day default is opted out so
+	// the single-day assertions keep holding.
+	optOutStaggered(t, pool, premier.ID)
 
 	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
 		t.Fatalf("start premier: %v", err)
@@ -959,6 +984,9 @@ func TestCupCalendarAnchoredToLeagueEnd(t *testing.T) {
 	if _, err := svc.UpdateCountryScheduling(ctx, worldID, countryID, weekend); err != nil {
 		t.Fatalf("set country weekdays: %v", err)
 	}
+	// Single-day calendars so the anchored no-collision rule stays decidable;
+	// staggered (IM22) cup rounds would intentionally share the weekend days.
+	optOutStaggered(t, pool, premier.ID)
 	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
 		t.Fatalf("start premier: %v", err)
 	}
@@ -973,6 +1001,7 @@ func TestCupCalendarAnchoredToLeagueEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create cup: %v", err)
 	}
+	optOutStaggered(t, pool, cup.ID)
 	if _, err := svc.StartCupCampaign(ctx, worldID, countryID, cup.ID); err != nil {
 		t.Fatalf("start campaign: %v", err)
 	}
@@ -1481,5 +1510,316 @@ func TestSetCupFinalDateOverrideAndClear(t *testing.T) {
 	}
 	if afterStories <= beforeStories {
 		t.Fatalf("expected a scheduling story per moved final (was %d, now %d)", beforeStories, afterStories)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// IM22 staggered kickoffs
+// ---------------------------------------------------------------------------
+
+// launchOn pins a world's launched_at to a fixed calendar day so the track
+// weekday-walk assertions are deterministic regardless of the real clock.
+func launchOn(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID, day string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE world.worlds SET launched_at = $2::timestamptz WHERE id = $1`,
+		worldID, day+"T00:00:00Z"); err != nil {
+		t.Fatalf("pin launched_at: %v", err)
+	}
+}
+
+// assertRoundGaps enforces the two-day rest floor across combined fixtures of
+// consecutive rounds: every later round's earliest kickoff is >= 2 game-days
+// after the earlier round's latest kickoff.
+func assertRoundGaps(t *testing.T, pool *pgxpool.Pool, competitionID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	type bounds struct {
+		min, max time.Time
+	}
+	days := map[int]bounds{}
+	rows, err := pool.Query(ctx, `
+		SELECT matchday, MIN(scheduled_at)::date, MAX(scheduled_at)::date
+		FROM match.fixtures WHERE competition_id = $1 AND status <> 'cancelled'
+		GROUP BY matchday ORDER BY matchday`, competitionID)
+	if err != nil {
+		t.Fatalf("query round bounds: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var md int
+		var lo, hi time.Time
+		if err := rows.Scan(&md, &lo, &hi); err != nil {
+			t.Fatalf("scan round bounds: %v", err)
+		}
+		days[md] = bounds{min: lo, max: hi}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate round bounds: %v", err)
+	}
+	for md := 2; md <= len(days); md++ {
+		prev, cur := days[md-1], days[md]
+		if daysBetween(prev.max, cur.min) < 2 {
+			t.Fatalf("rounds %d/%d only %d days apart: %s -> %s",
+				md-1, md, daysBetween(prev.max, cur.min), prev.max.Format("2006-01-02"), cur.min.Format("2006-01-02"))
+		}
+	}
+}
+
+// TestStaggeredDefaultCalendar pins the IM22 default calendar for an
+// unconfigured league (the built-in Fri/Sat/Sun/Mon weekday set): multi-day
+// round anchors, day/hour pools, and the single-evening season-final matchday.
+func TestStaggeredDefaultCalendar(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	launchOn(t, pool, worldID, "2026-06-01") // Monday
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+
+	// Round anchors follow the weekday walk off Monday 6/1: Fri 4, Sun 6,
+	// Fri 11, Sun 13, Fri 18, and the final matchday on the next allowed
+	// weekday (Sun 20).
+	assertPacedDays(t, pool, premier.ID, worldID, []int{4, 6, 11, 13, 18, 20})
+	// Every kickoff hour comes from the day/evening pools.
+	assertKickoffHours(t, pool, premier.ID, []int{12, 15, 17, 18, 20, 23})
+	assertRoundGaps(t, pool, premier.ID)
+
+	// The season-final matchday kicks all of its ties on one evening: a single
+	// distinct scheduled_at at the final hour (20:00).
+	var md6Distinct int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT scheduled_at) FROM match.fixtures
+		WHERE competition_id = $1 AND matchday = 6`, premier.ID).Scan(&md6Distinct); err != nil {
+		t.Fatalf("count final matchday distinct kickoffs: %v", err)
+	}
+	if md6Distinct != 1 {
+		t.Fatalf("final matchday has %d distinct kickoffs, want 1 (one evening)", md6Distinct)
+	}
+	var finalHour int
+	if err := pool.QueryRow(ctx, `
+		SELECT EXTRACT(HOUR FROM MIN(scheduled_at))::int FROM match.fixtures
+		WHERE competition_id = $1 AND matchday = 6`, premier.ID).Scan(&finalHour); err != nil {
+		t.Fatalf("final matchday hour: %v", err)
+	}
+	if finalHour != DefaultFinalKickoffHour {
+		t.Fatalf("final matchday hour = %d, want %d", finalHour, DefaultFinalKickoffHour)
+	}
+}
+
+// TestStaggeredRoundSpansDays proves a bigger round stretches across allowed
+// weekdays (one fixture per hour slot) while the season-final matchday still
+// collapses to a single evening.
+func TestStaggeredRoundSpansDays(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	big, err := svc.CreateLeague(ctx, LeagueParams{CountryID: countryID, Name: "Big", Tier: 3, TeamCount: 8})
+	if err != nil {
+		t.Fatalf("create big league: %v", err)
+	}
+	launchOn(t, pool, worldID, "2026-06-01")
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Lean pools (2 day + 1 evening hour) so a 4-tie round outgrows day 1.
+	if _, err := pool.Exec(ctx, `
+		UPDATE competition.competition_rules
+		SET scheduling_rules = '{"human_kickoff_hours": [18], "ai_kickoff_hours": [12, 15]}'
+		WHERE competition_id = $1`, big.ID); err != nil {
+		t.Fatalf("set lean pools: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, big.ID); err != nil {
+		t.Fatalf("start big: %v", err)
+	}
+
+	// Round 1 anchor (Fri 6/5) holds 12:00 + 15:00; the 3rd and 4th ties spill
+	// to Saturday — so the round spans two days and no hour slot repeats.
+	var round1Dates, round1Slots int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT scheduled_at::date), COUNT(DISTINCT scheduled_at)
+		FROM match.fixtures WHERE competition_id = $1 AND matchday = 1`, big.ID).
+		Scan(&round1Dates, &round1Slots); err != nil {
+		t.Fatalf("round 1 spread: %v", err)
+	}
+	if round1Dates != 2 {
+		t.Fatalf("round 1 spans %d days, want 2", round1Dates)
+	}
+	if round1Slots != 4 {
+		t.Fatalf("round 1 distinct kickoff slots = %d, want 4 (one per fixture)", round1Slots)
+	}
+	var firstDay time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT MIN(scheduled_at)::date FROM match.fixtures
+		WHERE competition_id = $1 AND matchday = 1`, big.ID).Scan(&firstDay); err != nil {
+		t.Fatalf("round 1 first day: %v", err)
+	}
+	if !firstDay.Equal(mustParseDay(t, "2026-06-05")) {
+		t.Fatalf("round 1 starts %s, want the anchor day 2026-06-05", firstDay.Format("2006-01-02"))
+	}
+	assertRoundGaps(t, pool, big.ID)
+
+	// The final matchday (14) plays every tie on the same evening.
+	var finalDistinct, finalHour int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT scheduled_at), EXTRACT(HOUR FROM MIN(scheduled_at))::int
+		FROM match.fixtures WHERE competition_id = $1 AND matchday = 14`, big.ID).
+		Scan(&finalDistinct, &finalHour); err != nil {
+		t.Fatalf("final round spread: %v", err)
+	}
+	if finalDistinct != 1 || finalHour != DefaultFinalKickoffHour {
+		t.Fatalf("final matchday distinct=%d hour=%d, want 1 at %d",
+			finalDistinct, finalHour, DefaultFinalKickoffHour)
+	}
+}
+
+// TestStaggeredRePaceReproducesSpread is the determinism contract of the
+// staggered assigner: re-pacing a pristine season onto the same weekdays
+// reproduces every kickoff slot exactly, moving nothing.
+func TestStaggeredRePaceReproducesSpread(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	launchOn(t, pool, worldID, "2026-06-01")
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+	before := kickoffSnapshot(t, pool, premier.ID)
+
+	rp, err := svc.UpdateLeagueScheduling(ctx, premier.ID, DefaultWeekdays)
+	if err != nil {
+		t.Fatalf("re-pace: %v", err)
+	}
+	if rp.MatchdaysRePaced != 0 || rp.FixturesMoved != 0 {
+		t.Fatalf("re-pace moved %d matchdays / %d fixtures, want no-op on identical weekdays: %+v",
+			rp.MatchdaysRePaced, rp.FixturesMoved, rp)
+	}
+	after := kickoffSnapshot(t, pool, premier.ID)
+	for key, at := range before {
+		if got := after[key]; !got.Equal(at) {
+			t.Fatalf("tie %s drifted across a no-op re-pace: %v -> %v", key, at, got)
+		}
+	}
+}
+
+// kickoffSnapshot maps "home|away" to a fixture's kickoff time for a league.
+func kickoffSnapshot(t *testing.T, pool *pgxpool.Pool, competitionID uuid.UUID) map[string]time.Time {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `
+		SELECT home_club_id, away_club_id, scheduled_at
+		FROM match.fixtures WHERE competition_id = $1`, competitionID)
+	if err != nil {
+		t.Fatalf("query kickoff snapshot: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var home, away uuid.UUID
+		var at time.Time
+		if err := rows.Scan(&home, &away, &at); err != nil {
+			t.Fatalf("scan kickoff snapshot: %v", err)
+		}
+		out[home.String()+"|"+away.String()] = at
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate kickoff snapshot: %v", err)
+	}
+	return out
+}
+
+func mustParseDay(t *testing.T, day string) time.Time {
+	t.Helper()
+	d, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		t.Fatalf("parse day %s: %v", day, err)
+	}
+	return d
+}
+
+// TestStaggeredOptOutKeepsSingleDay covers the single-day degenerate: a league
+// with staggered=false plays one whole round per day (no per-tie spread, no
+// cap slots), even when its weekday set has multiple entries.
+func TestStaggeredOptOutKeepsSingleDay(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+	if _, err := svc.SeedWorld(ctx, worldID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	optOutStaggered(t, pool, premier.ID)
+	if _, err := svc.UpdateLeagueScheduling(ctx, premier.ID, []int{5, 6, 7}); err != nil {
+		t.Fatalf("set weekday set: %v", err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
+		t.Fatalf("start premier: %v", err)
+	}
+	assertSingleDayPerMatchday(t, pool, premier.ID)
+	assertWeekdayInvariant(t, pool, premier.ID, []int{5, 6, 7})
+}
+
+// TestScheduleParamsResolvesIM22DefaultsAndOverrides asserts the compiled
+// defaults of an unconfigured competition and that every IM22 knob is
+// overridable per competition.
+func TestScheduleParamsResolvesIM22DefaultsAndOverrides(t *testing.T) {
+	pool, worldID, countryID := seedWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil)
+	premier, _ := twoTierLeague(t, svc, countryID)
+
+	p, err := svc.scheduleParams(ctx, pool, premier.ID, worldID)
+	if err != nil {
+		t.Fatalf("resolve defaults: %v", err)
+	}
+	if !p.staggered {
+		t.Fatalf("staggered = false, want the IM22 default true")
+	}
+	if len(p.allowedWeekdays) != 4 || !containsWeekday(p.allowedWeekdays, 5) || !containsWeekday(p.allowedWeekdays, 7) {
+		t.Fatalf("allowed weekdays = %v, want the built-in %v default", p.allowedWeekdays, DefaultWeekdays)
+	}
+	if len(p.humanHours) != 2 || len(p.aiHours) != 4 {
+		t.Fatalf("hour pools = %v / %v, want defaults %v / %v", p.humanHours, p.aiHours, DefaultHumanKickoffHours, DefaultAIKickoffHours)
+	}
+	if p.maxSimultaneous != DefaultMaxSimultaneous || p.finalKickoffHour != DefaultFinalKickoffHour {
+		t.Fatalf("cap = %d final hour = %d, want %d / %d",
+			p.maxSimultaneous, p.finalKickoffHour, DefaultMaxSimultaneous, DefaultFinalKickoffHour)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE competition.competition_rules
+		SET scheduling_rules = '{
+			"staggered": false,
+			"max_simultaneous_matches": 5,
+			"final_kickoff_hour": 18,
+			"human_kickoff_hours": [19, 21],
+			"ai_kickoff_hours": [9, 11],
+			"allowed_weekdays": [1, 2, 3]
+		}' WHERE competition_id = $1`, premier.ID); err != nil {
+		t.Fatalf("set overrides: %v", err)
+	}
+	p2, err := svc.scheduleParams(ctx, pool, premier.ID, worldID)
+	if err != nil {
+		t.Fatalf("resolve overrides: %v", err)
+	}
+	if p2.staggered {
+		t.Fatalf("staggered opt-out ignored")
+	}
+	if len(p2.allowedWeekdays) != 3 || !containsWeekday(p2.allowedWeekdays, 3) {
+		t.Fatalf("overridden weekdays = %v, want [1 2 3]", p2.allowedWeekdays)
+	}
+	if p2.maxSimultaneous != 5 || p2.finalKickoffHour != 18 {
+		t.Fatalf("overridden cap/final = %d/%d, want 5/18", p2.maxSimultaneous, p2.finalKickoffHour)
+	}
+	if len(p2.humanHours) != 2 || p2.humanHours[0] != 19 || len(p2.aiHours) != 2 || p2.aiHours[0] != 9 {
+		t.Fatalf("overridden pools = %v / %v, want [19 21] / [9 11]", p2.humanHours, p2.aiHours)
 	}
 }

@@ -261,6 +261,28 @@ const (
 // a season while staying stable for replay.
 var DefaultKickoffHours = []int{15, 18, 20}
 
+// Staggered scheduling defaults (IM22): a round spreads its fixtures across
+// its allowed weekdays; fixtures involving a human-managed club (club.clubs
+// is_ai_controlled = false) kick off in the evening pool, AI-only fixtures
+// scatter through the day including a late slot. All three are overridable per
+// league/cup via competition_rules.scheduling_rules.
+var (
+	DefaultHumanKickoffHours = []int{18, 20}
+	DefaultAIKickoffHours    = []int{12, 15, 17, 23}
+	DefaultWeekdays          = []int{5, 6, 7, 1} // Fri, Sat, Sun, Mon
+)
+
+// DefaultMaxSimultaneous caps how many fixtures of one staggered competition
+// can be live at the same time; rounds pack kickoff slots so no slot exceeds
+// it. Final matchdays (all fixtures one evening) and single-day rounds are
+// exempt (they kick the whole round at once).
+const DefaultMaxSimultaneous = 3
+
+// DefaultFinalKickoffHour is the evening slot the season's final matchday
+// kicks all of its fixtures at (UTC), so the title race is decided on one
+// night. Overridable per league via scheduling_rules->>'final_kickoff_hour'.
+const DefaultFinalKickoffHour = 20
+
 // Service orchestrates competition administration, seeding, standings, and
 // season rollover.
 type Service struct {

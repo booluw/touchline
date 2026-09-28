@@ -980,18 +980,57 @@ func (s *Service) materializeRound(ctx context.Context, tx pgx.Tx, worldID, cupI
 	// Cup rounds are their own matchday; with the one-round-per-week default
 	// each round occupies a fresh game day. When the campaign plan carries an
 	// IM05 anchored slot (planCupCalendar) that wins; otherwise the legacy
-	// weekly formula applies.
+	// weekly formula applies. Staggered cups (IM22, default with 2+ allowed
+	// weekdays) spread the round's ties across those weekdays around the same
+	// anchor day; the final rule (whole round on one evening) is leagues only.
 	kickoff := kickoffHour(seed, cupID, p.kickoffHours, plan.Round)
 	day := scheduledAtFromDay(worldRef, plan.Round, p.daysPerWeek, p.matchdaysPerWeek, kickoff)
 	if plan.Date != nil {
 		day = kickOff(daysTruncate(*plan.Date), kickoff)
 	}
-	for _, pair := range pairs {
+
+	staggered := p.staggered && len(p.allowedWeekdays) >= 2
+	if staggered && !isAllowedWeekday(daysTruncate(day), p.allowedWeekdays) {
+		day = kickOff(nextAllowedWeekday(daysTruncate(day), p.allowedWeekdays), kickoff)
+	}
+
+	var kicks []time.Time
+	if staggered {
+		human := map[uuid.UUID]bool{}
+		rows, err := tx.Query(ctx,
+			`SELECT id, is_ai_controlled FROM club.clubs WHERE id = ANY($1::uuid[])`, participants)
+		if err != nil {
+			return fmt.Errorf("load cup club control flags: %w", err)
+		}
+		for rows.Next() {
+			var id uuid.UUID
+			var ai bool
+			if err := rows.Scan(&id, &ai); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan cup club control flags: %w", err)
+			}
+			human[id] = !ai
+		}
+		rows.Close()
+		ties := make([]roundFixture, 0, len(pairs))
+		for _, pair := range pairs {
+			ties = append(ties, roundFixture{
+				home: pair[0], away: pair[1],
+				human: human[pair[0]] || human[pair[1]],
+			})
+		}
+		kicks = assembleRoundKickoffs(p, ties, daysTruncate(day))
+	}
+	for i, pair := range pairs {
+		fixture := day
+		if staggered {
+			fixture = kicks[i]
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO match.fixtures
 				(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
 			VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
-			worldID, cupID, pair[0], pair[1], plan.Round, day); err != nil {
+			worldID, cupID, pair[0], pair[1], plan.Round, fixture); err != nil {
 			return fmt.Errorf("insert cup fixture round %d: %w", plan.Round, err)
 		}
 	}

@@ -65,6 +65,9 @@ func TestStartSeasonKickoffPinsMatchdayOne(t *testing.T) {
 	today := worldCurrentDay(t, pool, worldID)
 	kickoff := today.AddDate(0, 0, 3)
 
+	// Opt out of the staggered default (IM22) so an arbitrary pin date needs
+	// no allowed-weekday match; the exact-pinning contract is what's tested.
+	optOutStaggered(t, pool, premier.ID)
 	season, err := svc.StartSeasonKickoff(ctx, worldID, premier.ID, &kickoff)
 	if err != nil {
 		t.Fatalf("start season on %v: %v", kickoff, err)
@@ -93,7 +96,7 @@ func TestStartSeasonKickoffPinsMatchdayOne(t *testing.T) {
 	}
 }
 
-func TestStartSeasonDefaultKicksOffNextDay(t *testing.T) {
+func TestStartSeasonDefaultKicksOffNextAllowedWeekday(t *testing.T) {
 	pool, worldID, countryID := seedWorld(t)
 	ctx := context.Background()
 	svc := NewService(pool, nil)
@@ -106,8 +109,12 @@ func TestStartSeasonDefaultKicksOffNextDay(t *testing.T) {
 	if _, err := svc.StartSeason(ctx, worldID, premier.ID); err != nil {
 		t.Fatalf("start season: %v", err)
 	}
-	if got := testimonyMatchdayOne(t, pool, premier.ID, worldID); !got.Equal(today.AddDate(0, 0, 1)) {
-		t.Fatalf("matchday 1 = %v, want the world's current date + 1 (%v)", got, today.AddDate(0, 0, 1))
+	// IM22 default: an unconfigured league resolves the built-in weekday set
+	// (DefaultWeekdays) and matchday 1 is its first allowed weekday after
+	// today, not literally tomorrow.
+	want := nextAllowedWeekday(today.AddDate(0, 0, 1), DefaultWeekdays)
+	if got := testimonyMatchdayOne(t, pool, premier.ID, worldID); !got.Equal(want) {
+		t.Fatalf("matchday 1 = %v, want %v (first partner weekday after today)", got, want)
 	}
 	if n := countAnnouncements(t, pool, worldID, countryID); n != 2 {
 		t.Fatalf("announcement stories = %d, want 2 for the default kickoff", n)

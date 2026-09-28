@@ -148,10 +148,10 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 
 	// Season 1: 6 matchdays x 2 leagues x 2 fixtures, each kicked off once the
 	// world clock matures its scheduled_at and paced to completion in real
-	// time. The clock also advances during pacing, so a pass may mature more
-	// than one matchday at a time; the invariants below (whole matchdays only,
-	// and every kicked fixture completed with nothing double-kicked) hold no
-	// matter how the batches align.
+	// time. IM22 staggering gives each fixture its own kickoff slot (the two
+	// ties of a league round mature a couple of game-hours apart), so passes
+	// carry whatever slice is due — the invariants below (every kicked fixture
+	// completed, nothing double-kicked) hold no matter how the batches align.
 	kicked := 0
 	for pass := 0; kicked < 24; pass++ {
 		waitForNextDue(t, pool, worldID)
@@ -160,17 +160,14 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 			t.Fatalf("pass %d run: %v", pass, err)
 		}
 		if sum.Kicked == 0 {
-			t.Fatalf("pass %d: clock matured a matchday but nothing kicked", pass)
-		}
-		if sum.Kicked%4 != 0 {
-			t.Fatalf("pass %d: kicked %d fixtures, want whole matchdays of 4", pass, sum.Kicked)
+			t.Fatalf("pass %d: clock matured a fixture but nothing kicked", pass)
 		}
 
 		if pass == 0 {
-			// No-overlap gate (OPD-21): a second delivery while a match is
-			// still live must skip the next due matchday, never double-kick.
-			// Make matchday 2 due (extra scheduled fixture dated the world's
-			// current game-day), then deliver again without re-waiting.
+			// Round-order gate (IM22): a fixture of a later matchday must not
+			// kick while an earlier round of the same competition is still
+			// live. Make matchday 2 due (extra scheduled fixture dated the
+			// world's current game-day) and re-deliver without re-waiting.
 			var extra uuid.UUID
 			if err := pool.QueryRow(ctx, `
 				INSERT INTO match.fixtures (world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
@@ -186,7 +183,7 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 				t.Fatalf("pass 0 overlap run: %v", err)
 			}
 			if again.Matchdays != 0 || again.Kicked != 0 || again.Skipped != 1 {
-				t.Fatalf("overlap matchdays=%d kicked=%d skipped=%d, want 0/0/1", again.Matchdays, again.Kicked, again.Skipped)
+				t.Fatalf("overlap matchdays=%d kicked=%d skipped=%d, want 0/0/1 (round-order gate)", again.Matchdays, again.Kicked, again.Skipped)
 			}
 			if _, err := pool.Exec(ctx, `DELETE FROM match.fixtures WHERE id = $1`, extra); err != nil {
 				t.Fatalf("drop extra fixture: %v", err)
@@ -196,8 +193,11 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 				`SELECT COUNT(*) FROM match.fixtures WHERE world_id = $1 AND status = 'live'`, worldID).Scan(&live); err != nil {
 				t.Fatalf("count live: %v", err)
 			}
-			if live != 4 {
-				t.Fatalf("live fixtures after pass 0 = %d, want 4", live)
+			// Staggered rounds mature per fixture: the pass kicked each
+			// competition's first lane (2 leagues x their first tie), with the
+			// second lane maturing a few game-hours later.
+			if live != 2 && live != 4 {
+				t.Fatalf("live fixtures after pass 0 = %d, want the first staggered lane (2) or both lanes (4)", live)
 			}
 		}
 
@@ -270,20 +270,38 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 	}
 
 	// After the off-season gap the world clock matures season 2's first
-	// matchday: it activates on the day gate and kicks exactly its 4 fixtures.
+	// matchday: it activates on the day gate and kicks its due fixtures. With
+	// IM22 staggering each league's first lane (its 12:00 tie) matures ahead of
+	// the second (15:00), so the pass carries one or both lanes.
 	waitForNextDue(t, pool, worldID)
 	sum, err = runner.KickoffDue(ctx, worldID)
 	if err != nil {
 		t.Fatalf("season 2 run: %v", err)
 	}
-	if sum.Kicked != 4 {
-		t.Fatalf("season 2: kicked=%d, want 4", sum.Kicked)
+	if sum.Kicked != 2 && sum.Kicked != 4 {
+		t.Fatalf("season 2: kicked=%d, want the first staggered lane (2) or both lanes (4)", sum.Kicked)
 	}
+	s2kicked := sum.Kicked
 	if err := runner.RunLive(ctx, worldID); err != nil {
 		t.Fatalf("season 2 live: %v", err)
 	}
-	if got := countCompleted(); got != 28 {
-		t.Fatalf("completed = %d, want 28", got)
+
+	// The second lane of season 2's first matchday matures a few game-hours
+	// later; kick it and pace it out too so the season is actually playing.
+	waitForNextDue(t, pool, worldID)
+	sum, err = runner.KickoffDue(ctx, worldID)
+	if err != nil {
+		t.Fatalf("season 2 lane-2 run: %v", err)
+	}
+	s2kicked += sum.Kicked
+	if err := runner.RunLive(ctx, worldID); err != nil {
+		t.Fatalf("season 2 lane-2 live: %v", err)
+	}
+	if s2kicked != 4 {
+		t.Fatalf("season 2 matchday 1 kicked = %d, want all 4 fixtures", s2kicked)
+	}
+	if got := countCompleted(); got != 24+s2kicked {
+		t.Fatalf("completed = %d, want %d (season 1 + season 2 matchday 1)", got, 24+s2kicked)
 	}
 
 	// Season 2 now has standings and is playing.
@@ -305,7 +323,7 @@ func TestRunnerAdvancesMatchdaysAndRollsOver(t *testing.T) {
 		t.Fatalf("count MATCH_PLAYED: %v", err)
 	}
 	if playedEvents != 28 {
-		t.Fatalf("MATCH_PLAYED events = %d, want 28", playedEvents)
+		t.Fatalf("MATCH_PLAYED events = %d, want %d", playedEvents, 24+s2kicked)
 	}
 }
 
@@ -506,5 +524,146 @@ func TestRunnerResumesStalledLiveMatch(t *testing.T) {
 	}
 	if err := runner.RunLive(ctx, worldID); err != nil {
 		t.Fatalf("idle run live: %v", err)
+	}
+}
+
+// insertDueFixtures plants n already-due fixtures for toComp at a matchday,
+// borrowing club pairings from fromComp's own scheduled fixtures so the pair
+// never collides with toComp's real calendar. The injected fixtures are due now
+// (kickoff moment already passed), so a KickoffDue pass admits them without
+// waiting for the world clock.
+func insertDueFixtures(t *testing.T, pool *pgxpool.Pool, worldID, fromComp, toComp uuid.UUID, matchday, n int, at time.Time) int {
+	t.Helper()
+	tag, err := pool.Exec(context.Background(), `
+		INSERT INTO match.fixtures (world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
+		SELECT f.world_id, $2, f.home_club_id, f.away_club_id, $3, $4, 'scheduled'
+		FROM match.fixtures f
+		WHERE f.world_id = $1 AND f.competition_id = $5 AND f.status = 'scheduled'
+		LIMIT $6`,
+		worldID, toComp, matchday, at, fromComp, n)
+	if err != nil {
+		t.Fatalf("insert due fixtures: %v", err)
+	}
+	return int(tag.RowsAffected())
+}
+
+// leagueIDs returns the world's two competition ids in creation order.
+func leagueIDs(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) (first, second uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := pool.Query(ctx,
+		`SELECT id FROM competition.competitions WHERE world_id = $1 ORDER BY name, id`, worldID)
+	if err != nil {
+		t.Fatalf("load league ids: %v", err)
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan league id: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate league ids: %v", err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("found %d competitions, want 2", len(ids))
+	}
+	return ids[0], ids[1]
+}
+
+// optOutStaggered pins a competition's scheduling_rules->'staggered' to false
+// so a test exercises the single-weekday kickoff path instead of the IM22
+// staggered default.
+func optOutStaggered(t *testing.T, pool *pgxpool.Pool, competitionID uuid.UUID) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE competition.competition_rules
+		SET scheduling_rules = COALESCE(scheduling_rules, '{}'::jsonb) || '{"staggered": false}'::jsonb
+		WHERE competition_id = $1`, competitionID); err != nil {
+		t.Fatalf("opt out of staggered scheduling: %v", err)
+	}
+}
+
+// TestRunnerCapOnlyForStaggered pins the IM22 cap at kickoff time: a staggered
+// competition (2+ allowed weekdays) never runs more than its
+// max_simultaneous_matches (default 3) of a round live at once, so the 4-th
+// due fixture is deferred; opt the same competition back to a single weekday
+// and the deferred fixture kicks immediately with no cap.
+func TestRunnerCapOnlyForStaggered(t *testing.T) {
+	pool, worldID, compSvc := runnerWorld(t)
+	ctx := context.Background()
+
+	matches := match.NewService(pool, nil, squad.NewStore(pool), form.NewStore(pool))
+	runner := NewRunner(pool, matches, compSvc)
+
+	first, second := leagueIDs(t, pool, worldID)
+	target, donor := second, first // Premier (staggered default) is the cap target
+	optOutStaggered(t, pool, donor)
+
+	dueAt := scaleNow(t, pool, worldID)
+	if n := insertDueFixtures(t, pool, worldID, donor, target, 5, 4, dueAt); n != 4 {
+		t.Fatalf("inserted %d due fixtures, want 4", n)
+	}
+
+	sum, err := runner.KickoffDue(ctx, worldID)
+	if err != nil {
+		t.Fatalf("cap run: %v", err)
+	}
+	if sum.Matchdays != 1 || sum.Kicked != 3 || sum.Skipped != 1 {
+		t.Fatalf("cap run matchdays=%d kicked=%d skipped=%d, want 1/3/1 (cap 3 of 4 due)", sum.Matchdays, sum.Kicked, sum.Skipped)
+	}
+	var live, stillScheduled int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE status = 'live'),
+		       COUNT(*) FILTER (WHERE status = 'scheduled')
+		FROM match.fixtures
+		WHERE world_id = $1 AND competition_id = $2 AND matchday = 5`,
+		worldID, target).Scan(&live, &stillScheduled); err != nil {
+		t.Fatalf("post-cap state: %v", err)
+	}
+	if live != 3 || stillScheduled != 1 {
+		t.Fatalf("after cap: live=%d still_scheduled=%d, want 3 live and 1 deferred", live, stillScheduled)
+	}
+
+	// Opt the target competition out of staggering: the deferred fixture now
+	// kicks — single-day rounds cap at nothing.
+	optOutStaggered(t, pool, target)
+	sum, err = runner.KickoffDue(ctx, worldID)
+	if err != nil {
+		t.Fatalf("uncapped run: %v", err)
+	}
+	if sum.Matchdays != 1 || sum.Kicked != 1 || sum.Skipped != 0 {
+		t.Fatalf("uncapped run matchdays=%d kicked=%d skipped=%d, want 1/1/0", sum.Matchdays, sum.Kicked, sum.Skipped)
+	}
+}
+
+// TestRunnerFinalRoundBypassesCap: the season-final matchday of a staggered
+// league is excluded from the cap — every tie of the final round kicks at once
+// (StaggeredCap returns 0 when the open matchday is the competition's last).
+func TestRunnerFinalRoundBypassesCap(t *testing.T) {
+	pool, worldID, compSvc := runnerWorld(t)
+	ctx := context.Background()
+
+	matches := match.NewService(pool, nil, squad.NewStore(pool), form.NewStore(pool))
+	runner := NewRunner(pool, matches, compSvc)
+
+	first, second := leagueIDs(t, pool, worldID)
+	target, donor := second, first
+
+	dueAt := scaleNow(t, pool, worldID)
+	if n := insertDueFixtures(t, pool, worldID, donor, target, 6, 4, dueAt); n != 4 {
+		t.Fatalf("inserted %d due fixtures, want 4", n)
+	}
+
+	sum, err := runner.KickoffDue(ctx, worldID)
+	if err != nil {
+		t.Fatalf("final run: %v", err)
+	}
+	if sum.Matchdays != 1 || sum.Kicked != 4 || sum.Skipped != 0 {
+		t.Fatalf("final run matchdays=%d kicked=%d skipped=%d, want 1/4/0 (final round bypasses cap)",
+			sum.Matchdays, sum.Kicked, sum.Skipped)
 	}
 }

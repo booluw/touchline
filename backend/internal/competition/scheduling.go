@@ -255,9 +255,12 @@ func (s *Service) requireCompetition(ctx context.Context, tx pgx.Tx, competition
 // unstarted matchday lands on the earliest allowed weekday at least two
 // game-days after the frozen horizon (or after the season anchor with none
 // frozen); each later one steps the same way off its predecessor. Matchday
-// order and the deterministic kickoff rotation are preserved. Returns the
-// number of matchdays whose date moved and how many fixture rows were
-// re-stamped. A league with no weekday set (unconfigured) is untouched.
+// order and the deterministic kickoff rotation are preserved; staggered
+// leagues (IM22) reproduce the per-tie multi-day kickoff spread and the
+// single-evening final matchday exactly as fresh materialization would.
+// Returns the number of matchdays whose date moved and how many fixture rows
+// were re-stamped. A league with no weekday set (unconfigured / opted out of
+// staggering) is untouched.
 func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID uuid.UUID) (int, int, error) {
 	p, err := s.scheduleParams(ctx, tx, leagueID, worldID)
 	if err != nil {
@@ -267,13 +270,18 @@ func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID
 		return 0, 0, nil // no weekday calendar to enforce
 	}
 
+	type tieInfo struct {
+		home    uuid.UUID
+		away    uuid.UUID
+		kickoff time.Time
+	}
 	type mdInfo struct {
-		dates  []time.Time
+		ties   []tieInfo
 		frozen bool
 		order  int
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT matchday, scheduled_at, status
+		SELECT matchday, home_club_id, away_club_id, scheduled_at, status
 		FROM match.fixtures
 		WHERE competition_id = $1 AND world_id = $2 AND status <> 'cancelled'
 		ORDER BY matchday, scheduled_at`, leagueID, worldID)
@@ -286,13 +294,16 @@ func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID
 	group := map[int]*mdInfo{}
 	horizon := 0
 	horizonDate := time.Time{}
+	clubs := map[uuid.UUID]bool{}
 	for rows.Next() {
 		var (
 			md      int
+			home    uuid.UUID
+			away    uuid.UUID
 			kickoff time.Time
 			status  string
 		)
-		if err := rows.Scan(&md, &kickoff, &status); err != nil {
+		if err := rows.Scan(&md, &home, &away, &kickoff, &status); err != nil {
 			return 0, 0, fmt.Errorf("repacing: scan fixture: %w", err)
 		}
 		info, ok := group[md]
@@ -300,7 +311,9 @@ func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID
 			info = &mdInfo{order: md}
 			group[md] = info
 		}
-		info.dates = append(info.dates, kickoff)
+		info.ties = append(info.ties, tieInfo{home: home, away: away, kickoff: kickoff})
+		clubs[home] = true
+		clubs[away] = true
 		if status == "live" || status == "completed" {
 			info.frozen = true
 		}
@@ -314,9 +327,9 @@ func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID
 	for md, info := range group {
 		if info.frozen && md > horizon {
 			horizon = md
-			for _, d := range info.dates {
-				if d.After(horizonDate) {
-					horizonDate = d
+			for _, t := range info.ties {
+				if t.kickoff.After(horizonDate) {
+					horizonDate = t.kickoff
 				}
 			}
 		}
@@ -333,6 +346,31 @@ func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID
 		Scan(&seed, &worldRef)
 	if worldErr != nil {
 		return 0, 0, fmt.Errorf("repacing: load world: %w", worldErr)
+	}
+
+	// Club control flags for the staggered evening/day pools (IM22).
+	staggered := p.staggered && len(p.allowedWeekdays) >= 2
+	human := map[uuid.UUID]bool{}
+	if staggered {
+		clubIDs := make([]uuid.UUID, 0, len(clubs))
+		for id := range clubs {
+			clubIDs = append(clubIDs, id)
+		}
+		crows, err := tx.Query(ctx,
+			`SELECT id, is_ai_controlled FROM club.clubs WHERE id = ANY($1::uuid[])`, clubIDs)
+		if err != nil {
+			return 0, 0, fmt.Errorf("repacing: load club control flags: %w", err)
+		}
+		for crows.Next() {
+			var id uuid.UUID
+			var ai bool
+			if err := crows.Scan(&id, &ai); err != nil {
+				crows.Close()
+				return 0, 0, fmt.Errorf("repacing: scan club control flags: %w", err)
+			}
+			human[id] = !ai
+		}
+		crows.Close()
 	}
 
 	last := daysTruncate(worldRef)
@@ -359,27 +397,72 @@ func (s *Service) repaceLeague(ctx context.Context, tx pgx.Tx, worldID, leagueID
 		} else {
 			start = nextAllowedWeekday(last.AddDate(0, 0, 2), p.allowedWeekdays)
 		}
-		last = start
-		day := kickOff(start, kickoffHour(seed, leagueID, p.kickoffHours, md))
+
+		// Single-day rounds and the season-final matchday get one kickoff at
+		// `start`; staggered rounds (IM22) reproduce the per-tie spread that
+		// fresh materialization assigned.
+		single := kickOff(start, p.finalKickoffHour)
+		last = daysTruncate(single)
+		byKey := map[string]time.Time{}
+		final := md == maxMD
+		if staggered && !final {
+			ties := make([]roundFixture, 0, len(info.ties))
+			for _, t := range info.ties {
+				ties = append(ties, roundFixture{home: t.home, away: t.away,
+					human: human[t.home] || human[t.away]})
+			}
+			kicks := assembleRoundKickoffs(p, ties, start)
+			for i, t := range ties {
+				byKey[fixtureKey(t.home, t.away)] = kicks[i]
+			}
+			last = roundLastDay(kicks)
+		} else if !final {
+			single = kickOff(start, kickoffHour(seed, leagueID, p.kickoffHours, md))
+			last = daysTruncate(single)
+		}
+
 		changed := false
-		for _, existing := range info.dates {
-			if !existing.Equal(day) {
+		for _, t := range info.ties {
+			want, ok := byKey[fixtureKey(t.home, t.away)]
+			if !ok {
+				want = single
+			}
+			if !t.kickoff.Equal(want) {
 				changed = true
-				break
 			}
 		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE match.fixtures SET scheduled_at = $3
-			WHERE competition_id = $1 AND world_id = $2 AND matchday = $4 AND status <> 'cancelled'`,
-			leagueID, worldID, day, md); err != nil {
-			return 0, 0, fmt.Errorf("repacing: restamp matchday %d: %w", md, err)
+
+		if staggered && !final {
+			for _, t := range info.ties {
+				if _, err := tx.Exec(ctx, `
+					UPDATE match.fixtures SET scheduled_at = $3
+					WHERE competition_id = $1 AND world_id = $2 AND matchday = $4
+					  AND home_club_id = $5 AND away_club_id = $6 AND status <> 'cancelled'`,
+					leagueID, worldID, byKey[fixtureKey(t.home, t.away)], md, t.home, t.away); err != nil {
+					return 0, 0, fmt.Errorf("repacing: restamp matchday %d: %w", md, err)
+				}
+			}
+		} else {
+			if _, err := tx.Exec(ctx, `
+				UPDATE match.fixtures SET scheduled_at = $3
+				WHERE competition_id = $1 AND world_id = $2 AND matchday = $4 AND status <> 'cancelled'`,
+				leagueID, worldID, single, md); err != nil {
+				return 0, 0, fmt.Errorf("repacing: restamp matchday %d: %w", md, err)
+			}
 		}
+
 		if changed {
 			matchdaysMoved++
-			fixturesMoved += len(info.dates)
+			fixturesMoved += len(info.ties)
 		}
 	}
 	return matchdaysMoved, fixturesMoved, nil
+}
+
+// fixtureKey pairs two club ids into a compound map key so per-tie kickoff
+// restamping can match rows regardless of read order.
+func fixtureKey(home, away uuid.UUID) string {
+	return home.String() + "|" + away.String()
 }
 
 // publishSchedulingNews records a calendar event and a country-scoped news

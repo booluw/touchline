@@ -39,10 +39,22 @@ async function init() {
 
     state.value.style = res.tactics.style
     state.value.formation = res.lineup.formation
-    slots.value = res.lineup.slots
+    slots.value = res.lineup.slots.map((s) => {
+      const player = res.squad.players.find((p) => p?.player?.id === s.player.id)
+
+      return {
+        ...s,
+        player: {
+          ...s.player,
+          display_name: player?.player?.name,
+          squad_number: player?.squad_number
+        }
+      }
+    })
 
     loading.value = "loaded"
-  } catch {
+  } catch (error) {
+    console.error(error)
     loading.value = "error"
   }
 }
@@ -113,7 +125,7 @@ onMounted(async () => {
           </div>
 
           <PitchView variant="half" :formation="tactics.formation" :slots :clickable="true"
-            @select="(e) => selectedSlot = e" />
+            @select="(e) => selectedSlot = e" :selected-slot />
           <div class="flex justify-end py-5">
             <button @click="saveClubLineup()" class="button button--primary">Save Lineup</button>
           </div>
@@ -142,8 +154,8 @@ onMounted(async () => {
               </div>
               <div class="heading">{{ player.position }}</div>
               <div class="heading text-center">{{ player.overall }}</div>
-              <div class="heading col-span-4 flex gap-1">
-                <div class="flex gap-1 items-center">
+              <div class="heading col-span-4 flex gap-1 justify-around">
+                <div v-if="player.position === 'GK'" class="flex gap-1 items-center">
                   <span class="heading heading--small">GK</span>{{ player.attributes.goalkeeping }}
                 </div>
                 <div class="flex gap-1 items-center">
@@ -158,15 +170,12 @@ onMounted(async () => {
                 <div class="flex gap-1 items-center">
                   <span class="heading heading--small">TECH</span>{{ player.attributes.technical }}
                 </div>
-                <div class="flex gap-1 items-center">
-                  <span class="heading heading--small">POS</span>{{ player.attributes.positional }}
-                </div>
               </div>
             </div>
           </div>
         </div>
         <div class="overflow-auto">
-          {{ slots[0] }}
+          <!-- {{ slots[0] }} -->
           <!-- {{ squad[0] }} -->
           <!-- {{ playersInLineup }} -->
         </div>

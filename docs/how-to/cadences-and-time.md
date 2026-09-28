@@ -236,3 +236,61 @@ FROM match.matches WHERE status = 'in_progress';
   match with `live …: fixture … kicked off …` and `live …: full time …`, and a
   resumed match logs `resuming … from minute N … live for …`, so a stalled loop
   is visible without running queries.
+
+## 8. Staggered kickoffs: a round is a spread of slots, not one moment (IM22)
+
+Since IM22 a competition round no longer shares one kickoff time by default.
+Each tie gets its own **kickoff slot** resolved from two per-competition hour
+pools — human-involving ties (a club with `club.clubs.is_ai_controlled =
+false` on either side) from `human_kickoff_hours`, default **18:00 / 20:00
+UTC**, and AI-only ties from `ai_kickoff_hours`, default **12:00 / 15:00 /
+17:00 / 23:00 UTC** — spread across the round's allowed weekdays.
+
+**When does a round span days?** When the competition resolves **≥ 2 allowed
+weekdays** (`scheduling_rules->'allowed_weekdays'`, the IM05 chain). The default
+for unconfigured competitions is the built-in set **{5, 6, 7, 1}** (Fri/Sat/Sun/
+Mon), so a normal league matchweek is a real multi-day spread like the European
+leagues. A single-weekday competition (or one opted out with
+`scheduling_rules->>'staggered' = 'false'`) keeps the legacy single-day
+calendars unchanged.
+
+**How the slots are chosen.** The round walk places round 1 on the first allowed
+weekday after the season anchor and each later round on the first allowed
+weekday ≥ 2 game-days after the previous round's last kickoff day. Within a
+round, ties sorted by `(home, away)` fill slots on those days — one tie per
+slot; a round too big for the first day's slots advances to the next allowed
+weekday, **within its own pool** (human ties stay in the evening slots, AI ties
+stay in the day slots). The 23:00 AI slot is the matchweek's "midnight kickoff"
+tail.
+
+**How many matches run at once.** `max_simultaneous_matches` (default 3) caps a
+_staggered_ competition's live fixtures per round at kickoff time: the worker
+admits the due round's earliest-scheduled ties up to the cap and defers the
+rest (`Summary.Skipped`) until some finish. The cap does **not** apply to
+single-day rounds, legacy pacing, or the season-final matchday — those kick
+their whole round at once. A competition also never has two rounds live at a
+time: before admitting a round, the runner checks the competition has no `live`
+fixture from an earlier matchday (round-order gate, replacing the old world-wide
+"any live match blocks everything" rule).
+
+**The season final plays together.** For leagues the final matchday is stamped
+on one day at `final_kickoff_hour` (default **20:00 UTC**) with every tie
+kicking simultaneously — the title race finishes at once even in a staggered
+league. Cup finals are not forced single-evening (cups have their own date
+policy).
+
+**Operational notes.** The intra-day poll (§3) matures each slot: a staggered
+round's later lanes kick off when their own `scheduled_at` passes, not on the
+matchday's first kickoff. Config keys live under
+`competition.competition_rules.scheduling_rules` JSONB (`staggered`,
+`human_kickoff_hours`, `ai_kickoff_hours`, `max_simultaneous_matches`,
+`final_kickoff_hour`); nothing else changed — advanced users who want the
+legacy rhythm set `"staggered": false`.
+
+How to see a competition's resolved settings (run from `psql`):
+
+```sql
+SELECT competition_id, scheduling_rules
+FROM competition.competition_rules
+WHERE competition_id = '<competition-id>';
+```

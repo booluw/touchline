@@ -200,6 +200,30 @@ func (s *Service) KickoffMatchday(ctx context.Context, worldID uuid.UUID, matchd
 	return out, nil
 }
 
+// KickoffFixtureIDs marks a specific subset of fixtures live — the staggered
+// slice of one competition/round the runner's per-competition cap admitted
+// (IM22). Same idempotent per-fixture semantics as KickoffMatchday; the caller
+// guarantees all ids share one competition and round so the round-order gate
+// holds by construction.
+func (s *Service) KickoffFixtureIDs(ctx context.Context, ids []uuid.UUID) ([]*LiveSession, error) {
+	out := make([]*LiveSession, 0, len(ids))
+	for _, id := range ids {
+		if s.absence != nil {
+			if err := s.absence.EnsureMatchInputs(ctx, id); err != nil {
+				return out, fmt.Errorf("kickoff fixture ids: absence inputs %s: %w", id, err)
+			}
+		}
+		sess, err := s.kickoffFixture(ctx, id)
+		if err != nil {
+			return out, err
+		}
+		if sess != nil {
+			out = append(out, sess)
+		}
+	}
+	return out, nil
+}
+
 // kickoffFixture freezes one fixture by id: marks it live, builds + persists
 // the simulation snapshot, and books home/away lineup warnings. The fixture
 // row is locked FOR UPDATE, so two concurrent kickoffs serialize and the

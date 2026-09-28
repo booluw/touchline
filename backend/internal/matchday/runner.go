@@ -10,10 +10,13 @@
 package matchday
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -60,50 +63,114 @@ type Summary struct {
 	WorldID   uuid.UUID
 	Matchdays int // distinct matchdays kicked off this pass
 	Kicked    int // fixtures newly kicked off this pass
-	Skipped   int // matchdays deferred because a match in the world is already live
+	Skipped   int // competition-round groups deferred (round still live, or staggered cap saturated)
 }
 
-// KickoffDue kicks off every matchday of a world whose kickoff date the world
-// clock has already passed: each scheduled fixture is frozen into a live match
-// (status 'live', snapshot persisted) awaiting the pacing goroutine. Idempotent:
-// on redelivery only fixtures still marked scheduled kick off again, and the
-// no-overlap gate defers a matchday while an earlier one is still live.
+// KickoffDue kicks off every due fixture of a world whose kickoff moment the
+// world clock has already passed: each scheduled fixture is frozen into a live
+// match (status 'live', snapshot persisted) awaiting the pacing goroutine.
+// Idempotent: on redelivery only fixtures still marked scheduled kick off
+// again. The world-wide no-overlap gate is replaced (IM22) by two
+// per-competition rules: the round-order gate (a competition's next round never
+// kicks while an earlier round still has live fixtures) and, for staggered
+// competitions (2+ allowed weekdays), a cap on how many of its fixtures may be
+// live at once (max_simultaneous_matches). Single-day rounds, legacy pacing and
+// the season-final matchday kick their whole round at once with no cap.
 func (r *Runner) KickoffDue(ctx context.Context, worldID uuid.UUID) (*Summary, error) {
 	asOf, err := r.worldNow(ctx, worldID)
 	if err != nil {
 		return nil, err
 	}
-	matchdays, err := r.dueMatchdays(ctx, worldID, asOf)
+	groups, err := r.dueFixtureGroups(ctx, worldID, asOf)
 	if err != nil {
 		return nil, err
 	}
 
 	sum := &Summary{WorldID: worldID}
-	if len(matchdays) == 0 {
+	if len(groups) == 0 {
 		return sum, nil
 	}
 
-	// No-overlap gate (OPD-21): a world with a match still live must not kick
-	// off the next matchday; the pacing goroutine re-runs KickoffDue after
-	// completion. Without this, live matches would pile up across matchdays.
-	live, err := r.worldHasLive(ctx, worldID)
-	if err != nil {
-		return sum, err
+	// Fold due fixtures into per-competition open rounds (a competition may
+	// appear once per matchday; its open round is its lowest due matchday).
+	byComp := map[uuid.UUID][]dueFixtureGroup{}
+	for _, g := range groups {
+		byComp[g.competitionID] = append(byComp[g.competitionID], g)
 	}
-	if live {
-		sum.Skipped = len(matchdays)
-		return sum, nil
+	compIDs := make([]uuid.UUID, 0, len(byComp))
+	for id := range byComp {
+		compIDs = append(compIDs, id)
 	}
+	sort.Slice(compIDs, func(a, b int) bool {
+		return bytes.Compare(compIDs[a][:], compIDs[b][:]) < 0
+	})
 
-	for _, md := range matchdays {
-		sessions, err := r.matches.KickoffMatchday(ctx, worldID, md)
+	kickedMDs := map[int]bool{}
+	for _, compID := range compIDs {
+		gs := byComp[compID]
+		g := gs[0] // open round: the lowest due matchday
+		admitted, deferred, err := r.admitKickoffs(ctx, worldID, compID, g)
 		if err != nil {
-			return sum, fmt.Errorf("kickoff matchday: %w", err)
+			return sum, err
 		}
-		sum.Matchdays++
+		if deferred {
+			sum.Skipped++
+		}
+		if len(admitted) == 0 {
+			continue
+		}
+		sessions, err := r.matches.KickoffFixtureIDs(ctx, admitted)
+		if err != nil {
+			return sum, fmt.Errorf("kickoff fixtures: %w", err)
+		}
 		sum.Kicked += len(sessions)
+		kickedMDs[g.matchday] = true
 	}
+	sum.Matchdays = len(kickedMDs)
 	return sum, nil
+}
+
+// admitKickoffs decides which of a competition's open-round due fixtures may
+// go live this pass. The round-order gate defers the whole round while an
+// earlier round still has live fixtures; a staggered competition further caps
+// how many of this round's fixtures may be live at once. Returns the fixture
+// ids to kick (in kickoff order) and whether any due fixture was deferred.
+func (r *Runner) admitKickoffs(ctx context.Context, worldID uuid.UUID, compID uuid.UUID, g dueFixtureGroup) (ids []uuid.UUID, deferred bool, err error) {
+	var earlierLive bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM match.fixtures
+			WHERE competition_id = $1 AND world_id = $2 AND status = 'live' AND matchday < $3
+		)`, compID, worldID, g.matchday).Scan(&earlierLive); err != nil {
+		return nil, false, fmt.Errorf("matchday: round-order gate: %w", err)
+	}
+	if earlierLive {
+		return nil, true, nil
+	}
+
+	ids = g.ids
+	cap, _, err := r.comp.StaggeredCap(ctx, r.pool, worldID, compID, g.matchday)
+	if err != nil {
+		return nil, false, fmt.Errorf("matchday: staggered cap: %w", err)
+	}
+	if cap <= 0 {
+		return ids, false, nil // single-day / legacy round / final matchday: whole round at once
+	}
+	var live int
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM match.fixtures
+		WHERE competition_id = $1 AND world_id = $2 AND matchday = $3 AND status = 'live'`,
+		compID, worldID, g.matchday).Scan(&live); err != nil {
+		return nil, false, fmt.Errorf("matchday: live count: %w", err)
+	}
+	room := cap - live
+	if room <= 0 {
+		return nil, true, nil // cap saturated: wait for some to finish
+	}
+	if len(ids) > room {
+		return ids[:room], true, nil
+	}
+	return ids, false, nil
 }
 
 // RunLive paces every in-progress live match of a world to full time in real
@@ -395,16 +462,6 @@ func (r *Runner) PlayableWorlds(ctx context.Context) ([]uuid.UUID, error) {
 	return out, nil
 }
 
-// worldHasLive reports whether any fixture of the world is currently live.
-func (r *Runner) worldHasLive(ctx context.Context, worldID uuid.UUID) (bool, error) {
-	var n int
-	if err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM match.fixtures WHERE world_id = $1 AND status = 'live'`, worldID).Scan(&n); err != nil {
-		return false, fmt.Errorf("matchday: live check: %w", err)
-	}
-	return n > 0, nil
-}
-
 // WorldsWithLiveMatches lists every world with at least one live fixture, for
 // the worker's startup rehydration sweep.
 func (r *Runner) WorldsWithLiveMatches(ctx context.Context) ([]uuid.UUID, error) {
@@ -444,30 +501,51 @@ func (r *Runner) worldNow(ctx context.Context, worldID uuid.UUID) (time.Time, er
 	return world.ScaleNow(time.Now(), epoch, dayLength), nil
 }
 
-// dueMatchdays lists the distinct matchdays with scheduled fixtures whose
-// scheduled kickoff moment (scheduled_at) the world clock has already reached,
-// ascending. IM16: this is a timestamp comparison against the continuous world
-// clock, so a matchday with a 20:00 kickoff only becomes due at 20:00 — its
-// fixtures never simulate on the date alone.
-func (r *Runner) dueMatchdays(ctx context.Context, worldID uuid.UUID, asOf time.Time) ([]int, error) {
+// dueFixtureGroup is one competition's open-round slice of fixtures whose
+// kickoff moment has already arrived, in kickoff order.
+type dueFixtureGroup struct {
+	competitionID uuid.UUID
+	matchday      int
+	ids           []uuid.UUID
+}
+
+// dueFixtureGroups lists the due scheduled fixtures of a world grouped by
+// (competition, matchday), ascending. IM16: this is a timestamp comparison
+// against the continuous world clock, so a 20:00 kickoff only matures at 20:00
+// — and a staggered round's later fixtures mature on their own days, so the
+// runner never kicks them earlier than scheduled.
+func (r *Runner) dueFixtureGroups(ctx context.Context, worldID uuid.UUID, asOf time.Time) ([]dueFixtureGroup, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT DISTINCT matchday FROM match.fixtures
+		SELECT id, competition_id, matchday
+		FROM match.fixtures
 		WHERE world_id = $1
 		  AND matchday IS NOT NULL
 		  AND status = 'scheduled'
 		  AND scheduled_at <= $2
-		ORDER BY matchday`, worldID, asOf)
+		ORDER BY matchday, competition_id, scheduled_at, id`, worldID, asOf)
 	if err != nil {
-		return nil, fmt.Errorf("matchday: due matchdays: %w", err)
+		return nil, fmt.Errorf("matchday: due fixtures: %w", err)
 	}
 	defer rows.Close()
-	out := []int{}
+	out := []dueFixtureGroup{}
+	index := map[string]int{}
 	for rows.Next() {
-		var md int
-		if err := rows.Scan(&md); err != nil {
+		var (
+			id   uuid.UUID
+			comp uuid.UUID
+			md   int
+		)
+		if err := rows.Scan(&id, &comp, &md); err != nil {
 			return nil, fmt.Errorf("matchday: scan: %w", err)
 		}
-		out = append(out, md)
+		key := comp.String() + ":" + strconv.Itoa(md)
+		pos, ok := index[key]
+		if !ok {
+			pos = len(out)
+			index[key] = pos
+			out = append(out, dueFixtureGroup{competitionID: comp, matchday: md})
+		}
+		out[pos].ids = append(out[pos].ids, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("matchday: iterate: %w", err)

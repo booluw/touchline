@@ -23,7 +23,7 @@
       :class="{ empty: !slot.player, selected: slot.slot === props.selectedSlot, 'cursor-pointer': clickable }"
       :style="{ left: slot.x + '%', top: slot.y + '%' }" @click="clickable ? $emit('select', slot.slot) : undefined">
       <span class="token-number">{{ slot.player?.squad_number ?? '' }}</span>
-      <span class="token-name">{{ slot.player?.display_name ?? slot.player.name ?? 'Empty' }}</span>
+      <span class="token-name">{{ slot.player?.display_name ?? 'Empty' }}</span>
     </button>
   </div>
 </template>
@@ -82,7 +82,7 @@ const positionedSlots = computed(() =>
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 0;
+  padding: 10px 0;
   background: var(--color-void-850, #0e1218);
   border: 2px solid var(--color-void-600, #2c3542);
   color: var(--color-void-100, #e4e7eb);

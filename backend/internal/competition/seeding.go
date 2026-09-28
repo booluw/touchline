@@ -551,8 +551,14 @@ func (s *Service) createSeason(ctx context.Context, tx pgx.Tx, worldID, leagueID
 // deterministic, so identical inputs reproduce identical calendars. With an
 // allowed_weekdays set (IM05) the calendar plays only on those weekdays via a
 // forward weekday walk; unconfigured leagues use the exact IM03 day formula.
+// Staggered leagues (IM22, the default when 2+ allowed weekdays resolve) spread
+// each round's fixtures across those weekdays, human-involving ties on the
+// evening pool and AI-only ties through the day, capped at
+// max_simultaneous_matches per slot. A season's final matchday always plays all
+// of its ties on one evening (final_kickoff_hour).
 func (s *Service) createFixtures(ctx context.Context, tx pgx.Tx, worldID, leagueID uuid.UUID, entries []uuid.UUID, bootRef time.Time) (int, int, error) {
 	rounds := roundRobin(len(entries))
+	finalRound := len(rounds)
 
 	p, err := s.scheduleParams(ctx, tx, leagueID, worldID)
 	if err != nil {
@@ -564,23 +570,108 @@ func (s *Service) createFixtures(ctx context.Context, tx pgx.Tx, worldID, league
 		return 0, 0, fmt.Errorf("load world seed: %w", err)
 	}
 
+	staggered := p.staggered && len(p.allowedWeekdays) >= 2
+
+	// Club control flags (IM22): a tie is "human" when either club is
+	// human-managed, which picks its evening kickoff pool. Read once for the
+	// whole season materialization.
+	human := map[uuid.UUID]bool{}
+	rows, err := tx.Query(ctx,
+		`SELECT id, is_ai_controlled FROM club.clubs WHERE id = ANY($1::uuid[])`, entries)
+	if err != nil {
+		return 0, 0, fmt.Errorf("load club control flags: %w", err)
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var ai bool
+		if err := rows.Scan(&id, &ai); err != nil {
+			rows.Close()
+			return 0, 0, fmt.Errorf("scan club control flags: %w", err)
+		}
+		human[id] = !ai
+	}
+	rows.Close()
+
 	count := 0
+	roundAnchor := roundAnchorFirst(bootRef, p.allowedWeekdays)
 	for r, round := range rounds { // matchday is 1-based
 		md := r + 1
-		hour := kickoffHour(seed, leagueID, p.kickoffHours, md)
-		kickoff := scheduledAtFromDay(bootRef, md, p.daysPerWeek, p.matchdaysPerWeek, hour)
-		if len(p.allowedWeekdays) > 0 {
-			kickoff = paceWeekdayMatchday(bootRef, md, p.allowedWeekdays, hour)
-		}
-		for _, pair := range round {
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO match.fixtures
-					(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
-				VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
-				worldID, leagueID, entries[pair[0]], entries[pair[1]], md, kickoff); err != nil {
-				return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", md, err)
+		switch {
+		case staggered:
+			// The season-final matchday plays every tie on one evening
+			// (IM22): same day, same time. Earlier rounds spread across the
+			// allowed weekdays, human ties on the evening pool and AI-only
+			// ties through the day, capped per slot.
+			if md == finalRound {
+				kickoff := kickOff(roundAnchor, p.finalKickoffHour)
+				for _, pair := range round {
+					if _, err := tx.Exec(ctx, `
+						INSERT INTO match.fixtures
+							(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
+						VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
+						worldID, leagueID, entries[pair[0]], entries[pair[1]], md, kickoff); err != nil {
+						return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", md, err)
+					}
+					count++
+				}
+				continue
 			}
-			count++
+			ties := make([]roundFixture, 0, len(round))
+			for _, pair := range round {
+				ties = append(ties, roundFixture{
+					home: entries[pair[0]], away: entries[pair[1]],
+					human: human[entries[pair[0]]] || human[entries[pair[1]]],
+				})
+			}
+			kicks := assembleRoundKickoffs(p, ties, roundAnchor)
+			for i, pair := range round {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO match.fixtures
+						(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
+					VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
+					worldID, leagueID, entries[pair[0]], entries[pair[1]], md, kicks[i]); err != nil {
+					return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", md, err)
+				}
+				count++
+			}
+			if len(ties) > 0 {
+				roundAnchor = roundAnchorNext(roundLastDay(kicks), p.allowedWeekdays)
+			}
+			continue
+
+		case len(p.allowedWeekdays) > 0:
+			hour := kickoffHour(seed, leagueID, p.kickoffHours, md)
+			if md == finalRound {
+				hour = p.finalKickoffHour
+			}
+			kickoff := paceWeekdayMatchday(bootRef, md, p.allowedWeekdays, hour)
+			for _, pair := range round {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO match.fixtures
+						(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
+					VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
+					worldID, leagueID, entries[pair[0]], entries[pair[1]], md, kickoff); err != nil {
+					return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", md, err)
+				}
+				count++
+			}
+
+		default:
+			hour := kickoffHour(seed, leagueID, p.kickoffHours, md)
+			if md == finalRound {
+				hour = p.finalKickoffHour
+			}
+			kickoff := scheduledAtFromDay(bootRef, md, p.daysPerWeek, p.matchdaysPerWeek, hour)
+			for _, pair := range round {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO match.fixtures
+						(world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
+					VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')`,
+					worldID, leagueID, entries[pair[0]], entries[pair[1]], md, kickoff); err != nil {
+					return 0, 0, fmt.Errorf("insert fixture matchday %d: %w", md, err)
+				}
+				count++
+			}
 		}
 	}
 	return count, len(rounds), nil
