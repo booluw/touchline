@@ -1,5 +1,5 @@
 // Package board owns the S06-02 board system: structured per-club mandates,
-// the weekly confidence scoring that fills manager.job_security_snapshots with
+// the monthly confidence scoring that fills manager.job_security_snapshots with
 // explainable factor breakdowns, manager-side negotiation of sporting targets,
 // and the sacking guard that hands a failing human-managed club back to AI
 // control via manager.Service (MANAGER_SACKED).

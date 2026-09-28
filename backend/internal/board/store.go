@@ -297,7 +297,7 @@ func (s *Store) updateSentiment(ctx context.Context, q querier, clubID uuid.UUID
 }
 
 // snapshotExists reports whether a snapshot already exists for the tick
-// (idempotent weekly replay + read-triggered reviews).
+// (idempotent monthly replay + read-triggered reviews).
 func (s *Store) snapshotExists(ctx context.Context, q querier, managerID uuid.UUID, tick int64) (bool, error) {
 	var exists bool
 	if err := q.QueryRow(ctx, `

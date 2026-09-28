@@ -126,14 +126,22 @@ discovery **can** roll a Wonderkid ceiling:
 |---|---|
 | Monthly maintenance | debits `annual_cost / 12`, ledger category `academy`, idempotent per world tick |
 | Upgrade to tier N | one-off `UpgradeCostByTier` debit + `annual_cost` switches to tier N |
-| Shutdown | academy inactive, intake paused, sentiment penalty applied, ongoing cost **stopped** (no maintenance debit) |
+| Shutdown | academy inactive, intake paused, sentiment penalty applied immediately (floor 15), ongoing cost **stopped** (no maintenance debit) |
 | Reopen | academy active again, intake resumes next season intake |
 
 Upgrade costs are upgrade-only: moving **into** tier N charges its cost,
 moving **down** refunds nothing (downshifts simply reduce annual cost).
 Shutdowns give immediate budget relief but carry a boardroom/supporter
-sentiment cost (`AcademyShutdownSentimentHit`), so emergency cash relief is
+sentiment cost (`ShutdownSentimentPenalty`, 15), so emergency cash relief is
 not free.
+
+The shutdown hit is the only supporter-sentiment move outside the board EWMA
+(`board.SupporterSentimentAlpha`). It is applied immediately — not blended — and
+floors at `board.SupporterSentimentMin` (15) rather than 0, so a shutdown cannot
+park sentiment below the range the EWMA converges within; the next review blends
+it back up. At the floor the realised penalty is smaller than 15, and the event
+explanation and `sentiment_hit` payload report the delta actually applied.
+Reopening the academy does not restore the sentiment.
 
 ## 6. Read models (canonical OVR surface)
 

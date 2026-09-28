@@ -48,7 +48,7 @@ func reviewProgress(played, total int) float64 {
 }
 
 // evaluateAndRecord grades the club's mandates, computes the seven factor
-// scores and their weighted total, snapshots the result, and emits the weekly
+// scores and their weighted total, snapshots the result, and emits the board
 // review plus per-mandate resolution events. Must run inside the review tx.
 func (s *Service) evaluateAndRecord(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, in reviewInputs, finish, points int, tick int64) (FactorScores, *explanation.Explanation, error) {
 	persona, _, _, err := s.fetchPersona(ctx, tx, in.clubID)

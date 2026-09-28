@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/touchline/backend/internal/board"
 	"github.com/touchline/backend/pkg/apiref"
 	"github.com/touchline/backend/pkg/playergen"
 )
@@ -58,6 +59,20 @@ const (
 	StreetMinAge   = 13
 	StreetMaxAge   = 15
 )
+
+// sentimentAfterShutdown applies the immediate supporter hit of an academy
+// shutdown. The floor is the board EWMA's own minimum
+// (board.SupporterSentimentMin) rather than 0, so a shutdown cannot park
+// sentiment below the range the EWMA converges within — the next review blends
+// it straight back up. It also lifts any legacy sub-floor value left behind by
+// the previous GREATEST(0, …) behaviour.
+func sentimentAfterShutdown(current int) int {
+	next := current - ShutdownSentimentPenalty
+	if next < board.SupporterSentimentMin {
+		return board.SupporterSentimentMin
+	}
+	return next
+}
 
 // AnnualCostByTier is a club academy's seasonal operating cost. Monthly
 // maintenance debits annual_cost/12.

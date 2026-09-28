@@ -28,7 +28,9 @@ const (
 	FinancialNoDataScore    = 60
 
 	// SupporterSentimentAlpha is the EWMA blend of results into supporter
-	// sentiment each weekly review.
+	// sentiment. Reviews are monthly (IM02), plus a lazy per-tick refresh when a
+	// manager opens the board view; the (manager_id, world_tick) snapshot guard
+	// makes each tick blend at most once.
 	SupporterSentimentAlpha = 0.20
 	SupporterSentimentMin   = 15
 	SupporterSentimentMax   = 95
@@ -50,7 +52,7 @@ const (
 	AlternativesMax                = 90
 
 	// SackThresholdTotal is the confidence line below which a human-managed
-	// club's board fires the manager on the weekly review.
+	// club's board fires the manager on the monthly review.
 	SackThresholdTotal = 25
 
 	// Mandate grading windows (0-100 scale inputs).

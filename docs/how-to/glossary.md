@@ -119,9 +119,9 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | **Mandates** | Four per (club, manager, season): `league_finish` (primary), `points_target` (secondary), `operating_balance` (strategic, break-even 0), `wage_structure` (financial, budget 0). Graded each month-boundary board review (IM02; default day 30) with slacks/allowances (e.g. finish slack `3→0` as the season progresses; points window `−10`; wage tolerance `budget×(1+target+5%)`). |
 | **Seven factor scores** | Each 0–100: `performance`, `expectations`, `financial`, `board_relationship`, `club_dna_alignment`, `supporter_sentiment`, `alternatives`. Formulas in the design doc (e.g. `performance = clamp(50 + 8·(expectedFinish − position), 0, 100)`). |
 | **Confidence (weighted total)** | `Σ round(wᵢ·factorᵢ)` with persona weights, clamped `[0,100]`; factor deltas **sum exactly** to the total (tested). |
-| **Sack threshold** | Weekly weighted total ≤ `SackThresholdTotal = 25` and the club is human-managed → sacked (AI-managed clubs are scored but never sacked). |
+| **Sack threshold** | Weighted total ≤ `SackThresholdTotal = 25` at a review and the club is human-managed → sacked (AI-managed clubs are scored but never sacked). |
 | **Mandate negotiation** | Proposals within `±3` finish places / `±8` points and persona tolerance; worsens accepted only within tolerance. |
-| **Supporter sentiment (board lens)** | `sentiment += 0.20·(performance − sentiment)`, clamped `[15, 95]`, persisted on `club.supporter_groups`. |
+| **Supporter sentiment (board lens)** | `sentiment += 0.20·(performance − sentiment)`, clamped `[15, 95]`, persisted on `club.supporter_groups.current_sentiment`. Blended on each review (month-boundary, or lazily when the board page is opened; at most once per world tick per manager). The only non-EWMA mover is an academy shutdown: immediate `−15`, floored at 15. Not to be confused with the player↔manager relationship deltas in §9. |
 
 ## 7. Offers & careers
 
@@ -144,10 +144,10 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | **Morale swing** | `next = current + α·(target − current)`, `α = 0.35 × vol × pro` (vol 1.0→1.5 by emotional volatility; pro 1.0→0.5 by professionalism), clamped `[0,1]`. |
 | **Weekly recovery** | `next = current + 0.10·(0.5→2.0 by professionalism)·(0.5 − current)`, clamped `[0,1]`. |
 | **Transfer-request trigger** | Weekly, human clubs only, all of: morale ≤ 0.35 (after recovery); `share < 0.5 × expected`; no open pending request; cooldown lapsed. Reasons: playing_time / wage / ambition / homesickness. |
-| **Request lifecycle** | Approve → listed at market value (sentiment +15); Deny → morale −0.10, cooldown 28d, sentiment −25; Reassure → 28d promise, cooldown 28d, sentiment 0; Unaddressed → **auto-listed after 21 world days**. |
+| **Request lifecycle** | Approve → listed at market value (relationship +15); Deny → morale −0.10, cooldown 28d, relationship −25; Reassure → 28d promise, cooldown 28d, relationship 0; Unaddressed → **auto-listed after 21 world days**. The deltas are the player↔manager relationship journal (`social.relationships`), **not** club supporter sentiment. |
 | **Promises** | `increase_playing_time`: `share ≥ expected` → fulfilled (+10); older than 4 weeks (`PromiseEvaluationWeeks`) → broken (−30), cooldown cleared. |
 | **Fresh start** | On transfer: morale → 0.85, share → 0, cooldown cleared, open request → withdrawn. |
-| **Relationship memory** | Player↔manager deltas: approved +15 / denied −25 / reassured 0 / promise kept +10 / broken −30 on the canonical `social.relationships` row. |
+| **Relationship memory** | Player↔manager deltas: approved +15 / denied −25 / reassured 0 / promise kept +10 / broken −30 on the canonical `social.relationships` row (constants `Sentiment*` in `internal/player/numerics.go` — the name is historical, the target is the relationship, not supporter sentiment). |
 
 ## 9. Training, tactics & condition
 

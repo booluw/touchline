@@ -1,6 +1,10 @@
 package academy
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/touchline/backend/internal/board"
+)
 
 func TestProspectCountForTier(t *testing.T) {
 	cases := map[int]int{1: 5, 2: 7, 3: 9, 4: 11, 5: 13}
@@ -68,5 +72,40 @@ func TestAnnualAndUpgradeCostTables(t *testing.T) {
 	}
 	if UpgradeCostByTier[5] <= UpgradeCostByTier[2] {
 		t.Fatal("upgrade cost must rise with tier")
+	}
+}
+
+func TestSentimentAfterShutdown(t *testing.T) {
+	cases := []struct {
+		name    string
+		current int
+		want    int
+	}{
+		{"full penalty above the floor", 100, 85},
+		{"mid-range takes the full hit", 50, 35},
+		{"clamp binds just above the floor", 20, board.SupporterSentimentMin},
+		{"already at the floor is a no-op", board.SupporterSentimentMin, board.SupporterSentimentMin},
+		{"legacy sub-floor value is lifted to the floor", 10, board.SupporterSentimentMin},
+		{"legacy zero is lifted to the floor", 0, board.SupporterSentimentMin},
+	}
+	for _, c := range cases {
+		if got := sentimentAfterShutdown(c.current); got != c.want {
+			t.Errorf("%s: sentimentAfterShutdown(%d) = %d, want %d", c.name, c.current, got, c.want)
+		}
+	}
+}
+
+// The shutdown must never leave sentiment below the board EWMA's own minimum,
+// otherwise the next board review blends the value back up and the hit is not
+// the one the explanation claims.
+func TestSentimentAfterShutdownRespectsEWMAFloor(t *testing.T) {
+	for cur := -20; cur <= 100; cur++ {
+		got := sentimentAfterShutdown(cur)
+		if got < board.SupporterSentimentMin {
+			t.Fatalf("sentimentAfterShutdown(%d) = %d, below EWMA floor %d", cur, got, board.SupporterSentimentMin)
+		}
+		if got > board.SupporterSentimentMax {
+			t.Fatalf("sentimentAfterShutdown(%d) = %d, above EWMA ceiling %d", cur, got, board.SupporterSentimentMax)
+		}
 	}
 }

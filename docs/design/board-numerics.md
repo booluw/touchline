@@ -18,7 +18,9 @@ pounds in `finance.*` columns.
 On every **month-boundary** world tick (`handleWorldTick` in `internal/app`,
 day `current_day % calendar.days_per_month == 0` — default day 30, IM02),
 `board.Service.Review` scores every club that has an
-active manager in the world:
+active manager in the world. The same scoring also runs lazily when a manager
+opens `GET /api/manager/me/board`, so the board page is never stale; §9 records
+the consequence for the sentiment figure.
 
 1. **Scores** the manager against the club's open mandates (see §3).
 2. **Snapshots** the seven factor scores + their weighted total into
@@ -115,7 +117,7 @@ Each lens is a 0–100 score:
 | `financial_score` | `50 + round(40·(1 − wageRatio)) ± 10` profit signal | wageRatio = committedAnnual/budget capped at 1; `+10` operating profit / `−10` loss; `60` (or `50` with committed wages) when no budget |
 | `board_relationship_score` | `clamp(50 + (patience − 50)/5 + 25·(met − broken)/resolved, 0, 100)` | patience softens; kept-mandate ratio pressures |
 | `club_dna_alignment_score` | `clamp(50 + 15·met_strategic + 15·met_financial − 25·broken_strategic − 25·broken_financial, 0, 100)` | deeper DNA adherence deferred to S10-03 |
-| `supporter_sentiment_score` | stored `club.supporter_groups.sentiment` | EWMA-updated each month-boundary review: `sentiment += 0.20·(performance − sentiment)`, clamped [15, 95] |
+| `supporter_sentiment_score` | stored `club.supporter_groups.current_sentiment` | EWMA-updated on every review that runs: `sentiment += 0.20·(performance − sentiment)`, clamped [15, 95] |
 | `alternatives_score` | `clamp(50 + 5·worldReputation, 10, 90)` | manager career-log reputation; replacement-pressure proxy |
 
 **Weighted total** = Σ `round(wᵢ × factorScoreᵢ)` with the persona's seven
@@ -180,8 +182,17 @@ manager_id, season, category) WHERE status IN ('pending','agreed')`, so a
   S10-03.
 - **Supporters** are a single bloc; the EWMA is the only sentiment driver
   (match results do not feed it directly yet — performance proxies them; live
-  social sentiment lands with S06-04).
+  social sentiment lands with S06-04). The seeded `loyality`,
+  `financial_sensitivity` and `rivalry_intensity_base` columns are not read by
+  any scoring path yet. The one non-EWMA mover is the academy shutdown, which
+  applies an immediate `ShutdownSentimentPenalty` (15) and floors at the same
+  15 minimum.
 - **Alternatives** uses world reputation only; candidate pool modelling (past
   success, wage expectations) lands with the S07 hiring flow (OPD-09).
-- The confidence number is recalculated on the month-boundary review only; a
-  live pipe to the frontend follows the S07-01 realtime replay work.
+- A review runs at most once per `(manager_id, world_tick)`, triggered either by
+  the month-boundary `Board.Review` or lazily when the manager opens
+  `GET /api/manager/me/board` (which refreshes the current tick's snapshot so the
+  board page is never stale). A manager who checks the board daily therefore
+  blends sentiment more often than one who never opens it, so the displayed
+  figure is path-dependent; a live pipe to the frontend follows the S07-01
+  realtime replay work.

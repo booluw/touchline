@@ -249,25 +249,44 @@ func (s *Service) setActive(ctx context.Context, clubID uuid.UUID, active bool, 
 	a.IsActive = active
 
 	var exJSON []byte
+	var sentimentHit int
 	if !active {
-		// Shutting down: immediate relief, immediate backlash.
-		if _, err := tx.Exec(ctx, `
-			UPDATE club.supporter_groups
-			SET current_sentiment = GREATEST(0, current_sentiment - $2)
-			WHERE club_id = $1`, clubID, ShutdownSentimentPenalty); err != nil {
-			return Academy{}, fmt.Errorf("academy shutdown: sentiment: %w", err)
+		// Shutting down: immediate relief, immediate backlash. Lock the row so a
+		// concurrent board review cannot blend sentiment between the read and the
+		// write, then apply the penalty in Go so sentimentAfterShutdown stays the
+		// only place the clamp lives.
+		var currentSentiment int
+		err := tx.QueryRow(ctx, `
+			SELECT current_sentiment FROM club.supporter_groups
+			WHERE club_id = $1 FOR UPDATE`, clubID).Scan(&currentSentiment)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			// No supporter row (pre-bootstrap club): nothing to hit, as before.
+		case err != nil:
+			return Academy{}, fmt.Errorf("academy shutdown: read sentiment: %w", err)
+		default:
+			next := sentimentAfterShutdown(currentSentiment)
+			if _, err := tx.Exec(ctx, `
+				UPDATE club.supporter_groups
+				SET current_sentiment = $2
+				WHERE club_id = $1`, clubID, next); err != nil {
+				return Academy{}, fmt.Errorf("academy shutdown: sentiment: %w", err)
+			}
+			// Report the penalty actually applied: at the floor the real hit is
+			// smaller than the nominal one.
+			sentimentHit = next - currentSentiment
+			exp := explanation.New("academy_shutdown", sentimentHit).
+				Add("Academy closed: supporter sentiment", sentimentHit).
+				Add(fmt.Sprintf("Annual saving £%d", a.AnnualCost), 0)
+			exJSON, _ = json.Marshal(exp)
 		}
-		exp := explanation.New("academy_shutdown", -ShutdownSentimentPenalty).
-			Add("Academy closed: supporter sentiment", -ShutdownSentimentPenalty).
-			Add(fmt.Sprintf("Annual saving £%d", a.AnnualCost), 0)
-		exJSON, _ = json.Marshal(exp)
 	}
 
 	payload := mustJSON(map[string]any{
 		"club_id":       clubID,
 		"is_active":     active,
 		"annual_cost":   a.AnnualCost,
-		"sentiment_hit": boolToInt(!active) * ShutdownSentimentPenalty,
+		"sentiment_hit": sentimentHit,
 	})
 	eventType := EventReopened
 	if !active {
@@ -649,13 +668,6 @@ func hashSeed(worldID, clubID, countryID uuid.UUID, season int) int64 {
 	}
 	_, _ = h.Write([]byte(fmt.Sprintf(":%d", season)))
 	return int64(h.Sum64())
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 func mustJSON(v any) []byte {
