@@ -22,9 +22,10 @@ const (
 )
 
 // RecordMatchAppearances persists the appearances of one completed match and
-// refreshes each appearing player's whole-season share + morale. It MUST run
-// inside the match-completion transaction so the event log and pitch outcome
-// land atomically.
+// refreshes each appearing player's whole-season share + morale. Callers own
+// the surrounding transaction; in the live path it is the finalize side-effect
+// pass (which commits its MATCH_PLAYED marker in the same transaction, so a
+// re-finalize is a no-op and the pitch outcome and event log land together).
 func (s *Service) RecordMatchAppearances(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, appearances []Appearance) error {
 	for _, a := range appearances {
 		if err := insertAppearance(ctx, tx, matchID, a); err != nil {

@@ -584,3 +584,120 @@ func TestFeedCommentaryNamesPlayers(t *testing.T) {
 		t.Fatalf("feed had %d named events and %d substitutions; the fixture is not exercising attribution", named, substitutions)
 	}
 }
+
+// TestLiveInputMinuteGuardRejectsPacedMinutes pins the atomic awaited-minute
+// check. The service pre-check reads current_minute without a lock, so a tactic
+// change could cross the wire after the pacing goroutine already streamed that
+// minute; the guarded INSERT re-checks current_minute in the same statement and
+// accepts zero rows, so a manager can never land an input at a minute already
+// persisted (which Finalize's full-stream re-run would otherwise silently
+// replay into a different final scoreline than the feed showed).
+func TestLiveInputMinuteGuardRejectsPacedMinutes(t *testing.T) {
+	pool, worldID, homeID, _, _, managerID := liveWorld(t)
+	ctx := context.Background()
+	svc := newMatchService(pool)
+	sess := kickoff(t, svc, pool, worldID)
+
+	for sess.NextMinute() <= 3 {
+		if _, _, err := svc.PaceMinute(ctx, sess); err != nil {
+			t.Fatalf("pace: %v", err)
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{"club_id": homeID.String(), "style": "balanced"})
+	guarded := `
+		INSERT INTO match.match_inputs (match_id, world_id, sequence, minute, kind, payload, created_by_manager_id)
+		SELECT $1, $2, $3, $4, 'tactic_change', $5, $6
+		WHERE EXISTS (
+			SELECT 1 FROM match.matches
+			WHERE id = $1 AND status = 'in_progress' AND current_minute < $4
+		)`
+
+	// An already-persisted minute (the clock is at 3) must accept zero rows.
+	tag, err := pool.Exec(ctx, guarded, sess.MatchID, worldID, 1, 3, payload, managerID)
+	if err != nil {
+		t.Fatalf("guarded insert at paced minute: %v", err)
+	}
+	if tag.RowsAffected() != 0 {
+		t.Fatalf("guarded insert accepted %d rows at a paced minute, want 0", tag.RowsAffected())
+	}
+
+	// A strictly future minute must still land.
+	tag, err = pool.Exec(ctx, guarded, sess.MatchID, worldID, 2, 45, payload, managerID)
+	if err != nil {
+		t.Fatalf("guarded insert at future minute: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("guarded insert accepted %d rows at a future minute, want 1", tag.RowsAffected())
+	}
+
+	// Through the API: the paced minute errors, the future minute succeeds.
+	if err := svc.TacticChange(ctx, sess.MatchID, managerID, 3, map[string]any{"style": "balanced"}); err != ErrMinuteClosed {
+		t.Fatalf("tactic change at paced minute: err = %v, want ErrMinuteClosed", err)
+	}
+	if err := svc.TacticChange(ctx, sess.MatchID, managerID, 46, map[string]any{"style": "balanced"}); err != nil {
+		t.Fatalf("tactic change at future minute: %v", err)
+	}
+}
+
+// TestFinalizeSideEffectsIdempotent pins the two-phase finalize: the mandatory
+// completion stamps full time and unblocks the ladder, and the follow-up side
+// effects (form, MATCH_PLAYED, …) land exactly once — a redelivery re-reads the
+// persisted result and, guarded by the MATCH_PLAYED marker, does not re-apply.
+func TestFinalizeSideEffectsIdempotent(t *testing.T) {
+	pool, worldID, homeID, awayID, _, _ := liveWorld(t)
+	ctx := context.Background()
+	svc := newMatchService(pool)
+	sess := kickoff(t, svc, pool, worldID)
+	paceToFullTime(t, svc, sess)
+
+	if _, err := svc.Finalize(ctx, sess); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	var matchStatus, fixtureStatus string
+	if err := pool.QueryRow(ctx,
+		`SELECT m.status, f.status FROM match.matches m JOIN match.fixtures f ON f.id = m.fixture_id WHERE m.id = $1`,
+		sess.MatchID).Scan(&matchStatus, &fixtureStatus); err != nil {
+		t.Fatalf("statuses: %v", err)
+	}
+	if matchStatus != "completed" || fixtureStatus != "completed" {
+		t.Fatalf("statuses after finalize = %q/%q, want completed/completed", matchStatus, fixtureStatus)
+	}
+
+	var formClubs int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM club.form_state WHERE club_id IN ($1, $2)`, homeID, awayID).Scan(&formClubs); err != nil {
+		t.Fatalf("form rows: %v", err)
+	}
+	if formClubs != 2 {
+		t.Fatalf("form_state rows = %d, want 2 (phase two applied both clubs)", formClubs)
+	}
+	playedCount := func() int {
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM world.events WHERE event_type = 'MATCH_PLAYED' AND payload->>'match_id' = $1`,
+			sess.MatchID.String()).Scan(&n); err != nil {
+			t.Fatalf("match played count: %v", err)
+		}
+		return n
+	}
+	if n := playedCount(); n != 1 {
+		t.Fatalf("MATCH_PLAYED count = %d after finalize, want 1", n)
+	}
+
+	// Redelivery: same session, match already completed. Must succeed, keep the
+	// single MATCH_PLAYED, and not double-apply the form pass.
+	if _, err := svc.Finalize(ctx, sess); err != nil {
+		t.Fatalf("re-finalize: %v", err)
+	}
+	if n := playedCount(); n != 1 {
+		t.Fatalf("MATCH_PLAYED count = %d after redelivery, want 1 (marker no-op)", n)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM club.form_state WHERE club_id IN ($1, $2)`, homeID, awayID).Scan(&formClubs); err != nil {
+		t.Fatalf("form rows after redelivery: %v", err)
+	}
+	if formClubs != 2 {
+		t.Fatalf("form_state rows = %d after redelivery, want 2", formClubs)
+	}
+}

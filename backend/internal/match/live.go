@@ -457,11 +457,18 @@ func liveFinished(sess *LiveSession, m int) bool {
 	return !sess.fc.GoldenGoal || m > matchsim.RegulationMinutes
 }
 
-// Finalize completes a fully-paced live match: it re-runs the engine over the
-// complete persisted input stream, stamps the final scorelines on the match
-// and fixture, updates both clubs' rolling form, and records MATCH_PLAYED.
+// Finalize completes a fully-paced live match in two phases so that full time
+// can never be held up by a follow-up write. Phase one — the mandatory stamp —
+// re-runs the engine over the complete persisted input stream and writes the
+// final scorelines and completed status on the match and fixture. A service
+// left 'live' blocks the world's whole matchday ladder behind the no-overlap
+// gate, so this is the one write that must always land. Phase two applies the
+// side effects (form, MATCH_PLAYED, appearances, injuries, rivalries) in their
+// own all-or-nothing pass that is retried in place and, on persistent failure,
+// degraded to a loudly-logged alert — never allowed to re-strand the match.
 // Idempotent: a match already 'completed' (redelivery) loads its persisted
-// result instead of writing again.
+// result; the side-effect pass is re-run only when its MATCH_PLAYED marker is
+// missing (a crash between the two phases), and then at most once.
 func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinalized, error) {
 	if sess.nextMinute <= RegulationMinutes {
 		return nil, fmt.Errorf("finalize %s: match not at full time (next minute %d)", sess.MatchID, sess.nextMinute)
@@ -480,8 +487,17 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		LiveInputs: inputs,
 		GoldenGoal: sess.fc.GoldenGoal,
 	})
+	return s.settleMatch(ctx, sess, res)
+}
+
+// settleMatch writes the mandatory completion, then the best-effort side
+// effects. It is the shared core of a fresh finalize and the redelivery path.
+func (s *Service) settleMatch(ctx context.Context, sess *LiveSession, res matchsim.MatchResult) (*MatchFinalized, error) {
 	now := time.Now().UTC()
 
+	// Phase one: the mandatory completion. Nothing else runs in this
+	// transaction, so no follow-up hook failure can ever prevent the landing
+	// that unblocks the matchday ladder.
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("finalize: begin: %w", err)
@@ -496,21 +512,23 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		}
 		return nil, fmt.Errorf("finalize: load match: %w", err)
 	}
-	if status == "completed" {
+	switch status {
+	case "completed":
+		// Redelivery: an earlier finalize already stamped full time. Load the
+		// persisted result; phase two re-runs only if its marker never landed
+		// (a crash between the two phases, or a hook that permanently failed).
 		if err := tx.Commit(ctx); err != nil {
 			return nil, fmt.Errorf("finalize: commit: %w", err)
 		}
-		m := &Match{}
-		if err := s.pool.QueryRow(ctx, `
-			SELECT id, fixture_id, world_id, seed, home_score, away_score, ended_at
-			FROM match.matches WHERE id = $1`, sess.MatchID).
-			Scan(&m.ID, &m.FixtureID, &m.WorldID, &m.Seed, &m.HomeGoals, &m.AwayGoals, &m.EndedAt); err != nil {
-			return nil, fmt.Errorf("finalize: load completed: %w", err)
+		final, err := s.loadMatchFinalized(ctx, sess.MatchID)
+		if err != nil {
+			return nil, err
 		}
-		return &MatchFinalized{
-			FixtureID: m.FixtureID, MatchID: m.ID, WorldID: m.WorldID, Seed: m.Seed,
-			HomeGoals: m.HomeGoals, AwayGoals: m.AwayGoals, EndedAt: *m.EndedAt,
-		}, nil
+		s.applySideEffects(ctx, sess, res)
+		return final, nil
+	case "in_progress":
+	default:
+		return nil, fmt.Errorf("finalize: match %s in state %q", sess.MatchID, status)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -518,53 +536,19 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		WHERE id = $1`, sess.MatchID, res.HomeGoals, res.AwayGoals, now); err != nil {
 		return nil, fmt.Errorf("finalize: complete match: %w", err)
 	}
-	if err := applyFormStates(ctx, tx, sess.formHome, sess.formAway, sess.Home, sess.Away, res, sess.worldTick); err != nil {
-		return nil, fmt.Errorf("finalize: %w", err)
-	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE match.fixtures SET status = 'completed' WHERE id = $1 AND status = 'live'`, sess.FixtureID); err != nil {
 		return nil, fmt.Errorf("finalize: complete fixture: %w", err)
 	}
-
-	ev := s.matchPlayedEvent(sess.WorldID, sess.worldTick, sess.FixtureID, sess.MatchID, sess.Seed, res, now)
-	if err := s.recordEvent(ctx, tx, ev); err != nil {
-		return nil, fmt.Errorf("finalize: %w", err)
-	}
-
-	// Player appearances, ratings + morale land atomically with the result
-	// (S06-03, v1.6): the engine's per-player rating sheet gives authoritative
-	// minutes and the match 1–10 ratings, which become the whole-season share
-	// input and the development pass' match-feed source for the two XIs.
-	if s.players != nil {
-		apps := append(
-			appearancesFromRatings(sess.homeXI, res.HomePlayerRatings),
-			appearancesFromRatings(sess.awayXI, res.AwayPlayerRatings)...)
-		if err := s.players.RecordMatchAppearances(ctx, tx, sess.MatchID, apps); err != nil {
-			return nil, fmt.Errorf("finalize: record appearances: %w", err)
-		}
-	}
-
-	// Match injuries land atomically with the result (S08-03), mirroring the
-	// quick-play path.
-	if _, err := injury.PersistMatch(ctx, tx, s.bus, sess.WorldID, sess.worldTick, sess.MatchID, sess.Seed, now, injuryCandidates(res)); err != nil {
-		return nil, fmt.Errorf("finalize: injuries: %w", err)
-	}
-
-	// Rivalry graph + trust deltas land atomically with the result (S06-04c).
-	var socialPush *internalsocial.RelationshipPush
-	if s.social != nil {
-		if socialPush, err = s.social.RecordCompletedMatch(ctx, tx, sess.WorldID, sess.FixtureID, sess.HomeClubID, sess.AwayClubID, res.HomeGoals, res.AwayGoals, now); err != nil {
-			return nil, fmt.Errorf("finalize: rivalries: %w", err)
-		}
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("finalize: commit: %w", err)
 	}
 
-	if socialPush != nil {
-		s.social.PublishRelationshipChange(ctx, socialPush)
-	}
+	// Phase two: the follow-up side effects. Best-effort by contract — the
+	// completion above is already durable, so a hook failing here can no longer
+	// hold the match open ("match never ends"), and the redelivery path repairs
+	// the pass once the transient cause clears.
+	s.applySideEffects(ctx, sess, res)
 
 	// The real-time cost of the match, from the live wall clock. At the seeded
 	// cadence this lands on ~30 minutes; a much larger number means the pacing
@@ -578,6 +562,149 @@ func (s *Service) Finalize(ctx context.Context, sess *LiveSession) (*MatchFinali
 		FixtureID: sess.FixtureID, MatchID: sess.MatchID, WorldID: sess.WorldID, Seed: sess.Seed,
 		HomeGoals: res.HomeGoals, AwayGoals: res.AwayGoals, HomePossession: res.HomePossession, EndedAt: now,
 	}, nil
+}
+
+// loadMatchFinalized re-reads the persisted stamp of a completed match, used on
+// redelivery so the runner publishes exactly what was written.
+func (s *Service) loadMatchFinalized(ctx context.Context, matchID uuid.UUID) (*MatchFinalized, error) {
+	m := &Match{}
+	if err := s.pool.QueryRow(ctx, `
+		SELECT id, fixture_id, world_id, seed, home_score, away_score, ended_at
+		FROM match.matches WHERE id = $1`, matchID).
+		Scan(&m.ID, &m.FixtureID, &m.WorldID, &m.Seed, &m.HomeGoals, &m.AwayGoals, &m.EndedAt); err != nil {
+		return nil, fmt.Errorf("finalize: load completed: %w", err)
+	}
+	return &MatchFinalized{
+		FixtureID: m.FixtureID, MatchID: m.ID, WorldID: m.WorldID, Seed: m.Seed,
+		HomeGoals: m.HomeGoals, AwayGoals: m.AwayGoals, EndedAt: *m.EndedAt,
+	}, nil
+}
+
+// sideEffectRetryBackoff delays phase-two retries within one Finalize call. A
+// transient write failure must not leave the world's ladder waiting on the next
+// poll; a persistent one is alerted and the completion stands.
+var sideEffectRetryBackoff = []time.Duration{0, 2 * time.Second, 10 * time.Second}
+
+// applySideEffects pushes the post-completion side effects into their own
+// transaction: form states, MATCH_PLAYED, player appearances, injuries and
+// rivalries. Best-effort by contract — it is retried in place and, when it
+// still fails, logged as an alert while the completion stands, so a follow-up
+// hook can never re-strand a match. The pass is idempotent: its MATCH_PLAYED
+// marker commits in the same transaction, making any redelivery a no-op.
+func (s *Service) applySideEffects(ctx context.Context, sess *LiveSession, res matchsim.MatchResult) {
+	for attempt := range sideEffectRetryBackoff {
+		if attempt > 0 {
+			if err := sleepFor(ctx, sideEffectRetryBackoff[attempt]); err != nil {
+				return
+			}
+		}
+		if err := s.applySideEffectsTx(ctx, sess, res); err == nil {
+			return
+		} else if attempt == len(sideEffectRetryBackoff)-1 {
+			log.Printf("live %s: match %s full time: side effects still failing after %d attempts (completion already committed): %v",
+				sess.WorldID, sess.MatchID, len(sideEffectRetryBackoff), err)
+		}
+	}
+}
+
+// applySideEffectsTx writes all phase-two side effects atomically: MATCH_PLAYED
+// first — the marker that makes the pass idempotent — then form, appearances,
+// injuries and rivalries. One transaction, so a late failure rolls everything
+// back, the marker stays absent, and the retry starts clean.
+func (s *Service) applySideEffectsTx(ctx context.Context, sess *LiveSession, res matchsim.MatchResult) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("finalize: side effects: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Serialize against a concurrent redelivery and check the marker under the
+	// same row lock the mandatory completion held.
+	if _, err := tx.Exec(ctx,
+		`SELECT id FROM match.matches WHERE id = $1 FOR UPDATE`, sess.MatchID); err != nil {
+		return fmt.Errorf("finalize: side effects: lock match: %w", err)
+	}
+	recorded, err := matchPlayedRecorded(ctx, tx, sess.MatchID)
+	if err != nil {
+		return err
+	}
+	if recorded {
+		return tx.Commit(ctx) // an earlier pass already applied the side effects
+	}
+
+	now := time.Now().UTC()
+	ev := s.matchPlayedEvent(sess.WorldID, sess.worldTick, sess.FixtureID, sess.MatchID, sess.Seed, res, now)
+	if err := s.recordEvent(ctx, tx, ev); err != nil {
+		return fmt.Errorf("finalize: %w", err)
+	}
+	if err := applyFormStates(ctx, tx, sess.formHome, sess.formAway, sess.Home, sess.Away, res, sess.worldTick); err != nil {
+		return fmt.Errorf("finalize: %w", err)
+	}
+
+	// Player appearances, ratings + morale land with the result (S06-03, v1.6):
+	// the engine's per-player rating sheet gives authoritative minutes and the
+	// match 1–10 ratings, which become the whole-season share input and the
+	// development pass' match-feed source for the two XIs.
+	if s.players != nil {
+		apps := append(
+			appearancesFromRatings(sess.homeXI, res.HomePlayerRatings),
+			appearancesFromRatings(sess.awayXI, res.AwayPlayerRatings)...)
+		if err := s.players.RecordMatchAppearances(ctx, tx, sess.MatchID, apps); err != nil {
+			return fmt.Errorf("finalize: record appearances: %w", err)
+		}
+	}
+
+	// Match injuries land with the result (S08-03), mirroring the quick-play
+	// path.
+	if _, err := injury.PersistMatch(ctx, tx, s.bus, sess.WorldID, sess.worldTick, sess.MatchID, sess.Seed, now, injuryCandidates(res)); err != nil {
+		return fmt.Errorf("finalize: injuries: %w", err)
+	}
+
+	// Rivalry graph + trust deltas land with the result (S06-04c).
+	var socialPush *internalsocial.RelationshipPush
+	if s.social != nil {
+		if socialPush, err = s.social.RecordCompletedMatch(ctx, tx, sess.WorldID, sess.FixtureID, sess.HomeClubID, sess.AwayClubID, res.HomeGoals, res.AwayGoals, now); err != nil {
+			return fmt.Errorf("finalize: rivalries: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("finalize: commit: %w", err)
+	}
+	if socialPush != nil {
+		s.social.PublishRelationshipChange(ctx, socialPush)
+	}
+	return nil
+}
+
+// matchPlayedRecorded reports whether the MATCH_PLAYED marker for a match has
+// been written — the flag that makes the side-effect pass idempotent under
+// redelivery. It is written in the same transaction as every other side
+// effect, so its presence means the whole pass committed.
+func matchPlayedRecorded(ctx context.Context, tx pgx.Tx, matchID uuid.UUID) (bool, error) {
+	var ok bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM world.events
+			WHERE event_type = $1 AND payload->>'match_id' = $2
+		)`, EventMatchPlayed, matchID.String()).Scan(&ok); err != nil {
+		return false, fmt.Errorf("finalize: match played marker: %w", err)
+	}
+	return ok, nil
+}
+
+// sleepFor sleeps d unless ctx is done first. A zero or negative delay returns
+// immediately (the pacing loop's cadence is the caller's job).
+func sleepFor(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 // LoadLiveSessions rehydrates every in-progress live match of a world from its
@@ -723,11 +850,25 @@ func (s *Service) Substitute(ctx context.Context, matchID, managerID uuid.UUID, 
 		"player_in":  playerIn.String(),
 		"player_out": playerOut.String(),
 	})
-	if _, err := s.pool.Exec(ctx, `
+	// The awaited-minute check is atomic with the insert: the pacing goroutine
+	// advances the clock under FOR UPDATE while this validation is read-only, so
+	// the pre-check alone could admit an input whose minute already streamed
+	// (a late style/sub landing after the client saw that minute). Re-checking
+	// current_minute in the INSERT's WHERE closes that window: an input for an
+	// already-persisted minute accepts zero rows and the manager gets
+	// ErrMinuteClosed instead of a change that silently reruns at Finalize.
+	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO match.match_inputs (match_id, world_id, sequence, minute, kind, payload, created_by_manager_id)
-		VALUES ($1, $2, $3, $4, 'substitution', $5, $6)`,
-		matchID, live.worldID, seq, minute, payload, managerID); err != nil {
+		SELECT $1, $2, $3, $4, 'substitution', $5, $6
+		WHERE EXISTS (
+			SELECT 1 FROM match.matches
+			WHERE id = $1 AND status = 'in_progress' AND current_minute < $4
+		)`, matchID, live.worldID, seq, minute, payload, managerID)
+	if err != nil {
 		return fmt.Errorf("substitute: insert input: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrMinuteClosed
 	}
 	return nil
 }
@@ -763,11 +904,21 @@ func (s *Service) TacticChange(ctx context.Context, matchID, managerID uuid.UUID
 		"club_id": live.clubID.String(),
 		"style":   style,
 	})
-	if _, err := s.pool.Exec(ctx, `
+	// Same atomic awaited-minute contract as Substitute: the insert is guarded
+	// by the match row's live current_minute so an input can never land at a
+	// minute the pacing goroutine already streamed (see the comment above).
+	tag, err := s.pool.Exec(ctx, `
 		INSERT INTO match.match_inputs (match_id, world_id, sequence, minute, kind, payload, created_by_manager_id)
-		VALUES ($1, $2, $3, $4, 'tactic_change', $5, $6)`,
-		matchID, live.worldID, seq, minute, payload, managerID); err != nil {
+		SELECT $1, $2, $3, $4, 'tactic_change', $5, $6
+		WHERE EXISTS (
+			SELECT 1 FROM match.matches
+			WHERE id = $1 AND status = 'in_progress' AND current_minute < $4
+		)`, matchID, live.worldID, seq, minute, payload, managerID)
+	if err != nil {
 		return fmt.Errorf("tactic change: insert input: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrMinuteClosed
 	}
 	return nil
 }
