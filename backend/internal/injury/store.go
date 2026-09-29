@@ -102,6 +102,7 @@ type playerContext struct {
 
 const playerContextQuery = `
 	SELECT
+		p.id,
 		p.club_id,
 		COALESCE(c.fatigue, 0)::float8,
 		COALESCE(h.injury_susceptibility, 50),

@@ -187,7 +187,13 @@ jobs:
       packages: write
     strategy:
       matrix:
-        image: [api, scheduler, worker, frontend]
+        # One backend image (cmd/touchline) serves every backend role; the
+        # Helm charts pick the role via container args (IM29).
+        include:
+          - image: touchline
+            dockerfile: api
+          - image: frontend
+            dockerfile: frontend
     steps:
       - uses: actions/checkout@v4
       - name: Set up QEMU
@@ -212,7 +218,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: infra/docker/Dockerfile.${{ matrix.image }}
+          file: infra/docker/Dockerfile.${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

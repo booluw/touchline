@@ -69,8 +69,8 @@ func (a *App) RunWorker(ctx context.Context) error {
 	return nil
 }
 
-// subscribeWorldTick fans each WORLD_TICK out to realtime subscribers, then
-// runs the day-derived gameplay dispatch (handleWorldTick).
+// subscribeWorldTick fans each WORLD_TICK out to realtime subscribers
+// (best-effort), then runs the day-derived gameplay dispatch (handleWorldTick).
 func (a *App) subscribeWorldTick(ctx context.Context) error {
 	err := a.Bus.Subscribe(ctx, "WORLD_TICK", func(ev eventbus.Event) error {
 		var payload struct {
@@ -83,12 +83,13 @@ func (a *App) subscribeWorldTick(ctx context.Context) error {
 		log.Printf("handled event %s (%s, granularity %s) for world %s at tick %d",
 			ev.ID, ev.EventType, payload.Granularity, ev.WorldID, ev.WorldTick)
 
-		tickEvent, err := realtime.BuildWorldTick(ev.WorldID, ev.ID.String(), payload.Granularity, ev.WorldTick)
-		if err != nil {
-			return nil
-		}
-		if err := a.Broker.Publish(ctx, tickEvent); err != nil {
-			return nil
+		// The socket push is best-effort (IM23): a realtime failure is logged
+		// and the day's gameplay still runs — skipping it here would silently
+		// drop wages, training, the market and kickoffs for that game day.
+		if tickEvent, err := realtime.BuildWorldTick(ev.WorldID, ev.ID.String(), payload.Granularity, ev.WorldTick); err != nil {
+			log.Printf("world tick %s: build realtime envelope: %v", ev.ID, err)
+		} else if err := a.Broker.Publish(ctx, tickEvent); err != nil {
+			log.Printf("world tick %s: realtime publish: %v", ev.ID, err)
 		}
 
 		return a.handleWorldTick(ctx, ev, payload.Granularity)
@@ -99,34 +100,41 @@ func (a *App) subscribeWorldTick(ctx context.Context) error {
 	return nil
 }
 
-// subscribeBidEvents pushes an urgent dashboard item to the selling club's
-// manager the moment a bid lands/counters/resolves (S07-01). The eventbus is
-// single-handler-per-type and nobody else consumes these types.
+// subscribeBidEvents pushes the urgent dashboard section to both sides of a
+// bid thread the moment a bid lands, is countered, accepted, rejected or
+// withdrawn (S07-01, IM26): the seller learns of an incoming offer, the buyer
+// of the answer. Every bid event carries buying_club_id + selling_club_id; a
+// side with no human manager (an AI club) is skipped, and PushCategory only
+// sends items that are new to that manager, so the acting side gets no noise.
+// The eventbus is single-handler-per-type and nobody else consumes these types.
 func (a *App) subscribeBidEvents(ctx context.Context) error {
 	for _, bidType := range []string{
 		transfer.EventBidPlaced,
 		transfer.EventBidCountered,
 		transfer.EventBidAccepted,
 		transfer.EventBidRejected,
+		transfer.EventBidWithdrawn,
 	} {
 		if err := a.Bus.Subscribe(ctx, bidType, func(ev eventbus.Event) error {
 			var payload struct {
-				BidID         uuid.UUID `json:"bid_id"`
+				BuyingClubID  uuid.UUID `json:"buying_club_id"`
 				SellingClubID uuid.UUID `json:"selling_club_id"`
 			}
 			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
 				log.Printf("bid event %s: unreadable payload (%v); skipping", ev.ID, err)
 				return nil
 			}
-			if payload.SellingClubID == uuid.Nil {
-				return nil
-			}
-			managerID, err := a.Dashboard.ManagerForClub(ctx, ev.WorldID, payload.SellingClubID)
-			if err != nil {
-				return nil
-			}
-			if err := a.Dashboard.PushCategory(ctx, ev.WorldID, managerID, dashboard.PriorityUrgent); err != nil {
-				log.Printf("world %s dashboard bid push: %v", ev.WorldID, err)
+			for _, clubID := range []uuid.UUID{payload.SellingClubID, payload.BuyingClubID} {
+				if clubID == uuid.Nil {
+					continue
+				}
+				managerID, err := a.Dashboard.ManagerForClub(ctx, ev.WorldID, clubID)
+				if err != nil {
+					continue // AI club / no human manager to notify
+				}
+				if err := a.Dashboard.PushCategory(ctx, ev.WorldID, managerID, dashboard.PriorityUrgent); err != nil {
+					log.Printf("world %s dashboard bid push: %v", ev.WorldID, err)
+				}
 			}
 			return nil
 		}); err != nil {

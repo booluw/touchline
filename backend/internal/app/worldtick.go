@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -29,9 +30,16 @@ func (a *App) handleWorldTick(ctx context.Context, ev eventbus.Event, granularit
 		return nil
 	}
 
-	day, week, month, err := a.World.Calendar(ctx, ev.WorldID)
+	currentDay, week, month, err := a.World.Calendar(ctx, ev.WorldID)
 	if err != nil {
 		return fmt.Errorf("world %s daily tick: calendar config: %w", ev.WorldID, err)
+	}
+	// IM23: the emission's own day, not the counter at processing time — a
+	// multi-day rollover commits all its increments at once. Emissions from
+	// before IM23 carry no day and fall back to the counter.
+	day := currentDay
+	if d, ok := tickDay(ev.Payload); ok {
+		day = d
 	}
 
 	if err := a.runDaily(ctx, ev); err != nil {
@@ -58,7 +66,7 @@ func (a *App) handleWorldTick(ctx context.Context, ev eventbus.Event, granularit
 	// (A06). The hooks dedup per season. Leagues worlds are driven by their own
 	// SEASON_COMPLETED subscription instead.
 	if day%int64(academy.DaysPerSeason) == 0 {
-		if err := a.runSeasonal(ctx, ev); err != nil {
+		if err := a.runSeasonal(ctx, ev, day); err != nil {
 			return err
 		}
 	}
@@ -133,9 +141,21 @@ func (a *App) runMonthly(ctx context.Context, ev eventbus.Event) error {
 	return nil
 }
 
-// runSeasonal is the league-less season-boundary lifecycle fallback.
-func (a *App) runSeasonal(ctx context.Context, ev eventbus.Event) error {
-	season, ref, err := a.worldSeason(ctx, ev.WorldID)
+// runSeasonal is the league-less season-boundary lifecycle fallback. A world
+// with any league is skipped (IM24): its countries' SEASON_COMPLETED events
+// drive the lifecycle, and a second world-wide pass here would run another
+// intake on top of theirs.
+func (a *App) runSeasonal(ctx context.Context, ev eventbus.Event, day int64) error {
+	var hasLeagues bool
+	if err := a.Pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM competition.competitions
+		               WHERE world_id = $1 AND competition_type = 'league')`, ev.WorldID).Scan(&hasLeagues); err != nil {
+		return fmt.Errorf("world %s seasonal lifecycle: league check: %w", ev.WorldID, err)
+	}
+	if hasLeagues {
+		return nil
+	}
+	season, ref, err := a.worldSeasonAt(ctx, ev.WorldID, day)
 	if err != nil {
 		return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
 	}
@@ -184,14 +204,31 @@ func (a *App) kickDueWorld(ctx context.Context, worldID uuid.UUID) error {
 // from the day counter (worldDate = COALESCE(launched_at, created_at) +
 // current_day days; OPD-24). Used by the seasonal academy-intake hooks.
 func (a *App) worldSeason(ctx context.Context, worldID uuid.UUID) (int, time.Time, error) {
-	var day int64
+	return a.worldSeasonAt(ctx, worldID, -1)
+}
+
+// worldSeasonAt is worldSeason for an explicit calendar day; a negative day
+// reads the world's current counter.
+func (a *App) worldSeasonAt(ctx context.Context, worldID uuid.UUID, day int64) (int, time.Time, error) {
 	var ref time.Time
 	err := a.Pool.QueryRow(ctx, `
-		SELECT w.current_day,
-		       COALESCE(w.launched_at, w.created_at) + make_interval(days => w.current_day::int)
-		FROM world.worlds w WHERE w.id = $1`, worldID).Scan(&day, &ref)
+		SELECT d.day, COALESCE(w.launched_at, w.created_at) + make_interval(days => d.day::int)
+		FROM world.worlds w
+		CROSS JOIN LATERAL (SELECT CASE WHEN $2::bigint >= 0 THEN $2::bigint ELSE w.current_day END AS day) d
+		WHERE w.id = $1`, worldID, day).Scan(&day, &ref)
 	if err != nil {
 		return 0, time.Time{}, fmt.Errorf("world season: %w", err)
 	}
 	return academy.SeasonForDay(day), ref, nil
+}
+
+// tickDay extracts the calendar day stamped on a WORLD_TICK payload (IM23).
+func tickDay(payload []byte) (int64, bool) {
+	var p struct {
+		Day *int64 `json:"day"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil || p.Day == nil {
+		return 0, false
+	}
+	return *p.Day, true
 }

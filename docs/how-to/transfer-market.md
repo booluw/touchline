@@ -49,13 +49,16 @@ season or month.
 ## 4. Bid lifetime (the TTL)
 
 `BidTTLWorldDays = 3` (`internal/transfer/valuation.go`, OPD-05 resolution).
-An open bid (`pending` or `countered`) that goes **unanswered** past the
-wall-clock deadline is expired:
+The TTL is **three world days** at the world's clock scale: 3 ×
+`tick.day_length` of real time (three real days at the default scale, three
+minutes at `tick.day_length = 60`; IM26). An open bid (`pending` or
+`countered`) that goes **unanswered** past that deadline is expired:
 
 - lazily, the next time someone tries to `respond` to it
-  (`bidExpired` → `ErrBidExpired`), and
+  (`bidExpired` → `ErrBidExpired`; the expiry is saved before the error is
+  returned), and
 - eagerly, by the **daily sweep** (`ExpireStale`, SQL
-  `created_at < now() − interval`), which emits one `BID_EXPIRED` system event
+  `created_at < now() − ttl`), which emits one `BID_EXPIRED` system event
   per world with a change.
 
 Cascades: withdrawing a listing expires its open bids immediately; completing
@@ -64,15 +67,17 @@ a transfer expires every competing open bid on the player.
 ## 5. What a transfer completion actually does (atomic)
 
 `acceptBid` runs inside the caller's transaction, in order
-(`internal/transfer/service.go`, doc'd in
+(`internal/transfer/completion.go`, doc'd in
 [transfer-numerics](../design/transfer-numerics.md) §4):
 
 1. Relock the bid + latest agreed terms; re-validate.
 2. Verify the **buyer has cash ≥ fee**.
 3. Flip `player.players.club_id` to the buyer.
-4. Terminate the seller's active contracts + wage commitments (end today).
-5. Insert the buyer's contract + wage commitment from the agreed terms (`end =
-   today + contract_length_months`).
+4. Terminate the seller's active contracts + wage commitments (end on the
+   world's calendar date — `world.world_date`, IM25 — not the server's).
+5. Insert the buyer's contract + wage commitment from the agreed terms, dated
+   on the world calendar (`start = world date`, `end = start +
+   contract_length_months`).
 6. Emit `BID_ACCEPTED` (with explanation).
 7. Record `transfer.completed_transfers`.
 8. Post ledger, **dedup-keyed**: debit `transfer_fee` on the buyer, credit
@@ -89,13 +94,13 @@ against the pre-sale squad.
 
 ## 6. The daily tick and the market
 
-Each **daily** `WORLD_TICK`, in order (`internal/app/app.go`):
+Each **daily** `WORLD_TICK`, in order (`internal/app/worldtick.go`):
 
 1. `Policy.RespondToBidsForAbsent` — the PolicyBot answers pending bids on
    away-managed clubs' players **before** the sweep (so a transferred player
    can't be "sold out from under" an absent manager's back-and-forth).
 2. `Transfers.DailyTick`:
-   - `ExpireStale` — expire bids past the 3-day TTL.
+   - `ExpireStale` — expire bids past the 3-world-day TTL.
    - `RecomputeValuations` — refresh `player.players.market_value` for every
      active, contracted player (one `MARKET_VALUATIONS_REFRESHED` event on
      change). See the valuation formula in the glossary.
@@ -110,7 +115,10 @@ Each **daily** `WORLD_TICK`, in order (`internal/app/app.go`):
   `(listingID, worldTick)` uniform in `[valuation × 0.75, valuation × 0.95]`,
   never above asking; pays at most `valuation × 0.95`; only bids when
   `cash ≥ fee × 1.25`; the top-2 AI clubs by squad thinness shortlist; never
-  bids while an open bid exists.
+  bids while an open bid exists. AI bids go through **the same bid command a
+  manager's bid does** (`placeBidTx`, IM26): the same duplicate-open-bid,
+  funds, live-listing and transferability rules apply, and a bid those rules
+  refuse is simply skipped.
 - AI reacts to your counter: fee ≤ `valuation × 0.95` → accept; ≤
   `valuation × 1.10` → counter at `valuation × 0.95`; else reject. After
   **3 rounds** it rejects.
@@ -119,6 +127,12 @@ Each **daily** `WORLD_TICK`, in order (`internal/app/app.go`):
 
 All of this is tunable constant data in `internal/transfer` — recalibration is
 a data edit, never engine logic.
+
+**Notifications (S07-01, IM26).** Every bid-thread event — placed, countered,
+accepted, rejected, withdrawn — carries `buying_club_id` and
+`selling_club_id`, and the worker pushes the urgent dashboard section to the
+human manager on **each** side: the seller hears of an incoming offer, the
+buyer hears the answer. AI clubs (no human manager) are skipped.
 
 ## 8. HTTP surface (world-scoped to your manager)
 

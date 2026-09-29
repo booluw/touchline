@@ -729,7 +729,7 @@ func clubSeeds(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) []ClubSeed {
 // leaguesByCountry loads the country's leagues ordered by tier (ascending).
 func (s *Service) leaguesByCountry(ctx context.Context, tx pgx.Tx, countryID uuid.UUID) ([]League, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.status,
+		SELECT c.id, c.world_id, c.country_id, c.name, c.tier, c.team_count, c.reputation, c.status,
 		       r.promotions, r.relegations,
 		       r.promotes_to_competition_id, r.relegates_to_competition_id,
 		       COALESCE(ptc.name, ''), COALESCE(rtc.name, ''),

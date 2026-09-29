@@ -27,10 +27,14 @@ func (s *Service) DailyTick(ctx context.Context, worldID uuid.UUID, worldTick in
 
 // ExpireStale resolves bids that have gone unanswered beyond BidTTLWorldDays.
 func (s *Service) ExpireStale(ctx context.Context, worldID uuid.UUID, worldTick int64) (int64, error) {
+	ttl, err := bidTTL(ctx, s.pool, worldID)
+	if err != nil {
+		return 0, err
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE transfer.bids SET status = 'expired', responded_at = now()
 		WHERE world_id = $1 AND status IN ('pending','countered')
-		  AND created_at < now() - ($2 || ' days')::interval`, worldID, BidTTLWorldDays)
+		  AND created_at < now() - make_interval(secs => $2)`, worldID, ttl.Seconds())
 	if err != nil {
 		return 0, fmt.Errorf("expire stale bids: %w", err)
 	}
@@ -127,10 +131,13 @@ func (s *Service) AIBidActivity(ctx context.Context, worldID uuid.UUID, worldTic
 			if cand.Cash < int64(float64(fee)*aiBuyFundsMargin) {
 				continue
 			}
-			if err := s.placeAIBid(ctx, tx, worldID, worldTick, t, cand, fee, attrs); err != nil {
+			ok, err := s.placeAIBid(ctx, tx, worldID, t, cand, fee, attrs)
+			if err != nil {
 				return 0, err
 			}
-			placed++
+			if ok {
+				placed++
+			}
 		}
 	}
 

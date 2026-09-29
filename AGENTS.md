@@ -17,7 +17,7 @@ Repo-specific guidance for AI coding agents. Keep high-signal only; this file is
 - `go vet -tags integration ./internal/... ./pkg/...` (compile-gate for integration tests)
 - `go test ./...`
 
-Integration tests (`//go:build integration`) need a live Postgres (`TEST_DATABASE_URL`, `make db-up`/Docker) and **cannot run in CI-less local shells** — they only compile-check here. Never drop the `integration` build tag.
+Integration tests (`//go:build integration`) need a live Postgres (`TEST_DATABASE_URL`, `make db-up`/Docker). Without one they only compile-check; when a Postgres is available (even a local `postgresql-16` cluster) run the suites you touched — IM30 found runtime SQL bugs that `go vet -tags integration` cannot see. Never drop the `integration` build tag.
 
 ## Improvement workflow (the ongoing sprint)
 - Each improvement is planned in `docs/tasks/improvements/IM##-<slug>.md` from a fixed template (Status / Sprint / Source / Depends / What to do / Recorded decisions).

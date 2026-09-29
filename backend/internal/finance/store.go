@@ -224,7 +224,7 @@ func (s *Store) WageCommitments(ctx context.Context, clubID uuid.UUID) (*Commitm
 		       COALESCE(SUM(w.weekly_wage)::bigint, 0) * $2
 		FROM finance.wage_commitments w
 		JOIN player.contracts c ON c.id = w.contract_id
-		WHERE w.club_id = $1 AND c.status = 'active' AND w.end_date >= CURRENT_DATE`,
+		WHERE w.club_id = $1 AND c.status = 'active' AND w.end_date >= world.club_world_date($1)`,
 		clubID, WeeksPerSeason).Scan(&c.Count, &c.WeeklyWage, &c.AnnualWage)
 	if err != nil {
 		return nil, fmt.Errorf("wage commitments: %w", err)
@@ -239,7 +239,7 @@ func (s *Store) ActiveWageCommitments(ctx context.Context, tx pgx.Tx, clubID uui
 		SELECT w.contract_id, c.player_id, w.weekly_wage
 		FROM finance.wage_commitments w
 		JOIN player.contracts c ON c.id = w.contract_id
-		WHERE w.club_id = $1 AND c.status = 'active' AND w.end_date >= CURRENT_DATE
+		WHERE w.club_id = $1 AND c.status = 'active' AND w.end_date >= world.club_world_date($1)
 		ORDER BY c.player_id`, clubID)
 	if err != nil {
 		return nil, fmt.Errorf("active wage commitments: %w", err)
@@ -263,13 +263,17 @@ func (s *Store) ActiveWageCommitments(ctx context.Context, tx pgx.Tx, clubID uui
 // is forward-compatible and will activate automatically when S16 completes.
 func (s *Store) FutureInstallments(ctx context.Context, clubID uuid.UUID) (int64, error) {
 	// The JSONB array elements are of the form {"amount": <number>, "due_date": "<date>"}.
-	// We iterate the arrays in SQL, guarding against malformed JSON.
+	// We iterate the arrays in SQL, skipping non-array installments. The amount
+	// is cast per element before summing (IM25: SUM over the raw text failed on
+	// every call and the swallowed error always reported 0), and due dates are
+	// compared with the world's calendar date, not the server's.
 	rows, err := s.pool.Query(ctx, `
-		SELECT COALESCE(SUM(elem->>'amount')::bigint, 0)
-		FROM transfer.completed_transfers t,
-		     jsonb_array_elements(t.installments) elem
+		SELECT COALESCE(SUM((elem->>'amount')::bigint), 0)::bigint
+		FROM transfer.completed_transfers t
+		CROSS JOIN LATERAL jsonb_array_elements(
+		    CASE WHEN jsonb_typeof(t.installments) = 'array' THEN t.installments ELSE '[]'::jsonb END) elem
 		WHERE t.to_club_id = $1
-		  AND (elem->>'due_date')::date > CURRENT_DATE`, clubID)
+		  AND (elem->>'due_date')::date > world.club_world_date($1)`, clubID)
 	if err != nil {
 		// Defensive: malformed JSON in installments or missing columns
 		// should not crash the summary.

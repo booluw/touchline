@@ -81,7 +81,7 @@ func (s *Store) PendingBids(ctx context.Context, clubIDs []uuid.UUID) ([]pending
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT b.id, b.player_id, p.display_name,
+		SELECT b.id, b.player_id, pp.display_name,
 		       b.bidding_club_id, bc.name, b.selling_club_id, sc.name,
 		       (n.terms->>'fee')::bigint, n.round, b.status, b.created_at
 		FROM transfer.bids b
@@ -89,6 +89,7 @@ func (s *Store) PendingBids(ctx context.Context, clubIDs []uuid.UUID) ([]pending
 			SELECT n2.id FROM transfer.negotiations n2
 			WHERE n2.bid_id = b.id ORDER BY n2.round DESC LIMIT 1)
 		JOIN player.players p ON p.id = b.player_id
+		JOIN person.people pp ON pp.id = p.person_id
 		JOIN club.clubs bc ON bc.id = b.bidding_club_id
 		JOIN club.clubs sc ON sc.id = b.selling_club_id
 		WHERE b.selling_club_id = ANY($1) AND b.status IN ('pending', 'countered')
@@ -130,12 +131,13 @@ func (s *Store) ExpiringContracts(ctx context.Context, clubIDs []uuid.UUID, wind
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.player_id, p.display_name, c.club_id, c.end_date,
+		SELECT c.player_id, pp.display_name, c.club_id, c.end_date,
 		       COALESCE(c.weekly_wage, 0)::bigint, c.squad_role
 		FROM player.contracts c
 		JOIN player.players p ON p.id = c.player_id
+		JOIN person.people pp ON pp.id = p.person_id
 		WHERE c.club_id = ANY($1) AND c.status = 'active'
-		  AND c.end_date <= CURRENT_DATE + $2::int
+		  AND c.end_date <= world.club_world_date(c.club_id) + $2::int
 		ORDER BY c.end_date`, clubIDs, windowDays)
 	if err != nil {
 		return nil, fmt.Errorf("expiring contracts: %w", err)
@@ -325,14 +327,15 @@ func (s *Store) UnhappyPlayers(ctx context.Context, clubIDs []uuid.UUID, thresho
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT pc.player_id, p.display_name, pc.club_id, pc.morale,
+		SELECT pc.player_id, pp.display_name, pc.club_id, pc.morale,
 		       EXISTS (
 				SELECT 1 FROM player.player_transfer_requests r
 				WHERE r.player_id = pc.player_id AND r.status = 'pending')
 		FROM player.player_condition pc
 		JOIN player.players p ON p.id = pc.player_id
+		JOIN person.people pp ON pp.id = p.person_id
 		WHERE pc.club_id = ANY($1) AND pc.morale <= $2
-		ORDER BY pc.morale, p.display_name`, clubIDs, threshold)
+		ORDER BY pc.morale, pp.display_name`, clubIDs, threshold)
 	if err != nil {
 		return nil, fmt.Errorf("unhappy players: %w", err)
 	}
@@ -484,7 +487,7 @@ func (s *Store) RecentMarketEvents(ctx context.Context, worldID uuid.UUID, limit
 	rows, err := s.pool.Query(ctx, `
 		SELECT e.id, e.event_type,
 		       COALESCE(NULLIF(e.payload->>'player_id', '')::uuid, '00000000-0000-0000-0000-000000000000'),
-		       COALESCE(p.display_name, ''),
+		       COALESCE(pp.display_name, ''),
 		       COALESCE(NULLIF(e.payload->>'club_id', '')::uuid,
 		                NULLIF(e.payload->>'to_club_id', '')::uuid,
 		                '00000000-0000-0000-0000-000000000000'),
@@ -493,6 +496,7 @@ func (s *Store) RecentMarketEvents(ctx context.Context, worldID uuid.UUID, limit
 		       e.occurred_at
 		FROM world.events e
 		LEFT JOIN player.players p ON p.id = NULLIF(e.payload->>'player_id', '')::uuid
+		LEFT JOIN person.people pp ON pp.id = p.person_id
 		LEFT JOIN club.clubs cc ON cc.id = COALESCE(NULLIF(e.payload->>'club_id', '')::uuid,
 		                                            NULLIF(e.payload->>'to_club_id', '')::uuid)
 		WHERE e.world_id = $1

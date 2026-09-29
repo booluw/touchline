@@ -166,13 +166,32 @@ func (s *Service) SetConfig(ctx context.Context, id uuid.UUID, key string, value
 	if err != nil {
 		return fmt.Errorf("marshal config value for %s: %w", key, err)
 	}
-	if _, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin set config %s: %w", key, err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO world.world_config (world_id, config_key, config_value)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (world_id, config_key)
 		DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = now()`,
 		id, key, raw); err != nil {
 		return fmt.Errorf("set config %s: %w", key, err)
+	}
+	// IM27: a config change (clock scale, cadence, calendar steps) reshapes
+	// how the world runs, so it lands on the event spine like any change.
+	var tick int64
+	if err := tx.QueryRow(ctx, `SELECT current_tick FROM world.worlds WHERE id = $1`, id).Scan(&tick); err != nil {
+		return fmt.Errorf("set config %s: load tick: %w", key, err)
+	}
+	if err := s.record(ctx, tx, id, EventWorldConfigChanged, tick, map[string]any{
+		"key": key, "value": json.RawMessage(raw),
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit set config %s: %w", key, err)
 	}
 	return nil
 }
@@ -327,6 +346,9 @@ func canTransition(from, to string) bool {
 }
 
 const systemActor = "system"
+
+// EventWorldConfigChanged records a world_config write (key + new value, IM27).
+const EventWorldConfigChanged = "WORLD_CONFIG_CHANGED"
 
 func toUpper(s string) string {
 	switch s {

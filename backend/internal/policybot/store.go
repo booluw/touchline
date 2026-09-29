@@ -436,8 +436,8 @@ func (s *Store) PlayerAttrs(ctx context.Context, playerID uuid.UUID) (transfer.P
 	var a transfer.PlayerAttrs
 	err := s.pool.QueryRow(ctx, `
 		SELECT pl.id, pl.primary_position, pl.market_value,
-		       (CURRENT_DATE - pp.date_of_birth) / 365,
-		       COALESCE((SELECT (ct.end_date - CURRENT_DATE) FROM player.contracts ct
+		       (world.world_date(pl.world_id) - pp.date_of_birth) / 365,
+		       COALESCE((SELECT (ct.end_date - world.world_date(pl.world_id)) FROM player.contracts ct
 		                  WHERE ct.player_id = pl.id AND ct.status = 'active'
 		                  ORDER BY ct.start_date DESC LIMIT 1), 0),
 		       COALESCE((SELECT AVG(pa.value)::int FROM player.player_attributes pa

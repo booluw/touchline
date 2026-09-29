@@ -246,6 +246,13 @@ func (s *Service) SetCupFinalDate(ctx context.Context, cupID uuid.UUID, finalDat
 		}
 	}
 
+	if err := s.recordAdminEvent(ctx, tx, cup.WorldID, EventCupFinalDatePolicySet, map[string]any{
+		"cup_id": cupID, "final_date_mode": newMode, "final_date": newDeclDate,
+		"final_offset_days": newDeclOffset, "rounds_moved": moved,
+	}); err != nil {
+		return nil, err
+	}
+
 	cup, err = s.getCup(ctx, tx, cupID)
 	if err != nil {
 		return nil, err

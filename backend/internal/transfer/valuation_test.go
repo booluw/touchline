@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"math"
 	"testing"
 
 	"github.com/google/uuid"
@@ -14,13 +15,13 @@ func TestAgeFactorSpotValues(t *testing.T) {
 		want float64
 	}{
 		{15, 0.80}, {17, 0.80},
-		{18, 1.00}, {19, 0.97}, {23, 0.85}, // rising toward the 24-28 peak
+		{18, 0.85}, {19, 0.88}, {23, 1.00}, // rising toward the 24-28 peak
 		{24, 1.00}, {28, 1.00},
 		{29, 0.95}, {33, 0.75}, {35, 0.65},
 		{40, 0.50},
 	}
 	for _, c := range cases {
-		if got := ageFactor(c.age); int(got*100) != int(c.want*100) {
+		if got := ageFactor(c.age); math.Abs(got-c.want) > 1e-9 {
 			t.Errorf("ageFactor(%d) = %.3f, want %.3f", c.age, got, c.want)
 		}
 	}

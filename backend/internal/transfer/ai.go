@@ -8,8 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
-	"github.com/touchline/backend/pkg/eventbus"
 )
 
 // ---------- ai internals ----------
@@ -77,45 +75,43 @@ func (s *Service) aiBiddersForListing(ctx context.Context, tx pgx.Tx, worldID uu
 		if cand.Cash < int64(float64(fee)*aiBuyFundsMargin) {
 			continue
 		}
-		if err := s.placeAIBid(ctx, tx, worldID, worldTick, l, cand, fee, attrs); err != nil {
+		if _, err := s.placeAIBid(ctx, tx, worldID, l, cand, fee, attrs); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) placeAIBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, worldTick int64, l OpenListing, cand AIClubCandidate, fee int64, attrs PlayerAttrs) error {
+// placeAIBid submits one AI buyer's offer through the shared bid command
+// (placeBidTx), reporting whether a bid was actually placed. A bid the rules
+// refuse (duplicate open bid, unaffordable fee, listing gone) is skipped, not
+// an error, so one refusal never aborts the whole sweep.
+func (s *Service) placeAIBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, l OpenListing, cand AIClubCandidate, fee int64, attrs PlayerAttrs) (bool, error) {
 	wage := attrs.Wage
 	if wage <= 0 {
 		wage = defaultAIDealWage
 	}
-	terms := Terms{
-		Fee:                  fee,
-		WeeklyWage:           wage,
-		ContractLengthMonths: 24,
-	}
-	bidID, err := s.writeBidThread(ctx, tx, worldID, &l.ID, l.PlayerID, cand.ClubID, l.SellingClubID, terms, ProposedByBuyingClub)
-	if err != nil {
-		return err
+	listingID := l.ID
+	in := BidInput{
+		ListingID: &listingID,
+		Terms: Terms{
+			Fee:                  fee,
+			WeeklyWage:           wage,
+			ContractLengthMonths: 24,
+		},
 	}
 	bot := Actor{ManagerID: cand.ManagerID, IsPolicyBot: true}
-	payload := mustJSON(map[string]any{
-		"bid_id": bidID, "player_id": l.PlayerID,
-		"buying_club_id": cand.ClubID, "selling_club_id": l.SellingClubID, "fee": fee,
-	})
-	actorType, actorID := bot.actorTypeAndID()
-	e := eventbus.Event{
-		WorldID:   worldID,
-		WorldTick: worldTick,
-		EventType: EventBidPlaced,
-		ActorType: &actorType,
-		ActorID:   &actorID,
-		Payload:   payload,
+	_, _, _, err := s.placeBidTx(ctx, tx, bot, worldID, cand.ClubID, in)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrDuplicateOpenBid), errors.Is(err, ErrInsufficientFunds),
+		errors.Is(err, ErrListingNotFound), errors.Is(err, ErrPlayerNotTransferable), errors.Is(err, ErrSelfBid):
+		// The same rules that stop a manager's bid: this AI club sits it out.
+		return false, nil
+	default:
+		return false, fmt.Errorf("ai bid: %w", err)
 	}
-	if err := eventbus.WriteTx(ctx, s.bus, tx, &e); err != nil {
-		return fmt.Errorf("record ai bid: %w", err)
-	}
-	return nil
 }
 
 const defaultAIDealWage = int64(20_000)
@@ -177,8 +173,8 @@ func (s *Service) attrsForPlayerTx(ctx context.Context, tx pgx.Tx, playerID uuid
 	var a PlayerAttrs
 	err := tx.QueryRow(ctx, `
 		SELECT pl.id, pl.primary_position, pl.market_value,
-		       (CURRENT_DATE - pp.date_of_birth) / 365,
-		       COALESCE((SELECT (ct.end_date - CURRENT_DATE) FROM player.contracts ct
+		       (world.world_date(pl.world_id) - pp.date_of_birth) / 365,
+		       COALESCE((SELECT (ct.end_date - world.world_date(pl.world_id)) FROM player.contracts ct
 		                  WHERE ct.player_id = pl.id AND ct.status = 'active'
 		                  ORDER BY ct.start_date DESC LIMIT 1), 0),
 		       COALESCE((SELECT AVG(pa.value)::int FROM player.player_attributes pa

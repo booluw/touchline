@@ -208,4 +208,8 @@ func TestMatchFeedScopedToCallerWorld(t *testing.T) {
 	if resp := get(t, ts, client, "/api/matches/"+matchID.String()+"/events", cookies); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("foreign match events = %d, want 404", resp.StatusCode)
 	}
+	// An unknown fixture looks exactly like a foreign one (IM28): 404, not 500.
+	if resp := get(t, ts, client, "/api/fixtures/"+uuid.New().String(), cookies); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown fixture header = %d, want 404", resp.StatusCode)
+	}
 }

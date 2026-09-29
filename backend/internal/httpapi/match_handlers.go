@@ -28,6 +28,10 @@ func (s *server) handleGetFixture(c *gin.Context) {
 	}
 
 	view, err := s.matchSvc.GetFixtureMatch(c.Request.Context(), fixtureID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "fixture not found"})
+		return
+	}
 	if err != nil {
 		internalError(c, err)
 		return

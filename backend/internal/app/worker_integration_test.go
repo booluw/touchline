@@ -4,11 +4,13 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	internalcompetition "github.com/touchline/backend/internal/competition"
 	"github.com/touchline/backend/internal/testdb"
 	"github.com/touchline/backend/internal/transfertest"
 	"github.com/touchline/backend/pkg/eventbus"
@@ -152,14 +154,18 @@ func TestSingleDailyCadenceDispatchVariantCalendar(t *testing.T) {
 		wageTicks := distinctLedgerTicks(t, pool, w.WorldID, "wages", `^wage:([0-9]+):`)
 		academyTicks := distinctLedgerTicks(t, pool, w.WorldID, "academy", `^academy:maintenance:[0-9a-f-]+:([0-9]+)$`)
 
-		if day%10 == 0 {
-			if snapshots != 3 {
-				t.Fatalf("day %d: board snapshots = %d, want 3", day, snapshots)
-			}
-			assertEqualTicks(t, day, wageTicks, []int64{10, 20, 30})
-			assertEqualTicks(t, day, academyTicks, []int64{10, 20, 30})
-		} else if snapshots != 0 {
-			t.Fatalf("day %d: board snapshots = %d (not a 10-day month boundary)", day, snapshots)
+		// 10-day month: by day D the monthly passes have run on every multiple
+		// of 10 up to D (the old expectation demanded all three by day 10).
+		var months []int64
+		for m := int64(10); m <= day; m += 10 {
+			months = append(months, m)
+		}
+		if want := 3 * len(months); snapshots != want {
+			t.Fatalf("day %d: board snapshots = %d, want %d (3 clubs × %d monthly reviews)", day, snapshots, want, len(months))
+		}
+		if len(months) > 0 {
+			assertEqualTicks(t, day, wageTicks, months)
+			assertEqualTicks(t, day, academyTicks, months)
 		}
 
 		// 5-day week: the last week day reached by day D is D - D%5 (or 0).
@@ -196,14 +202,85 @@ func TestSingleDailyCadenceDispatchSeasonalFallback(t *testing.T) {
 	defer a.Close()
 	a.runnerEnabled = false
 
-	driveWorkerDaily(t, pool, a, w.WorldID, 364, nil)
+	// The monthly gate must stay silent on day 364 itself (364 % 30 != 0):
+	// the board-snapshot count and the wage ticks are unchanged from day 363.
+	// (The old assertion expected zero snapshots after a whole year of monthly
+	// reviews.)
+	var snapshotsAt363 int
+	driveWorkerDaily(t, pool, a, w.WorldID, 364, func(day int64) {
+		if day == 363 {
+			snapshotsAt363 = countSnapshots(t, pool, w.WorldID)
+		}
+	})
 
-	if got := countSnapshots(t, pool, w.WorldID); got != 0 {
-		t.Fatalf("seasonal fallback day 364: board snapshots = %d, want 0 (364 %% 30 != 0)", got)
+	if got := countSnapshots(t, pool, w.WorldID); got != snapshotsAt363 {
+		t.Fatalf("seasonal fallback day 364: board snapshots %d -> %d (364 %% 30 != 0)", snapshotsAt363, got)
 	}
-	if got := distinctLedgerTicks(t, pool, w.WorldID, "wages", `^wage:([0-9]+):`); len(got) != 0 {
-		t.Fatalf("seasonal fallback day 364: wages posted at %v", got)
+	for _, tick := range distinctLedgerTicks(t, pool, w.WorldID, "wages", `^wage:([0-9]+):`) {
+		if tick == 364 {
+			t.Fatalf("seasonal fallback day 364: wages posted on day 364")
+		}
 	}
+	if got := worldWideLifecycleEvents(t, pool, w.WorldID); got != 1 {
+		t.Fatalf("league-less world day 364: world-wide lifecycle events = %d, want 1", got)
+	}
+}
+
+// TestSeasonalFallbackSkipsLeagueWorlds: once a world has a league, its
+// countries' SEASON_COMPLETED events drive the lifecycle and the day-364
+// fallback must stay silent (IM24).
+func TestSeasonalFallbackSkipsLeagueWorlds(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t)
+	w := transfertest.Provision(t, pool, "IM24 League World", "im24-league@example.com")
+
+	compSvc := internalcompetition.NewService(pool, nil)
+	country, err := compSvc.CreateCountry(ctx, w.WorldID, "eng", "England")
+	if err != nil {
+		t.Fatalf("create country: %v", err)
+	}
+	if _, err := compSvc.CreateLeague(ctx, internalcompetition.LeagueParams{
+		CountryID: country.ID, Name: "Premier", Tier: 1, TeamCount: 4,
+	}); err != nil {
+		t.Fatalf("create league: %v", err)
+	}
+
+	a, err := Build(ctx, Config{
+		DatabaseURL: pool.Config().ConnConfig.ConnString(),
+		JWTSecret:   "test-secret",
+	})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	defer a.Close()
+	a.runnerEnabled = false
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE world.worlds SET current_day = 364, current_tick = 364 WHERE id = $1`, w.WorldID); err != nil {
+		t.Fatalf("advance clock: %v", err)
+	}
+	ev := eventbus.Event{
+		ID: uuid.New(), WorldID: w.WorldID, WorldTick: 364, EventType: "WORLD_TICK",
+		Payload: []byte(`{"granularity":"daily","day":364}`),
+	}
+	if err := a.handleWorldTick(ctx, ev, "daily"); err != nil {
+		t.Fatalf("day 364 handleWorldTick: %v", err)
+	}
+	if got := worldWideLifecycleEvents(t, pool, w.WorldID); got != 0 {
+		t.Fatalf("league world day 364: world-wide lifecycle events = %d, want 0", got)
+	}
+}
+
+func worldWideLifecycleEvents(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM world.events
+		WHERE world_id = $1 AND event_type = 'WORLD_LIFECYCLE_SEASON_COMPLETED'
+		  AND jsonb_typeof(payload->'country_id') = 'null'`, worldID).Scan(&n); err != nil {
+		t.Fatalf("count lifecycle events: %v", err)
+	}
+	return n
 }
 
 // ---- assertion helpers ----
@@ -282,5 +359,57 @@ func assertEqualTicks(t *testing.T, day int64, got, want []int64) {
 		if got[i] != want[i] {
 			t.Fatalf("day %d: ticks = %v, want %v", day, got, want)
 		}
+	}
+}
+
+// TestDailyDispatchUsesStampedDayOnCatchUp replays a multi-day scheduler
+// rollover (IM23): the whole batch is committed before the worker sees any of
+// its emissions, so world.worlds.current_day already reads the batch's last
+// day. The handler must gate on each emission's stamped day, so the weekly
+// pass lands exactly once (day 7) and the monthly pass exactly once (day 30).
+func TestDailyDispatchUsesStampedDayOnCatchUp(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.New(t)
+	w := transfertest.Provision(t, pool, "IM23 Catch Up", "im23-catchup@example.com")
+
+	a, err := Build(ctx, Config{
+		DatabaseURL: pool.Config().ConnConfig.ConnString(),
+		JWTSecret:   "test-secret",
+	})
+	if err != nil {
+		t.Fatalf("build app: %v", err)
+	}
+	defer a.Close()
+	a.runnerEnabled = false
+
+	learnerClub(t, pool, w.HumanClub)
+	fundedAcademies(t, pool, a, w.WorldID)
+
+	for _, batch := range [][2]int64{{1, 7}, {8, 14}, {15, 21}, {22, 28}, {29, 30}} {
+		// The rollover commits the whole batch first.
+		if _, err := pool.Exec(ctx,
+			`UPDATE world.worlds SET current_day = $1, current_tick = $1 WHERE id = $2`, batch[1], w.WorldID); err != nil {
+			t.Fatalf("advance clock to day %d: %v", batch[1], err)
+		}
+		for day := batch[0]; day <= batch[1]; day++ {
+			ev := eventbus.Event{
+				ID:        uuid.New(),
+				WorldID:   w.WorldID,
+				WorldTick: day,
+				EventType: "WORLD_TICK",
+				Payload:   []byte(fmt.Sprintf(`{"granularity":"daily","day":%d}`, day)),
+			}
+			if err := a.handleWorldTick(ctx, ev, "daily"); err != nil {
+				t.Fatalf("day %d handleWorldTick: %v", day, err)
+			}
+		}
+	}
+
+	if stamp := trainingStamp(t, pool, w.HumanClub); stamp != 28 {
+		t.Fatalf("training week stamp = %d, want 28 (weekly pass on days 7/14/21/28)", stamp)
+	}
+	assertEqualTicks(t, 30, distinctLedgerTicks(t, pool, w.WorldID, "wages", `^wage:([0-9]+):`), []int64{30})
+	if snapshots := countSnapshots(t, pool, w.WorldID); snapshots != 3 {
+		t.Fatalf("board snapshots = %d, want 3 (one monthly review)", snapshots)
 	}
 }

@@ -55,7 +55,7 @@ func ageFactor(age int) float64 {
 	case age <= 17:
 		return 0.80
 	case age <= 23:
-		return 0.85 + 0.03*float64(23-age) // 0.85..1.00 rising toward peak
+		return 0.85 + 0.03*float64(age-18) // 18 → 0.85 rising to 1.00 at 23 (IM26)
 	case age <= 28:
 		return 1.00
 	case age <= 35:

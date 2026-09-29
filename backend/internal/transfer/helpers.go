@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/touchline/backend/internal/world"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/explanation"
 )
@@ -229,6 +230,16 @@ func (s *Service) recordEventInner(ctx context.Context, tx pgx.Tx, worldID uuid.
 	return nil
 }
 
+// bidClubs loads the two sides of a bid thread. Every bid event carries both
+// club ids so the dashboard hook can notify the counterparty (IM26).
+func bidClubs(ctx context.Context, tx pgx.Tx, bidID uuid.UUID) (buyer, seller uuid.UUID, err error) {
+	if err := tx.QueryRow(ctx,
+		`SELECT bidding_club_id, selling_club_id FROM transfer.bids WHERE id = $1`, bidID).Scan(&buyer, &seller); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("bid clubs: %w", err)
+	}
+	return buyer, seller, nil
+}
+
 func bidTarget(ctx context.Context, tx pgx.Tx, in BidInput) uuid.UUID {
 	if in.ListingID != nil {
 		var pid uuid.UUID
@@ -264,11 +275,29 @@ func bidAsking(asking *int64) int64 {
 
 func (s *Service) bidExpired(ctx context.Context, tx pgx.Tx, bidID uuid.UUID) (bool, error) {
 	var created time.Time
+	var worldID uuid.UUID
 	if err := tx.QueryRow(ctx,
-		`SELECT created_at FROM transfer.bids WHERE id = $1`, bidID).Scan(&created); err != nil {
+		`SELECT created_at, world_id FROM transfer.bids WHERE id = $1`, bidID).Scan(&created, &worldID); err != nil {
 		return false, fmt.Errorf("bid created at: %w", err)
 	}
-	return time.Since(created) > time.Duration(BidTTLWorldDays)*24*time.Hour, nil
+	ttl, err := bidTTL(ctx, tx, worldID)
+	if err != nil {
+		return false, err
+	}
+	return time.Since(created) > ttl, nil
+}
+
+// bidTTL is BidTTLWorldDays converted to real time at the world's clock scale
+// (tick.day_length, IM16): three *world* days, which is three real days only at
+// the default one-game-day-per-real-day scale (IM26).
+func bidTTL(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, worldID uuid.UUID) (time.Duration, error) {
+	_, _, dayLength, err := world.LoadScale(ctx, q, worldID)
+	if err != nil {
+		return 0, fmt.Errorf("bid ttl: world clock: %w", err)
+	}
+	return time.Duration(BidTTLWorldDays) * dayLength, nil
 }
 
 func roundCount(ctx context.Context, tx pgx.Tx, bidID uuid.UUID) int {
@@ -309,17 +338,23 @@ func playerNameTx(ctx context.Context, tx pgx.Tx, playerID uuid.UUID) string {
 	return name
 }
 
+// completionExplanation scores an agreed transfer at its fee, broken down as
+// the player's market value plus the premium (or discount) the fee paid over
+// it — factor deltas sum to the score, as the explanation contract requires
+// (pkg/explanation Validate; IM26).
 func completionExplanation(valuation int64, terms Terms) *explanation.Explanation {
-	exp := explanation.New("transfer_value", int(valuation))
+	exp := explanation.New("transfer_value", int(terms.Fee))
 	exp.Add("market_value", int(valuation))
-	exp.Add("bid_fee", int(terms.Fee))
+	exp.Add("fee_vs_market_value", int(terms.Fee-valuation))
 	return exp
 }
 
+// counterExplanation scores a counter-offer at its asked fee: the valuation
+// plus the premium demanded over it.
 func counterExplanation(subject string, valuation, target int64) (*explanation.Explanation, error) {
-	exp := explanation.New(subject, int(valuation))
+	exp := explanation.New(subject, int(target))
 	exp.Add("valuation", int(valuation))
-	exp.Add("counter_fee", int(target))
+	exp.Add("counter_premium", int(target-valuation))
 	return exp, nil
 }
 

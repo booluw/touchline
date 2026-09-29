@@ -165,10 +165,10 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 
 | Term | Definition / derivation | Source |
 | --- | --- | --- |
-| **Market value** | `round10k(overall³ × 0.08 × positionMult × ageFactor × contractFactor)`, recomputed daily; `overall` is the mean attack/defence rating from the matchsim recipe. Position multipliers ~0.85–1.05; age peaks 24–28 (1.0); expiring deal (≤45 days left) ×0.5; contract factor capped 1.10. |
+| **Market value** | `round10k(overall³ × 0.08 × positionMult × ageFactor × contractFactor)`, recomputed daily; `overall` is the mean attack/defence rating from the matchsim recipe. Position multipliers ~0.85–1.05; age 18–23 rises 0.85 → 1.00, peaks 24–28 (1.0); expiring deal (≤45 days left) ×0.5; contract factor capped 1.10. |
 | **Listing status** | `active` (withdrawn closes it). **Listings never expire.** |
 | **Bid statuses** | `pending → accepted | rejected | countered | withdrawn | expired`. |
-| **Bid TTL** | `BidTTLWorldDays = 3` — expired by the daily sweep (`ExpireStale`) and lazily on respond. Withdrawing/completing cascades. |
+| **Bid TTL** | `BidTTLWorldDays = 3` world days (3 × `tick.day_length` of real time, IM26) — expired by the daily sweep (`ExpireStale`) and lazily on respond. Withdrawing/completing cascades. |
 | **AI seller** | `target = max(asking, valuation × 1.10)`; fee ≥ target accept; ≥ `0.90 × valuation` counter at target; else reject. |
 | **AI buyer** | deterministic fee in `[0.75, 0.95] × valuation`, pay cap `0.95×`, funds guard `cash ≥ 1.25×fee`, top-2 shortlist, no bid when an open bid exists; counter reaction cap `1.10×`; `aiMaxRounds = 3`. |
 | **Completion** | Atomic flip: ownership, seller contracts end, buyer contract, `BID_ACCEPTED`, `completed_transfers`, dedup-keyed ledger (debit `transfer_fee` / credit `player_sale`), clauses, history row, cascade close. |
@@ -215,7 +215,7 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | --- | --- | --- |
 | **world.events** | The append-only, world-scoped event log carrying `world_tick`, actor (`system`/`manager`/`policy_bot`), payload, and often an `Explanation`. Domain events e.g. `WORLD_TICK`, `SEASON_CREATED`, `BOARD_REVIEWED`, `MANAGER_SACKED`, `JOB_OFFER_ACCEPTED`, `BID_ACCEPTED`, `WAGE_POSTED`. |
 | **Outbox (OPD-23)** | Event publication and the write it describes land in the **same transaction** — a business write can't happen without its event, and redelivery is idempotent (dedup keys, `ON CONFLICT DO NOTHING`, `FOR UPDATE` relocks). |
-| **Explanation (OPD-12)** | Structured "why" (subject + factors) that **sum exactly** to the score it explains — rendered by clients, never recalculated (e.g. `board_confidence` factors sum to the weighted total; `monthly_wages` factors sum to the wage bill; `transfer_value` = valuation + fee). |
+| **Explanation (OPD-12)** | Structured "why" (subject + factors) that **sum exactly** to the score it explains — rendered by clients, never recalculated (e.g. `board_confidence` factors sum to the weighted total; `monthly_wages` factors sum to the wage bill; `transfer_value` scores the agreed fee = market value + the premium paid over it, IM26). |
 | **Commentary (IM19)** | The `detail.commentary` line of a `match.match_events` row. The engine stores it as a template with role placeholders (`{player}`, `{assist}`, `{sub}`) so a re-simulated match produces byte-identical text; the API resolves them to real names at read time from the row's `player_id` / `related_player_id`, falling back to neutral wording ("the player", "a teammate", "a substitute") when the attribution pass resolved nobody. A raw placeholder never reaches the client. |
 
 ---

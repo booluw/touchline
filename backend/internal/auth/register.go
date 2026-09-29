@@ -40,6 +40,9 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 	if email == "" || params.Password == "" {
 		return nil, fmt.Errorf("register: %w", ErrInvalidCredentials)
 	}
+	if len(params.Password) > 72 {
+		return nil, ErrPasswordTooLong
+	}
 	name := strings.TrimSpace(params.DisplayName)
 	if name == "" {
 		name = strings.SplitN(email, "@", 2)[0]

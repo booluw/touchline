@@ -24,11 +24,14 @@ import (
 // surface as 500.
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrNotAuthorized      = errors.New("login is currently limited to administrators")
+	ErrNotAuthorized      = errors.New("administrator access is no longer granted to this account")
 	ErrInvalidRefresh     = errors.New("invalid or expired session")
 	ErrNoManager          = errors.New("no world joined — an administrator must give this account a world before it can log in")
 	ErrNotMember          = errors.New("this account is not a member of the requested world")
 	ErrEmailTaken         = errors.New("an account with this email already exists")
+	// ErrPasswordTooLong: bcrypt only hashes the first 72 bytes, and refuses
+	// longer input outright (IM28: surfaced as a 400, not a 500).
+	ErrPasswordTooLong = errors.New("password must be at most 72 bytes")
 )
 
 // dummyHash is compared against (useless) credentials when no user matches an

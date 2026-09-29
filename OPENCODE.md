@@ -49,7 +49,7 @@ Both are the source of truth. Do not invent systems absent from these docs.
 - **Ledger, never a bare balance.** `finance.ledger_entries` is append-only; balance is always `SUM(entries)`. Do not add a stored `balance` column.
 - **Relationships = graph table** (`social.relationships`, pair + type unique), NOT columns on players. Uses `entity_{a,b}_type` polymorphism ('player' | 'manager' | 'club').
 - **Board mandates = structured rows** (category: primary/secondary/strategic/financial + status), not free text. Job-security math queries them directly.
-- **Explanation objects** (`internal/world/explanation.go`) accompany every scored decision (board confidence, transfer desire, job security…). UI and news generator render "why" from these; never recompute.
+- **Explanation objects** (`pkg/explanation`) accompany every scored decision (board confidence, transfer desire, job security…). UI and news generator render "why" from these; never recompute.
 - **Explainability**: every endpoint that changes state returns the `Explanation` where relevant.
 - **PolicyBot = another ActorID.** Absence-mode delegation and AI clubs are one system: human + PolicyBot both call the same command handlers.
 
@@ -110,8 +110,8 @@ frontend/
   pages/{index, auth/login, competitions, matches/[fixtureId], squad, tactics, training, finances}.vue — competitions table links to each live match screen; matches/[fixtureId] renders the S04-03 feed (server-computed score/header + ordered event list); squad.vue (S05-01) is a full lineup editor (11 formation-positioned roster selects, complete+no-duplicate validation); tactics.vue/training.vue submit Simple-Mode style/formation and weekly archetype; finances.vue (S05-02) shows cash/operating profit/projected year-end, budgets, wage commitments, factor breakdown (sums to cash), ledger table, contracts
   assets/css/main.css, tailwind.config.js, tsconfig.json, package.json (pnpm-managed), eslint.config.mjs (S03-02), pnpm-lock.yaml, pnpm-workspace.yaml, .env.example
 infra/
-  docker/          — Dockerfile.{api,scheduler,worker,frontend} (multi-stage; go 1.25-alpine builder)
-  helm/{api,scheduler,worker,frontend}/  — Chart.yaml + values.yaml + templates (deployment/service/ingress; worker has HPA on event_bus_queue_depth)
+  docker/          — Dockerfile.api (the single `cmd/touchline` backend image, every role), Dockerfile.frontend, Dockerfile.ref-seed (multi-stage; go 1.25-alpine builder)
+  helm/{api,scheduler,worker,frontend}/  — Chart.yaml + values.yaml + templates (deployment/service/ingress; worker has HPA on event_bus_queue_depth). api/scheduler/worker all run `ghcr.io/touchline/touchline` and pick the role via `args: ["touchline", "<role>"]` (IM29)
 docker-compose.yml  — redis + migrations + ref-seed + api + scheduler + worker + frontend; requires Neon DATABASE_URL (healthchecks + env guards; opt-in Postgres override infra/ci/docker-compose.postgres.yml)
 .github/workflows/ci.yml — backend lint/vet/test, eventbus integration (postgres:16), migrations + ref-seed idempotency, frontend lint/typecheck (pnpm), compose config + full-stack smoke (Postgres override), multi-arch GHCR build on main
 README.md, .gitignore, OPENCODE.md

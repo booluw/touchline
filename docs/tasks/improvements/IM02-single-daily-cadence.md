@@ -1,6 +1,6 @@
 # IM02 — Single daily cadence: day-derived weekly/monthly seasons and monthly board reviews
 
-**Status:** Not started
+**Status:** Implemented (status reconciled by the IM23–IM29 doc audit — see note at the end)
 **Sprint:** Improvements (world clock)
 **Source:** Product decision (manual session)
 **Depends on:** S02-03 (configurable world clock); S04-01 (daily kickoff);
@@ -152,3 +152,18 @@ on days 7/14/21/28 and monthly work on day 30.
 - Board review is monthly by day step; its numerics are unchanged.
 - Removed cadences become inert immediately (scheduler ignores them); the
   migration only cleans up the config rows.
+
+
+## Status reconciliation (IM23–IM29 audit)
+
+This file still read "Not started" although the behaviour ships: the scheduler
+registers only `tick.daily_cadence`, and the worker derives weekly/monthly
+passes from `calendar.days_per_week` / `calendar.days_per_month`
+(`internal/app/worldtick.go`, `World.Calendar`), with legacy granularities
+logged and dropped. Covered by `TestSingleDailyCadenceDispatchDefaultCalendar`,
+`TestSingleDailyCadenceDispatchVariantCalendar` and
+`TestSingleDailyCadenceDispatchSeasonalFallback`
+(`internal/app/worker_integration_test.go`) and documented in
+`docs/how-to/cadences-and-time.md`. IM23 later made the day gates read the day
+stamped on each emission. The audit only corrected the status; it did not
+re-verify every acceptance criterion above.

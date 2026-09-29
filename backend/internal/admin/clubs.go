@@ -34,7 +34,7 @@ func (s *Service) Clubs(ctx context.Context, worldID, countryID uuid.UUID) (*Clu
 		       (SELECT COUNT(*) FROM player.players p WHERE p.club_id = c.id),
 		       COALESCE((SELECT COALESCE(SUM(w.weekly_wage)::bigint, 0)
 		                  FROM finance.wage_commitments w
-		                  WHERE w.club_id = c.id AND w.end_date > CURRENT_DATE), 0),
+		                  WHERE w.club_id = c.id AND w.end_date > world.club_world_date(c.id)), 0),
 		       COALESCE((SELECT f.stage FROM finance.financial_crisis_states f
 		                  WHERE f.club_id = c.id AND f.resolved_at IS NULL
 		                  ORDER BY f.started_at DESC LIMIT 1), ''),

@@ -164,7 +164,7 @@ func ReleasePlayer(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 	previousClub := *club
 
 	tag, err := tx.Exec(ctx, `
-		UPDATE player.contracts SET status = 'terminated', end_date = CURRENT_DATE
+		UPDATE player.contracts SET status = 'terminated', end_date = world.club_world_date(club_id)
 		WHERE player_id = $1 AND status = 'active'`, playerID)
 	if err != nil {
 		return fmt.Errorf("release player: terminate contracts: %w", err)
@@ -174,10 +174,10 @@ func ReleasePlayer(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE finance.wage_commitments w
-		SET end_date = CURRENT_DATE
+		SET end_date = world.club_world_date(w.club_id)
 		FROM player.contracts c
 		WHERE w.contract_id = c.id AND c.player_id = $1
-		  AND c.status = 'terminated'`, playerID); err != nil {
+		  AND c.status = 'terminated' AND w.end_date > world.club_world_date(w.club_id)`, playerID); err != nil {
 		return fmt.Errorf("release player: end wage commitments: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `

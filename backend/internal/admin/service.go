@@ -209,7 +209,7 @@ func (s *Service) economySummary(ctx context.Context, clubIDs []uuid.UUID) Econo
 	s.pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(w.weekly_wage)::bigint, 0)
 		FROM finance.wage_commitments w
-		WHERE w.club_id = ANY($1) AND w.end_date > CURRENT_DATE`, clubIDs).
+		WHERE w.club_id = ANY($1) AND w.end_date > world.club_world_date(w.club_id)`, clubIDs).
 		Scan(&es.WageBill)
 	s.pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(l.amount) FILTER (WHERE l.entry_type = 'credit')::bigint, 0)

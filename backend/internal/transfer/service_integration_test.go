@@ -29,10 +29,20 @@ func newTransferFixture(t *testing.T, name string) (*transfer.Service, *pgxpool.
 // pickPlayer returns one active player of a club.
 func pickPlayer(t *testing.T, pool *pgxpool.Pool, clubID uuid.UUID) uuid.UUID {
 	t.Helper()
+	return pickPlayerExcept(t, pool, clubID)
+}
+
+// pickPlayerExcept returns the club's first active player not in skip, so a
+// test can take two different players from one squad.
+func pickPlayerExcept(t *testing.T, pool *pgxpool.Pool, clubID uuid.UUID, skip ...uuid.UUID) uuid.UUID {
+	t.Helper()
+	if skip == nil {
+		skip = []uuid.UUID{}
+	}
 	var id uuid.UUID
 	if err := pool.QueryRow(context.Background(),
-		`SELECT id FROM player.players WHERE club_id = $1 AND status = 'active' ORDER BY id LIMIT 1`,
-		clubID).Scan(&id); err != nil {
+		`SELECT id FROM player.players WHERE club_id = $1 AND status = 'active' AND id <> ALL($2)
+		 ORDER BY id LIMIT 1`, clubID, skip).Scan(&id); err != nil {
 		t.Fatalf("pick player of %s: %v", clubID, err)
 	}
 	return id
@@ -233,10 +243,13 @@ func TestAISellerCountersThenHumanAccepts(t *testing.T) {
 		t.Fatalf("counter explanation missing: %+v", exp)
 	}
 
-	// A rejected offer below the floor.
-	low := int64(float64(val) * 0.80)
+	// A rejected offer below the floor, on another player: the countered
+	// thread above is still open, and a club may hold only one open bid per
+	// player.
+	other := pickPlayerExcept(t, pool, tw.AIOneClub, player)
+	low := int64(float64(valuation(t, pool, other)) * 0.80)
 	rejected, ct2, _, err := svc.PlaceBid(ctx, transfer.Actor{ManagerID: tw.HumanMgr},
-		tw.WorldID, transfer.BidInput{PlayerID: &player, Terms: fullTerms(low)})
+		tw.WorldID, transfer.BidInput{PlayerID: &other, Terms: fullTerms(low)})
 	if err != nil {
 		t.Fatalf("place below-floor bid: %v", err)
 	}
@@ -515,7 +528,7 @@ func TestListingsAndBidsReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create listing: %v", err)
 	}
-	p2 := pickPlayer(t, pool, tw.HumanClub)
+	p2 := pickPlayerExcept(t, pool, tw.HumanClub, p1)
 	if _, err := svc.CreateListing(ctx, humanActor, tw.WorldID,
 		transfer.CreateListingInput{PlayerID: p2, ListingType: transfer.ListingLoanAvailable}); err != nil {
 		t.Fatalf("create loan-available listing: %v", err)
@@ -557,8 +570,10 @@ func TestListingsAndBidsReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list bids: %v", err)
 	}
-	if len(incoming) != 4 { // two AI offers on each of the two open listings
-		t.Fatalf("incoming bids = %d, want 4", len(incoming))
+	// Two AI offers on the open-to-offers listing; a loan-available listing
+	// draws no AI buyers (S06-01 "Loans: listing only").
+	if len(incoming) != 2 {
+		t.Fatalf("incoming bids = %d, want 2", len(incoming))
 	}
 	if len(outgoing) != 0 {
 		t.Fatalf("outgoing bids = %d, want 0", len(outgoing))
@@ -576,5 +591,64 @@ func TestListingsAndBidsReads(t *testing.T) {
 		if b.BiddingClub == nil || b.BiddingClub.Name == "" {
 			t.Fatalf("incoming bid bidding club ref wrong: %+v", b.BiddingClub)
 		}
+	}
+}
+
+// TestBidEventsCarryBothClubs: every bid event names both sides of the thread
+// (IM26), so the dashboard hook can notify the counterparty — the seller of an
+// incoming offer, the buyer of the answer.
+func TestBidEventsCarryBothClubs(t *testing.T) {
+	svc, pool, tw := newTransferFixture(t, "tf-events")
+	ctx := context.Background()
+	humanActor := transfer.Actor{ManagerID: tw.HumanMgr}
+
+	player := pickPlayer(t, pool, tw.HumanClub)
+	listed, err := svc.CreateListing(ctx, humanActor, tw.WorldID,
+		transfer.CreateListingInput{PlayerID: player, ListingType: transfer.ListingOpenToOffers})
+	if err != nil {
+		t.Fatalf("create listing: %v", err)
+	}
+	if listed.LatestBid == nil {
+		t.Fatalf("listing drew no AI bid: %+v", listed)
+	}
+	if _, _, _, err := svc.RespondToBid(ctx, humanActor, tw.WorldID,
+		listed.LatestBid.ID, transfer.RespondReject, nil); err != nil {
+		t.Fatalf("reject ai bid: %v", err)
+	}
+
+	for _, eventType := range []string{transfer.EventBidPlaced, transfer.EventBidRejected} {
+		if got := count(t, pool, `
+			SELECT COUNT(*) FROM world.events
+			WHERE world_id = $1 AND event_type = $2
+			  AND payload->>'selling_club_id' = $3
+			  AND (payload->>'buying_club_id') IS NOT NULL`,
+			tw.WorldID, eventType, tw.HumanClub.String()); got == 0 {
+			t.Errorf("%s events carry no buying_club_id + selling_club_id", eventType)
+		}
+	}
+}
+
+// TestAIBidsFollowTheBidCommandRules: AI buyers bid through the same command
+// as managers (IM26), so a second AI sweep on the same tick cannot stack a
+// second open bid from a club that already has one on the player.
+func TestAIBidsFollowTheBidCommandRules(t *testing.T) {
+	svc, pool, tw := newTransferFixture(t, "tf-aiparity")
+	ctx := context.Background()
+	humanActor := transfer.Actor{ManagerID: tw.HumanMgr}
+
+	player := pickPlayer(t, pool, tw.HumanClub)
+	if _, err := svc.CreateListing(ctx, humanActor, tw.WorldID,
+		transfer.CreateListingInput{PlayerID: player, ListingType: transfer.ListingOpenToOffers}); err != nil {
+		t.Fatalf("create listing: %v", err)
+	}
+	if _, err := svc.AIBidActivity(ctx, tw.WorldID, 5); err != nil {
+		t.Fatalf("ai bid activity: %v", err)
+	}
+	if got := count(t, pool, `
+		SELECT COUNT(*) FROM (
+			SELECT bidding_club_id FROM transfer.bids
+			WHERE player_id = $1 AND status IN ('pending','countered')
+			GROUP BY bidding_club_id HAVING COUNT(*) > 1) dup`, player); got != 0 {
+		t.Fatalf("%d AI clubs hold more than one open bid on the player", got)
 	}
 }
