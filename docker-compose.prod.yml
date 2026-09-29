@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
     labels:
       - traefik.enable=true
-      - traefik.http.routers.touchline-api.rule=Host(`touchline.example.com`) && (PathPrefix(`/api`) || PathPrefix(`/ws`) || PathPrefix(`/health`))
+      - traefik.http.routers.touchline-api.rule=Host(`touchline.myshort.page`) && (PathPrefix(`/api`) || PathPrefix(`/ws`) || PathPrefix(`/health`))
       - traefik.http.routers.touchline-api.entrypoints=https
       - traefik.http.routers.touchline-api.tls=true
       - traefik.http.routers.touchline-api.tls.certresolver=letsencrypt
