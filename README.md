@@ -1,4 +1,4 @@
-# Touchline
+# :soccer: Touchline
 
 **The persistent multiplayer football universe.**
 
