@@ -16,9 +16,7 @@ services:
     restart: unless-stopped
 
   migrations:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.migrations
+    image: ghcr.io/booluw/migrations:${TAG:-main}
     command: ["-database", "${DATABASE_URL}", "-path", "/migrations", "up"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -26,9 +24,7 @@ services:
     exclude_from_hc: true
 
   ref-seed:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.ref-seed
+    image: ghcr.io/booluw/ref-seed:${TAG:-main}
     environment:
       DATABASE_URL: ${DATABASE_URL}
     depends_on:
@@ -38,9 +34,7 @@ services:
     exclude_from_hc: true
 
   touchline:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.api
+    image: ghcr.io/booluw/api:${TAG:-main}
     command: ["touchline", "serve"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -75,11 +69,7 @@ services:
       - traefik.http.services.touchline-api.loadbalancer.server.port=8080
 
   frontend:
-    build:
-      context: .
-      dockerfile: infra/docker/Dockerfile.frontend
-      args:
-        NUXT_PUBLIC_API_BASE: https://touchline.myshort.page
+    image: ghcr.io/booluw/frontend:${TAG:-main}
     depends_on:
       touchline:
         condition: service_healthy

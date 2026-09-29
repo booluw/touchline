@@ -178,48 +178,64 @@ jobs:
           docker compose -f docker-compose.yml -f infra/ci/docker-compose.postgres.yml down -v
 
   build-images:
-    name: Build + push images
-    runs-on: ubuntu-latest
     needs: [backend-lint, backend-test, frontend-lint]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     strategy:
       matrix:
-        # One backend image (cmd/touchline) serves every backend role; the
-        # Helm charts pick the role via container args (IM29).
         include:
-          - image: touchline
-            dockerfile: api
+          - image: api
+            build_args: ""
+          - image: ref-seed
+            build_args: ""
+          - image: migrations
+            build_args: ""
           - image: frontend
-            dockerfile: frontend
+            build_args: |
+              NUXT_PUBLIC_API_BASE=https://touchline.myshort.page
     steps:
       - uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata
-        id: meta
+
+      - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
-            type=sha
+            type=sha,format=long
             type=ref,event=branch
-      - name: Build and push
-        uses: docker/build-push-action@v5
+
+      - uses: docker/build-push-action@v5
         with:
           context: .
-          file: infra/docker/Dockerfile.${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          file: infra/docker/Dockerfile.${{ matrix.image }}
+          platforms: linux/amd64
           push: true
+          build-args: ${{ matrix.build_args }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  deploy:
+    needs: build-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coolify deploy
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
+        run: |
+          curl -fsS --retry 3 \
+            -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            "$COOLIFY_WEBHOOK"
