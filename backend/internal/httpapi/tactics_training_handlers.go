@@ -10,7 +10,7 @@ import (
 	internalmatch "github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/training"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 func (s *server) commandActor(c *gin.Context) (tactics.Actor, error) {

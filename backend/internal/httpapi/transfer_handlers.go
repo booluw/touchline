@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	internaltransfer "github.com/touchline/backend/internal/transfer"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 // transferStatus maps transfer sentinel errors to HTTP statuses. Nonexistent

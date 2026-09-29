@@ -106,12 +106,6 @@ type View struct {
 	Mandates    []Mandate      `json:"mandates"`
 }
 
-// Actor identifies the caller of a board mutation (mirrors finance.Actor).
-type Actor struct {
-	ManagerID   uuid.UUID
-	IsPolicyBot bool
-}
-
 // NegotiateInput is the bounded sporting-target proposal.
 type NegotiateInput struct {
 	MandateID   uuid.UUID `json:"-"`

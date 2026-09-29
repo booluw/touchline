@@ -84,9 +84,6 @@ var categoryMeans = map[string]map[string]int{
 	"RW": {"technical": 66, "physical": 64, "mental": 56, "tactical": 50, "positional": 52},
 }
 
-// attrJitter is the per-key spread around archetype+adjust.
-const attrJitter = 15
-
 // CategoryForKey maps a catalogue key back to its category.
 func CategoryForKey(key string) string {
 	for cat, keys := range attributeKeys {

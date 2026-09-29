@@ -8,6 +8,9 @@ dist/
 backend/api
 backend/scheduler
 backend/worker
+backend/touchline
+backend/ref-seed
+backend/user-create
 *.test
 
 # Env

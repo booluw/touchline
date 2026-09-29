@@ -45,21 +45,6 @@ func WithOriginPatterns(patterns []string) Option {
 	return func(h *Hub) { h.originPatterns = patterns }
 }
 
-// WithLogger overrides the package logger.
-func WithLogger(l *log.Logger) Option {
-	return func(h *Hub) { h.logger = l }
-}
-
-// WithPingInterval sets how often the server pings idle sockets.
-func WithPingInterval(d time.Duration) Option {
-	return func(h *Hub) { h.pingInterval = d }
-}
-
-// WithWriteTimeout bounds a single write/ping.
-func WithWriteTimeout(d time.Duration) Option {
-	return func(h *Hub) { h.writeTimeout = d }
-}
-
 // NewHub builds a hub around a broker. Call Run in a goroutine to start
 // receiving broker events.
 func NewHub(broker Broker, opts ...Option) *Hub {

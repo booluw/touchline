@@ -150,7 +150,7 @@ go run ./cmd/ref-seed -database "$DATABASE_URL" -data data/names
 
 Integration tests (tag `integration`) live in `pkg/eventbus`, `internal/auth`,
 `internal/world`, `internal/manager`, `internal/scheduler`,
-`internal/bootstrap`, `internal/club`, and `cmd/api`, sharing a harness in
+`internal/bootstrap`, `internal/club`, and `internal/httpapi`, sharing a harness in
 `internal/testdb` that migrates and truncates a real Postgres. Point them at
 any reachable instance with `TEST_DATABASE_URL` (without it they fall back to
 testcontainers, which requires Docker):
@@ -159,13 +159,13 @@ testcontainers, which requires Docker):
 TEST_DATABASE_URL="$DATABASE_URL" go test -p 1 -tags integration -race \
   ./pkg/eventbus/... ./internal/auth/... ./internal/world/... \
   ./internal/manager/... ./internal/scheduler/... ./internal/bootstrap/... \
-  ./internal/club/... ./cmd/api/...
+  ./internal/club/... ./internal/httpapi/...
 ```
 
 `-p 1` serializes packages: each test truncates the shared database, so
 concurrent packages would wipe each other's fixtures mid-test. The realtime
 unit tests (`go test -race ./pkg/realtime/...`) need no external services —
-they run against an in-process `miniredis`, and the `cmd/api` WebSocket
+they run against an in-process `miniredis`, and the `internal/httpapi` WebSocket
 integration tests use the same in-process broker.
 
 ### Auth session flow
@@ -357,13 +357,13 @@ redeploy).
 The Phase-0 exit criterion (plan §16) is *create a world, generate a club with
 a squad, and see a daily tick fire*. It is verified two ways:
 
-1. **Automated (repeatable):** `cmd/api/phase0_slice_integration_test.go`
+1. **Automated (repeatable):** `internal/httpapi/phase0_slice_integration_test.go`
    walks the whole exit path over real HTTP + the realtime seam — admin login →
    `POST /api/admin/worlds` (provisioning) → bootstrap `Slice FC` (24-player
    squad) → launch → set `tick.daily_cadence=* * * * *` → the scheduler's
    `FireTick` writes `WORLD_TICK` to `world.events` (`world_id`, granularity,
    `current_tick=1`) → the envelope is pushed to a cookie-authenticated `/ws`
-   client with the same `realtime.BuildWorldTick` helper `cmd/worker` uses, and
+   client with the same `realtime.BuildWorldTick` helper the worker (`internal/app`) uses, and
    the client receives it. Failure feedback is asserted too: 401 on a bad
    password, 403 `no world context` for an authenticated account without a
    manager row. Run it with the integration suite (above).

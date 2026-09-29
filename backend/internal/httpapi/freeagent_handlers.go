@@ -12,7 +12,7 @@ import (
 
 	internalfinance "github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/internal/playerpool"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 // freeAgentFilterRequest is the query-string form of playerpool.FreeAgentFilter.

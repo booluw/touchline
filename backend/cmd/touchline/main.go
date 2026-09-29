@@ -3,7 +3,8 @@
 // and the worker (event consumer + live match engine) in one process — the game
 // is only playable when all three run together, so this is the primary dev and
 // deployment entry point. The api/scheduler/worker subcommands run a single
-// subsystem for prod isolation.
+// subsystem for prod isolation; scheduler and worker also expose a /health
+// liveness probe on SCHEDULER_PORT (8081) / WORKER_PORT (8082).
 package main
 
 import (
@@ -43,8 +44,10 @@ func main() {
 	case "api":
 		err = a.RunAPI(ctx)
 	case "scheduler":
+		go app.ServeHealth(cfg.SchedulerPort)
 		err = a.RunScheduler(ctx)
 	case "worker":
+		go app.ServeHealth(cfg.WorkerPort)
 		err = a.RunWorker(ctx)
 	default:
 		log.Fatalf("unknown role %q — want serve|api|scheduler|worker", role)

@@ -13,14 +13,15 @@ Browser-based multiplayer football management simulation. Thousands of managers 
 
 ```
 /backend            Go backend (Gin HTTP API, river event bus, tick scheduler, worker pool)
-  /cmd/api          API gateway binary
-  /cmd/scheduler    Tick scheduler binary (WORLD_TICK cadences)
-  /cmd/worker       Simulation worker pool binary
+  /cmd/touchline    The single backend binary: `serve` (api + scheduler + worker), or `api` | `scheduler` | `worker`
   /cmd/ref-seed     Reference data seeder (nationalities + name pools; idempotent)
-  /internal         Engine packages: club, player, transfer, finance, match, social, world
+  /cmd/user-create  CLI to create a login account
+  /internal/app     Process composition: config, service wiring, subsystem runners, daily tick dispatch
+  /internal/httpapi Gin HTTP + WebSocket surface (one *_handlers.go per domain) and its HTTP integration tests
+  /internal/<domain> Engine packages: club, player, transfer, finance, match, competition, social, world, …
   /pkg/eventbus     Event bus interface + river implementation
   /pkg/playergen    Procedural player name/nationality generation
-  /pkg/auth         Custom JWT (httpOnly cookies)
+  /pkg/jwt          Custom JWT (httpOnly cookies)
   /data/names       Curated per-nationality name datasets
 /frontend           Nuxt 3 (Vue 3 + Pinia) SPA/PWA
 /infra

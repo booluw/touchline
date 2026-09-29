@@ -18,20 +18,6 @@ import (
 func worldA() uuid.UUID { return uuid.MustParse("11111111-1111-1111-1111-111111111111") }
 func worldB() uuid.UUID { return uuid.MustParse("22222222-2222-2222-2222-222222222222") }
 
-func miniredisClient(t *testing.T) *redis.Client {
-	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("start miniredis: %v", err)
-	}
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() {
-		_ = client.Close()
-		mr.Close()
-	})
-	return client
-}
-
 // sharedMiniredis runs one miniredis server for the whole test and returns its
 // address; multiple redis clients (e.g. one per simulated API pod) must share a
 // single server to fan events out across them.

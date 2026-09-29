@@ -116,12 +116,6 @@ func (s *Service) SetActive(ctx context.Context, managerID, clubID uuid.UUID, ac
 	return s.setActive(ctx, clubID, active, actorType, actorID)
 }
 
-// ConfigureAcademy is the un-gated configuration core (seeding/admin): it
-// applies any non-zero field of cfg, leaving others untouched.
-func (s *Service) ConfigureAcademy(ctx context.Context, clubID uuid.UUID, cfg AcademyConfig) (Academy, error) {
-	return s.configure(ctx, clubID, cfg, "system", nil)
-}
-
 // configure applies an AcademyConfig inside one transaction, posting the
 // one-off upgrade cost when the tier rises and emitting the change event.
 func (s *Service) configure(ctx context.Context, clubID uuid.UUID, cfg AcademyConfig, actorType string, actorID *uuid.UUID) (Academy, error) {

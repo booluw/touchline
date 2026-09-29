@@ -16,10 +16,6 @@ func parseDay(t *testing.T, s string) time.Time {
 	return daysTruncate(d)
 }
 
-func iso(t *testing.T, s string) string {
-	return parseDay(t, s).Format("2006-01-02")
-}
-
 func daysFrom(t *testing.T, anchor string, offset int) time.Time {
 	t.Helper()
 	return parseDay(t, anchor).AddDate(0, 0, offset)
@@ -230,11 +226,4 @@ func TestCupLadderDatesLocked(t *testing.T) {
 			t.Fatalf("round %d unexpectedly carries a date: %v", rp.Round, *rp.Date)
 		}
 	}
-}
-
-// daysFromDate returns the ISO string n days after the given ISO date,
-// normalized to midnight UTC. Kept local so tests read like prose.
-func daysFromDate(d string, n int) string {
-	t, _ := time.Parse("2006-01-02", d)
-	return t.AddDate(0, 0, n).Format("2006-01-02")
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,10 +37,6 @@ func squadTemplate(size int) [][]string {
 	}
 	return out
 }
-
-// Template exposes the position template for callers (e.g. the lifecycle AI
-// auto-fill) that need to reason about positional squad coverage.
-func Template(size int) [][]string { return squadTemplate(size) }
 
 // poolCandidate is a free-agent loaded from the DB for draft selection.
 type poolCandidate struct {
@@ -230,20 +225,6 @@ func loadAttributes(ctx context.Context, tx pgx.Tx, playerID uuid.UUID) map[stri
 	}
 	_ = rows.Err()
 	return out
-}
-
-// meanAttribute returns the arithmetic mean of all attribute values, or 0 if
-// the map is empty. Used internally for the ListFreeAgents / attribute
-// roll-up — the squad-level equivalent lives in internal/squad.
-func meanAttribute(attrs map[string]int) int {
-	if len(attrs) == 0 {
-		return 0
-	}
-	sum := 0
-	for _, v := range attrs {
-		sum += v
-	}
-	return int(math.Round(float64(sum) / float64(len(attrs))))
 }
 
 func contains(list []string, v string) bool {

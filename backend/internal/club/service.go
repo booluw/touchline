@@ -64,21 +64,6 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// GetClub fetches a single club.
-func (s *Service) GetClub(ctx context.Context, id uuid.UUID) (*Club, error) {
-	var c Club
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, world_id, name, short_name FROM club.clubs WHERE id = $1`, id,
-	).Scan(&c.ID, &c.WorldID, &c.Name, &c.ShortName)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrClubNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &c, nil
-}
-
 // ListClubs returns the clubs in a world, alphabetically.
 func (s *Service) ListClubs(ctx context.Context, worldID uuid.UUID) ([]*Club, error) {
 	rows, err := s.pool.Query(ctx, `
@@ -208,14 +193,4 @@ func ageAt(dob, at time.Time) int {
 		years = 0
 	}
 	return years
-}
-
-// GetClubDNA fetches a club's DNA row (empty when unmodelled).
-func (s *Service) GetClubDNA(ctx context.Context, clubID uuid.UUID) (*ClubDNA, error) {
-	return &ClubDNA{ClubID: clubID}, nil
-}
-
-// GetBoardMandates lists the club's mandates (targets land with S06-02).
-func (s *Service) GetBoardMandates(ctx context.Context, boardID uuid.UUID) ([]*BoardMandate, error) {
-	return nil, nil
 }

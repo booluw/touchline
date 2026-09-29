@@ -32,9 +32,7 @@ var ValidPolicyTypes = map[string]bool{
 
 // Sentinel errors surfaced by the service.
 var (
-	ErrInvalidPolicyType = errors.New("policy type must be squad, transfer or training")
-	ErrInvalidPolicyJSON = errors.New("policy params are not valid JSON")
-	ErrManagerNotFound   = errors.New("manager not found")
+	ErrManagerNotFound = errors.New("manager not found")
 )
 
 // Actor is the invoking principal (manager | policy bot), mirroring the

@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	internalfaction "github.com/touchline/backend/internal/faction"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 func factionStatus(c *gin.Context, err error) {

@@ -26,11 +26,3 @@ func (sm *splitMix64) next() uint64 {
 func (sm *splitMix64) nextFloat() float64 {
 	return float64(sm.next()>>11) * (1.0 / (1 << 53))
 }
-
-// nextInt returns a value in [0, n).
-func (sm *splitMix64) nextInt(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return int(sm.next() % uint64(n))
-}

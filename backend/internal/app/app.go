@@ -4,22 +4,27 @@
 // API (HTTP + WS), scheduler (world clock), and worker (event consumer + live
 // match engine) — from the same binary. `cmd/touchline serve` runs all three in
 // one process; the subcommands run them individually for prod isolation.
+//
+// File layout:
+//   - config.go     environment → Config
+//   - app.go        App, Build (service wiring), Close
+//   - infra.go      database, realtime broker, advisory-lock plumbing
+//   - runners.go    RunAPI / RunScheduler / RunAll and the health probe
+//   - worker.go     RunWorker, event subscriptions, background loops
+//   - worldtick.go  the daily WORLD_TICK dispatch and its cadence passes
 package app
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
-	"github.com/google/uuid"
 	internalacademy "github.com/touchline/backend/internal/academy"
 	internaladmin "github.com/touchline/backend/internal/admin"
 	internalauth "github.com/touchline/backend/internal/auth"
@@ -28,7 +33,6 @@ import (
 	internalclub "github.com/touchline/backend/internal/club"
 	internalcompetition "github.com/touchline/backend/internal/competition"
 	internaldashboard "github.com/touchline/backend/internal/dashboard"
-	"github.com/touchline/backend/internal/eventoutbox"
 	internalfaction "github.com/touchline/backend/internal/faction"
 	"github.com/touchline/backend/internal/finance"
 	"github.com/touchline/backend/internal/form"
@@ -39,7 +43,6 @@ import (
 	"github.com/touchline/backend/internal/matchday"
 	internalplayer "github.com/touchline/backend/internal/player"
 	"github.com/touchline/backend/internal/policybot"
-	"github.com/touchline/backend/internal/scheduler"
 	internalscout "github.com/touchline/backend/internal/scout"
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
@@ -47,49 +50,10 @@ import (
 	"github.com/touchline/backend/internal/training"
 	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/eventbus"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 	"github.com/touchline/backend/pkg/realtime"
 )
-
-// Config mirrors the environment the backend reads. FromEnv fills it with the
-// same defaults the old split binaries used.
-type Config struct {
-	DatabaseURL    string
-	JWTSecret      string
-	JWTAccessTTL   time.Duration
-	JWTRefreshTTL  time.Duration
-	AppOrigin      string
-	Env            string
-	RedisURL       string
-	APIPort        string
-	SchedulerPoll  time.Duration
-	RepairInterval time.Duration
-}
-
-// FromEnv reads Configuration from process environment variables and fails fast
-// with an actionable error when a required variable is missing.
-func FromEnv() (Config, error) {
-	cfg := Config{
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		JWTSecret:      os.Getenv("JWT_SECRET"),
-		JWTAccessTTL:   envDuration("JWT_ACCESS_TTL", 15*time.Minute),
-		JWTRefreshTTL:  envDuration("JWT_REFRESH_TTL", 720*time.Hour),
-		AppOrigin:      envOr("APP_ORIGIN", "http://localhost:3000"),
-		Env:            envOr("ENV", "development"),
-		RedisURL:       os.Getenv("REDIS_URL"),
-		APIPort:        envOr("API_PORT", "8080"),
-		SchedulerPoll:  envDuration("SCHEDULER_POLL_INTERVAL", 15*time.Second),
-		RepairInterval: envDuration("EVENT_REPAIR_SWEEP_INTERVAL", 60*time.Second),
-	}
-	if cfg.DatabaseURL == "" {
-		return cfg, fmt.Errorf("DATABASE_URL is required — set it in .env (see docs/development.md)")
-	}
-	if cfg.JWTSecret == "" {
-		return cfg, fmt.Errorf("JWT_SECRET is required — set it in .env (see docs/development.md)")
-	}
-	return cfg, nil
-}
 
 // App is one process bound to one database and one event bus. Every subsystem
 // runner shares the same services so the game is coherent whether it runs as a
@@ -98,7 +62,6 @@ type App struct {
 	Pool *pgxpool.Pool
 	Bus  *eventbus.RiverBus
 
-	JWT        pkgjwt.JWTConfig
 	AppOrigin  string
 	APIPort    string
 	Poll       time.Duration
@@ -107,10 +70,8 @@ type App struct {
 	// Realtime transport shared by the API hub and the worker's world-tick push
 	// so fan-out is coherent in a single process.
 	Broker realtime.Broker
-	Hub    *realtime.Hub
 
-	// Services (built once).
-	Matches   *match.Service
+	// Services the worker and scheduler drive directly (built once).
 	CompSvc   *internalcompetition.Service
 	Training  *training.Service
 	Finance   *finance.Service
@@ -121,7 +82,6 @@ type App struct {
 	Policy    *policybot.Service
 	Dashboard *internaldashboard.Service
 	Academy   *internalacademy.Service
-	Admin     *internaladmin.Service
 	Lifecycle *internallifecycle.Service
 	World     *internalworld.Service
 	Runner    *matchday.Runner
@@ -169,7 +129,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		RefreshTTL: cfg.JWTRefreshTTL,
 	}
 
-	broker := newRealtimeBroker(ctx)
+	broker := newRealtimeBroker(ctx, cfg.RedisURL)
 	hub := realtime.NewHub(broker, realtime.WithOriginPatterns(httpapi.OriginHostPattern(cfg.AppOrigin)))
 	go func() {
 		if err := hub.Run(ctx); err != nil {
@@ -248,14 +208,11 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	return &App{
 		Pool:       pool,
 		Bus:        bus,
-		JWT:        jwt,
 		AppOrigin:  cfg.AppOrigin,
 		APIPort:    cfg.APIPort,
 		Poll:       cfg.SchedulerPoll,
 		RepairTick: cfg.RepairInterval,
 		Broker:     broker,
-		Hub:        hub,
-		Matches:    matches,
 		CompSvc:    compSvc,
 		Training:   trainingSvc,
 		Finance:    financeSvc,
@@ -266,7 +223,6 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Policy:     policySvc,
 		Dashboard:  dashSvc,
 		Academy:    academySvc,
-		Admin:      adminSvc,
 		Lifecycle:  lifecycleSvc,
 		World:      worldSvc,
 		Runner:     runner,
@@ -279,7 +235,7 @@ func (a *App) HTTPHandler() http.Handler {
 	return a.http.Handler()
 }
 
-// Close releases the pool, the realtime broker, and the event bus.
+// Close releases the pool and the realtime broker.
 func (a *App) Close() {
 	if a.Broker != nil {
 		_ = a.Broker.Close()
@@ -287,495 +243,4 @@ func (a *App) Close() {
 	if a.Pool != nil {
 		a.Pool.Close()
 	}
-}
-
-// RunAPI serves the HTTP + WebSocket surface until ctx is cancelled, draining
-// in-flight requests on shutdown.
-func (a *App) RunAPI(ctx context.Context) error {
-	srv := &http.Server{
-		Addr:              ":" + a.APIPort,
-		Handler:           a.HTTPHandler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	log.Printf("API server starting on :%s (cors origin %s)", a.APIPort, a.AppOrigin)
-
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
-
-	select {
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return nil
-	case <-ctx.Done():
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
-	return nil
-}
-
-// RunScheduler drives the configurable world clock until ctx is cancelled. A
-// scheduler advisory lock elects a single leader.
-func (a *App) RunScheduler(ctx context.Context) error {
-	log.Printf("world clock starting (cadence sync every %s)", a.Poll)
-	if err := scheduler.NewService(a.Pool, a.Bus).Run(ctx, a.Poll); err != nil {
-		return fmt.Errorf("world clock: %w", err)
-	}
-	log.Printf("world clock stopped")
-	return nil
-}
-
-// RunWorker consumes the event bus: realtime world-tick fan-out, the daily
-// kickoffs + live match pacing, the day-derived weekly/monthly passes, the
-// outbox repair sweep, and the live-match startup rehydration.
-func (a *App) RunWorker(ctx context.Context) error {
-	bus := a.Bus
-
-	runnerEnabled, releaseRunnerLock, err := acquireMatchRunnerLock(ctx, a.Pool)
-	if err != nil {
-		return err
-	}
-	a.runnerEnabled = runnerEnabled
-	if !runnerEnabled {
-		log.Printf("another worker holds the match-runner lock; live subsystem disabled in this pod")
-	} else {
-		defer releaseRunnerLock()
-	}
-
-	if err := bus.Subscribe(ctx, "WORLD_TICK", func(ev eventbus.Event) error {
-		var payload struct {
-			Granularity string `json:"granularity"`
-		}
-		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-			log.Printf("world tick %s: unreadable payload (%v); skipping", ev.ID, err)
-			return nil
-		}
-		log.Printf("handled event %s (%s, granularity %s) for world %s at tick %d",
-			ev.ID, ev.EventType, payload.Granularity, ev.WorldID, ev.WorldTick)
-
-		tickEvent, err := realtime.BuildWorldTick(ev.WorldID, ev.ID.String(), payload.Granularity, ev.WorldTick)
-		if err != nil {
-			return nil
-		}
-		if err := a.Broker.Publish(ctx, tickEvent); err != nil {
-			return nil
-		}
-
-		return a.handleWorldTick(ctx, ev, payload.Granularity)
-	}); err != nil {
-		return fmt.Errorf("subscribe: %w", err)
-	}
-
-	// Transfer-market events push an urgent dashboard item to the selling
-	// club's manager the moment a bid lands/counters/resolves (S07-01). The
-	// eventbus is single-handler-per-type and nobody else consumes these types.
-	for _, bidType := range []string{
-		internaltransfer.EventBidPlaced,
-		internaltransfer.EventBidCountered,
-		internaltransfer.EventBidAccepted,
-		internaltransfer.EventBidRejected,
-	} {
-		if err := bus.Subscribe(ctx, bidType, func(ev eventbus.Event) error {
-			var payload struct {
-				BidID         uuid.UUID `json:"bid_id"`
-				SellingClubID uuid.UUID `json:"selling_club_id"`
-			}
-			if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-				log.Printf("bid event %s: unreadable payload (%v); skipping", ev.ID, err)
-				return nil
-			}
-			if payload.SellingClubID == uuid.Nil {
-				return nil
-			}
-			managerID, err := a.Dashboard.ManagerForClub(ctx, ev.WorldID, payload.SellingClubID)
-			if err != nil {
-				return nil
-			}
-			if err := a.Dashboard.PushCategory(ctx, ev.WorldID, managerID, internaldashboard.PriorityUrgent); err != nil {
-				log.Printf("world %s dashboard bid push: %v", ev.WorldID, err)
-			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("subscribe %s: %w", bidType, err)
-		}
-	}
-
-	// Season rollover drives the player lifecycle (S08-01, A06): the completed
-	// league's country gets its street discovery plus every club academy's youth
-	// cohort, then the world's retirement pass and pool replenishment run. The
-	// eventbus is single-handler-per-type and nobody else consumes SEASON_COMPLETED.
-	if err := bus.Subscribe(ctx, "SEASON_COMPLETED", func(ev eventbus.Event) error {
-		var payload struct {
-			CountryID *uuid.UUID `json:"country_id"`
-		}
-		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
-			log.Printf("season completed %s: unreadable payload (%v); skipping", ev.ID, err)
-			return nil
-		}
-		season, ref, err := a.worldSeason(ctx, ev.WorldID)
-		if err != nil {
-			return fmt.Errorf("world %s season completed lifecycle: %w", ev.WorldID, err)
-		}
-		if _, err := a.Lifecycle.OnSeasonCompleted(ctx, ev.WorldID, payload.CountryID, season, ref); err != nil {
-			return fmt.Errorf("world %s season completed lifecycle: %w", ev.WorldID, err)
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("subscribe season completed: %w", err)
-	}
-
-	if err := bus.Start(ctx); err != nil {
-		return fmt.Errorf("start worker: %w", err)
-	}
-	log.Printf("worker started; consuming events from the event bus")
-
-	// Outbox repair sweep (OPD-23). Idempotent re-enqueue by original id.
-	go a.sweep(ctx)
-
-	// Startup sweep (OPD-21): resume any in-progress match after a restart.
-	if runnerEnabled {
-		go a.rehydrate(ctx)
-		// IM16: kicks happen at scheduled_at moments, not just on daily ticks,
-		// so the worker polls every playable world on its own cadence.
-		go a.kickoffPoll(ctx)
-	}
-
-	<-ctx.Done()
-
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer stopCancel()
-	if err := bus.Stop(stopCtx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("stop: %v", err)
-	}
-	log.Printf("worker stopped")
-	return nil
-}
-
-// handleWorldTick is the single daily WORLD_TICK dispatch (IM02):
-// only the 'daily' granularity does gameplay work; every other periodic system
-// is derived from the world's day counter (world.worlds.current_day, read with
-// the calendar.days_per_week/days_per_month steps). Order is stable so a day
-// that is both a week and a month boundary runs weekly before monthly, and the
-// board review lands after wages/market exactly once per month.
-//
-// Legacy note: WORLD_TICK events of other granularities (hourly/weekly/monthly/
-// seasonal) that were still in flight at deploy are ignored — the passes they
-// used to drive now run off the new day gates, so replaying them would double-
-// post wages/reviews.
-func (a *App) handleWorldTick(ctx context.Context, ev eventbus.Event, granularity string) error {
-	if granularity != "daily" {
-		log.Printf("world %s tick %d: ignoring legacy %s granularity (single-daily clock)", ev.WorldID, ev.WorldTick, granularity)
-		return nil
-	}
-
-	day, week, month, err := a.World.Calendar(ctx, ev.WorldID)
-	if err != nil {
-		return fmt.Errorf("world %s daily tick: calendar config: %w", ev.WorldID, err)
-	}
-
-	if a.runnerEnabled {
-		// IM01: a rollover-created 'upcoming' season flips to 'in_progress'
-		// (and emits SEASON_STARTED) the moment its first fixture is due,
-		// before the kickoff pass so the season reads in_progress as its
-		// first matchday simulates.
-		if err := a.kickDueWorld(ctx, ev.WorldID); err != nil {
-			return fmt.Errorf("world %s daily tick: %w", ev.WorldID, err)
-		}
-	}
-
-	if err := a.Policy.RespondToBidsForAbsent(ctx, ev.WorldID); err != nil {
-		return fmt.Errorf("world %s daily policy bids: %w", ev.WorldID, err)
-	}
-	if err := a.Transfers.DailyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
-		return fmt.Errorf("world %s daily transfer market: %w", ev.WorldID, err)
-	}
-
-	// Weekly work (training, player pass, rivalry reconciliation) once per
-	// days_per_week days: days 7/14/21/28 with the default 7-day week.
-	if week > 0 && day%int64(week) == 0 {
-		if err := a.Policy.EnsureTraining(ctx, ev.WorldID); err != nil {
-			return fmt.Errorf("world %s weekly policy training (day %d): %w", ev.WorldID, day, err)
-		}
-		if _, err := a.Training.ApplyWeekly(ctx, ev.WorldID, ev.WorldTick); err != nil {
-			return fmt.Errorf("world %s weekly training: %w", ev.WorldID, err)
-		}
-		if err := a.Players.WeeklyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
-			return fmt.Errorf("world %s weekly player pass: %w", ev.WorldID, err)
-		}
-		if reconciled, err := a.Social.ReconcileRivalries(ctx, ev.WorldID); err != nil {
-			return fmt.Errorf("world %s rivalries reconcile: %w", ev.WorldID, err)
-		} else if reconciled > 0 {
-			log.Printf("world %s rivalries reconciled: %d fixtures backfilled", ev.WorldID, reconciled)
-		}
-	}
-
-	// Monthly work (wages, academy maintenance, the board review — re-purposed
-	// from weekly to monthly, IM02) once per days_per_month days: day 30 with
-	// the default 30-day month. Board runs last so it grades post-wage books.
-	if month > 0 && day%int64(month) == 0 {
-		if _, err := a.Finance.ApplyMonthlyWages(ctx, ev.WorldID, ev.WorldTick); err != nil {
-			return fmt.Errorf("world %s monthly wages: %w", ev.WorldID, err)
-		}
-		if _, err := a.Academy.Maintenance(ctx, ev.WorldID, ev.WorldTick); err != nil {
-			return fmt.Errorf("world %s academy maintenance: %w", ev.WorldID, err)
-		}
-		if reviewed, sacked, err := a.Board.Review(ctx, ev.WorldID, ev.WorldTick); err != nil {
-			return fmt.Errorf("world %s monthly board review: %w", ev.WorldID, err)
-		} else {
-			log.Printf("world %s monthly board review: %d reviewed, %d sacked", ev.WorldID, reviewed, sacked)
-		}
-	}
-
-	// Seasonal fallback (S08-01): a world without leagues never emits
-	// SEASON_COMPLETED, so reaching a season boundary drives the full lifecycle
-	// once per academy.DaysPerSeason days — intake, retirement, pool replenish
-	// (A06). The hooks dedup per season. Leagues worlds are driven by their own
-	// SEASON_COMPLETED subscription instead.
-	if day%int64(internalacademy.DaysPerSeason) == 0 {
-		season, ref, err := a.worldSeason(ctx, ev.WorldID)
-		if err != nil {
-			return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
-		}
-		if _, err := a.Lifecycle.OnSeasonCompleted(ctx, ev.WorldID, nil, season, ref); err != nil {
-			return fmt.Errorf("world %s seasonal lifecycle: %w", ev.WorldID, err)
-		}
-	}
-
-	// Home dashboard realtime sweep (S07-01): after the cadence passes have
-	// run, re-snapshot every managed club and push newly surfaced items to the
-	// affected managers' socket feeds. Best-effort; the GET read stays
-	// authoritative.
-	if err := a.Dashboard.PushWorldDelta(ctx, ev.WorldID); err != nil {
-		return fmt.Errorf("world %s dashboard sweep: %w", ev.WorldID, err)
-	}
-	return nil
-}
-
-// RunAll runs the API, scheduler, and worker in one process until ctx is
-// cancelled or one of them fails. All three share the same pool, bus, and
-// realtime transport built by Build.
-func (a *App) RunAll(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	log.Printf("---- touchline serve: api :%s + scheduler + worker in one process ----", a.APIPort)
-
-	errCh := make(chan error, 3)
-	go func() { errCh <- a.RunAPI(ctx) }()
-	go func() { errCh <- a.RunScheduler(ctx) }()
-	go func() { errCh <- a.RunWorker(ctx) }()
-
-	select {
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("touchline serve: subsystem failed (%v); shutting down", err)
-		}
-		cancel()
-		// Give the other subsystems a moment to drain after cancellation.
-		timeout := time.NewTimer(20 * time.Second)
-		defer timeout.Stop()
-		for range 2 {
-			select {
-			case <-errCh:
-			case <-timeout.C:
-			}
-		}
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-// kickDueWorld activates any due 'upcoming' seasons then kicks every matchday
-// the world clock has matured, spawning the live pacing loop for whatever
-// kicked. Idempotent: KickoffDue's status guard + no-overlap gate make a
-// concurrent pass (the daily tick handler and this poll both call it) safe.
-// Shared by the daily-tick handler and the IM16 intra-day kickoff poll.
-//
-// The pacing loop is started on every pass, not only when something new kicked
-// off. RunLive returns immediately when the world has nothing live and the
-// claim guard keeps a second copy from double-pacing, so this is a cheap no-op
-// in the common case — but it is what makes a live match self-heal: a loop that
-// died on a transient error (or a worker restart) resumes within one poll
-// interval instead of stranding the match at its last persisted minute, which
-// the no-overlap gate would otherwise keep at the head of the world's whole
-// matchday ladder forever.
-func (a *App) kickDueWorld(ctx context.Context, worldID uuid.UUID) error {
-	if activated, err := a.CompSvc.ActivateDueSeasons(ctx, worldID); err != nil {
-		return fmt.Errorf("activate seasons: %w", err)
-	} else if activated > 0 {
-		log.Printf("world %s: activated %d season(s)", worldID, activated)
-	}
-	sum, err := a.Runner.KickoffDue(ctx, worldID)
-	if err != nil {
-		return fmt.Errorf("kickoff: %w", err)
-	}
-	if sum != nil && sum.Kicked > 0 {
-		log.Printf("world %s: kicked %d matchday(s), %d fixture(s)", worldID, sum.Matchdays, sum.Kicked)
-	}
-	go func() {
-		if err := a.Runner.RunLive(ctx, worldID); err != nil {
-			log.Printf("world %s live runner: %v", worldID, err)
-		}
-	}()
-	return nil
-}
-
-// kickoffPoll is the IM16 intra-day kickoff pass: the continuous world clock
-// matures scheduled_at moments between daily tick emissions, so the worker
-// scans every playable world on its own cadence and plays what is due. This is
-// what makes a "20:00" fixture simulate at 20:00 instead of whenever the daily
-// tick lands.
-func (a *App) kickoffPoll(ctx context.Context) {
-	ticker := time.NewTicker(a.Poll)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			worlds, err := a.Runner.PlayableWorlds(ctx)
-			if err != nil {
-				log.Printf("kickoff poll: playable worlds: %v", err)
-				continue
-			}
-			for _, w := range worlds {
-				if err := a.kickDueWorld(ctx, w); err != nil {
-					log.Printf("kickoff poll: world %s: %v", w, err)
-				}
-			}
-		}
-	}
-}
-
-// worldSeason derives the canonical season number and world reference date
-// from the day counter (worldDate = COALESCE(launched_at, created_at) +
-// current_day days; OPD-24). Used by the seasonal academy-intake hooks.
-func (a *App) worldSeason(ctx context.Context, worldID uuid.UUID) (int, time.Time, error) {
-	var day int64
-	var ref time.Time
-	err := a.Pool.QueryRow(ctx, `
-		SELECT w.current_day,
-		       COALESCE(w.launched_at, w.created_at) + make_interval(days => w.current_day::int)
-		FROM world.worlds w WHERE w.id = $1`, worldID).Scan(&day, &ref)
-	if err != nil {
-		return 0, time.Time{}, fmt.Errorf("world season: %w", err)
-	}
-	return internalacademy.SeasonForDay(day), ref, nil
-}
-
-// sweep re-enqueues committed world.events rows that never got a dispatch job.
-func (a *App) sweep(ctx context.Context) {
-	ticker := time.NewTicker(a.RepairTick)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			rep, err := eventoutbox.Sweep(ctx, a.Pool, a.Bus, eventoutbox.Options{})
-			if err != nil && !errors.Is(err, context.Canceled) {
-				log.Printf("event_repair_sweep: error: %v", err)
-				continue
-			}
-			if rep.Repaired > 0 || rep.OldestLagSeconds > 0 {
-				log.Printf("event_repair_sweep scanned=%d repaired=%d oldest_lag_s=%.0f",
-					rep.Scanned, rep.Repaired, rep.OldestLagSeconds)
-			}
-		}
-	}
-}
-
-// rehydrate resumes every world's in-progress matches after a pod restart.
-func (a *App) rehydrate(ctx context.Context) {
-	worlds, err := a.Runner.WorldsWithLiveMatches(ctx)
-	if err != nil {
-		log.Printf("live startup sweep: %v", err)
-		return
-	}
-	for _, w := range worlds {
-		go func(worldID uuid.UUID) {
-			if err := a.Runner.RunLive(ctx, worldID); err != nil {
-				log.Printf("world %s live rehydrate: %v", worldID, err)
-			}
-		}(w)
-	}
-}
-
-// acquireMatchRunnerLock elects a single worker pod to run the live match
-// subsystem (OPD-21) via a Postgres advisory lock. The lock is bound to one
-// dedicated connection held for the worker's lifetime.
-func acquireMatchRunnerLock(ctx context.Context, pool *pgxpool.Pool) (bool, func(), error) {
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		return false, nil, fmt.Errorf("match runner: acquire lock connection: %w", err)
-	}
-	for {
-		var got bool
-		if err := conn.QueryRow(ctx,
-			`SELECT pg_try_advisory_lock(hashtext('touchline:match_runner'))`).Scan(&got); err != nil {
-			conn.Release()
-			return false, nil, fmt.Errorf("match runner: acquire lock: %w", err)
-		}
-		if got {
-			return true, func() { conn.Release() }, nil
-		}
-		log.Printf("match runner: waiting for another worker to release the runner lock")
-		select {
-		case <-ctx.Done():
-			conn.Release()
-			return false, nil, ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
-}
-
-// newRealtimeBroker builds the Redis pub/sub transport for realtime fan-out,
-// degrading gracefully to the in-process broker when Redis is unavailable.
-func newRealtimeBroker(ctx context.Context) realtime.Broker {
-	url := os.Getenv("REDIS_URL")
-	if url == "" {
-		return realtime.NewLocalBroker()
-	}
-	broker, err := realtime.NewRedisBroker(ctx, url)
-	if err != nil {
-		log.Printf("warning: REDIS_URL unreachable (%v); falling back to in-process realtime fan-out", err)
-		return realtime.NewLocalBroker()
-	}
-	log.Printf("realtime fan-out via Redis (%s)", broker.ChannelName())
-	return broker
-}
-
-func connectDB(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("cannot reach PostgreSQL: %w", err)
-	}
-	return pool, nil
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func envDuration(key string, fallback time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-		log.Printf("warning: invalid %s %q, using %s", key, v, fallback)
-	}
-	return fallback
 }

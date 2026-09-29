@@ -186,24 +186,6 @@ func validateBandsNoOverlap(bands []Band) error {
 	return nil
 }
 
-// regionalRef builds the engine-facing identity of an already-loaded regional cup.
-func regionalRef(cup *Cup) CompetitionRef {
-	ref := CompetitionRef{
-		ID:      cup.ID,
-		WorldID: cup.WorldID,
-		Name:    cup.Name,
-		Type:    cup.CompetitionType,
-		Scope:   ScopeRegion,
-	}
-	if cup.Region != nil {
-		ref.RegionID = cup.Region.ID
-	}
-	if cup.Tier != nil {
-		ref.Tier = *cup.Tier
-	}
-	return ref
-}
-
 // validateRegionalBands asserts every banded league is a real league whose
 // country sits inside the region, and that no two bands overlap. A missing
 // league is ErrCompetitionNotFound; a league outside the region is

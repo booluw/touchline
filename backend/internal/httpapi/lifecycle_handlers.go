@@ -10,7 +10,7 @@ import (
 
 	internalmanager "github.com/touchline/backend/internal/manager"
 	internalworld "github.com/touchline/backend/internal/world"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 type createWorldRequest struct {

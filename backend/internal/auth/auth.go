@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/touchline/backend/pkg/apiref"
-	pkgauth "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 // Sentinel errors. Handlers map these to HTTP status codes; all other errors
@@ -58,8 +58,8 @@ type WorldInfo struct {
 // from (Worlds non-nil, TokenPair/Identity nil). An administrator always gets a
 // world-less console session.
 type LoginResult struct {
-	TokenPair   *pkgauth.TokenPair
-	Identity    *pkgauth.ManagerIdentity
+	TokenPair   *pkgjwt.TokenPair
+	Identity    *pkgjwt.ManagerIdentity
 	Worlds      []WorldInfo
 	DisplayName string
 	IsAdmin     bool
@@ -71,11 +71,11 @@ type LoginResult struct {
 // Service resolves credentials and manages rotating sessions.
 type Service struct {
 	pool *pgxpool.Pool
-	cfg  pkgauth.JWTConfig
+	cfg  pkgjwt.JWTConfig
 }
 
 // NewService builds the auth service.
-func NewService(pool *pgxpool.Pool, cfg pkgauth.JWTConfig) *Service {
+func NewService(pool *pgxpool.Pool, cfg pkgjwt.JWTConfig) *Service {
 	return &Service{pool: pool, cfg: cfg}
 }
 
@@ -191,7 +191,7 @@ func (s *Service) managerLogin(ctx context.Context, userID uuid.UUID, name strin
 
 // adminSession mints the world-less console session for an administrator.
 func (s *Service) adminSession(ctx context.Context, userID uuid.UUID, name string, createdAt time.Time, ip *netip.Addr, deviceFingerprint string) (*LoginResult, error) {
-	identity := &pkgauth.ManagerIdentity{
+	identity := &pkgjwt.ManagerIdentity{
 		ManagerID: uuid.Nil,
 		WorldID:   uuid.Nil,
 		UserID:    userID,
@@ -206,7 +206,7 @@ func (s *Service) mintManagerSession(ctx context.Context, userID uuid.UUID, mana
 		`SELECT world_id FROM manager.managers WHERE id = $1`, managerID).Scan(&worldID); err != nil {
 		return nil, fmt.Errorf("load manager world: %w", err)
 	}
-	identity := &pkgauth.ManagerIdentity{
+	identity := &pkgjwt.ManagerIdentity{
 		ManagerID: managerID,
 		WorldID:   worldID,
 		UserID:    userID,
@@ -247,8 +247,8 @@ func (s *Service) managerClub(ctx context.Context, managerID uuid.UUID) (*apiref
 
 // completeLogin mints the token pair, records the hashed refresh session in one
 // transaction, and returns the assembled result.
-func (s *Service) completeLogin(ctx context.Context, userID uuid.UUID, identity *pkgauth.ManagerIdentity, name string, createdAt time.Time, isAdmin bool, ip *netip.Addr, deviceFingerprint string) (*LoginResult, error) {
-	pair, err := pkgauth.GenerateTokenPair(s.cfg, *identity)
+func (s *Service) completeLogin(ctx context.Context, userID uuid.UUID, identity *pkgjwt.ManagerIdentity, name string, createdAt time.Time, isAdmin bool, ip *netip.Addr, deviceFingerprint string) (*LoginResult, error) {
+	pair, err := pkgjwt.GenerateTokenPair(s.cfg, *identity)
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}
@@ -292,7 +292,7 @@ func (s *Service) completeLogin(ctx context.Context, userID uuid.UUID, identity 
 // against auth.users.is_admin here — a revoked admin grant kills the session
 // on its next refresh, mirroring requireAdmin's per-request check.
 func (s *Service) Refresh(ctx context.Context, rawRefresh string, ip *netip.Addr, deviceFingerprint string) (*LoginResult, error) {
-	managerID, err := pkgauth.ValidateRefreshToken(s.cfg, rawRefresh)
+	managerID, err := pkgjwt.ValidateRefreshToken(s.cfg, rawRefresh)
 	if err != nil {
 		return nil, ErrInvalidRefresh
 	}
@@ -309,7 +309,7 @@ func (s *Service) Refresh(ctx context.Context, rawRefresh string, ip *netip.Addr
 		expiresAt  time.Time
 		revokedAt  *time.Time
 	)
-	hash := pkgauth.HashRefreshToken(rawRefresh)
+	hash := pkgjwt.HashRefreshToken(rawRefresh)
 	err = tx.QueryRow(ctx, `
 		SELECT id, user_id, expires_at, revoked_at FROM auth.sessions
 		WHERE refresh_token_hash = $1 FOR UPDATE`, hash,
@@ -348,8 +348,8 @@ func (s *Service) Refresh(ctx context.Context, rawRefresh string, ip *netip.Addr
 		}
 	}
 
-	identity := &pkgauth.ManagerIdentity{ManagerID: managerID, WorldID: worldID, UserID: sessionUID}
-	pair, err := pkgauth.GenerateTokenPair(s.cfg, *identity)
+	identity := &pkgjwt.ManagerIdentity{ManagerID: managerID, WorldID: worldID, UserID: sessionUID}
+	pair, err := pkgjwt.GenerateTokenPair(s.cfg, *identity)
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}
@@ -385,7 +385,7 @@ func (s *Service) Logout(ctx context.Context, rawRefresh string) error {
 	}
 	if _, err := s.pool.Exec(ctx,
 		`DELETE FROM auth.sessions WHERE refresh_token_hash = $1`,
-		pkgauth.HashRefreshToken(rawRefresh)); err != nil {
+		pkgjwt.HashRefreshToken(rawRefresh)); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
 	return nil

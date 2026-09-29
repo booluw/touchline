@@ -42,8 +42,6 @@ type MedicalFacility struct {
 	UpgradedAt *time.Time      `json:"upgraded_at,omitempty"`
 }
 
-var ErrMedicalMaxLevel = errors.New("academy: medical facility already at maximum level")
-
 // MedicalUpgradeCost returns the cumulative cost to raise the medical facility
 // from level from to level to. The per-step cost is MedicalCostBase × step, so
 // the total is MedicalCostBase × (to(to-1) − from(from-1)) / 2: reaching level

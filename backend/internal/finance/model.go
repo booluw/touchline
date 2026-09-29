@@ -35,7 +35,6 @@ var (
 	ErrNotOwned        = errors.New("manager does not own this club")
 	ErrPlayerMismatch  = errors.New("player is not registered to this club")
 	ErrInvalidContract = errors.New("invalid contract terms")
-	ErrNoAccount       = errors.New("finance account does not exist for this club")
 )
 
 // Actor identifies the caller of a finance mutation.

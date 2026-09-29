@@ -5,6 +5,7 @@ Repo-specific guidance for AI coding agents. Keep high-signal only; this file is
 ## Layout
 - Monorepo: `backend/` (Go), `frontend/` (Nuxt 3, pnpm), `docs/` (product/how-to docs), `infra/`, `data/`.
 - App code lives in `backend/internal/<pkg>`, not `backend/docs/` (docs live at repo-root `docs/`).
+- One backend binary: `backend/cmd/touchline` (`serve` | `api` | `scheduler` | `worker`). Wiring lives in `internal/app` (config.go, app.go, runners.go, worker.go, worldtick.go); HTTP handlers + their integration tests live in `internal/httpapi` (`<domain>_handlers.go`). JWT helpers are `pkg/jwt`; `internal/auth` is the login/session service.
 - DB migrations: `backend/migrations/` as numbered `NNNN_name.{up,down}.sql`; add a row to the `migrations/README.md` matrix with each change. Never renumber existing files.
 - API schema: `backend/internal/apidocs/openapi.yaml`. Two Go tests in `backend/internal/httpapi` (`TestDocsCoverRouter`, `TestDocsOpenAPIValid`) gate it: any new/renamed route must be mirrored in openapi.yaml or `go test ./...` fails.
 - Engine invariants are documented in `docs/how-to/` (cups, seasons, cadences) and `docs/product_manager.md` (recorded decisions).

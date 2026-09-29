@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	internalsocial "github.com/touchline/backend/internal/social"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 // handleGetManagerProfile returns the manager profile page for any manager in
