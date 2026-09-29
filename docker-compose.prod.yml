@@ -65,6 +65,14 @@ services:
       ref-seed:
         condition: service_completed_successfully
     restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.touchline-api.rule=Host(`touchline.example.com`) && (PathPrefix(`/api`) || PathPrefix(`/ws`) || PathPrefix(`/health`))
+      - traefik.http.routers.touchline-api.entrypoints=https
+      - traefik.http.routers.touchline-api.tls=true
+      - traefik.http.routers.touchline-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.touchline-api.priority=100
+      - traefik.http.services.touchline-api.loadbalancer.server.port=8080
 
   frontend:
     build:
