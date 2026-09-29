@@ -146,7 +146,7 @@ func (s *Service) GetClubSquad(ctx context.Context, clubID uuid.UUID) ([]SquadPl
 		       pe.nationality_code, n.name,
 		       pe.date_of_birth,
 		       p.primary_position, p.squad_number,
-		       wc.id, wc.code
+		       wc.id, wc.code, world.world_date(c.world_id)
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
 		LEFT JOIN ref.nationalities n ON n.code = pe.nationality_code
@@ -165,13 +165,14 @@ func (s *Service) GetClubSquad(ctx context.Context, clubID uuid.UUID) ([]SquadPl
 		var dob time.Time
 		var countryID uuid.UUID
 		var countryCD string
+		var worldDate time.Time
 		if err := rows.Scan(&sp.ID, &sp.PersonID, &sp.FirstName, &sp.LastName, &sp.DisplayName,
 			&sp.NationalityCode, &sp.NationalityName, &dob, &sp.PrimaryPosition, &sp.SquadNumber,
-			&countryID, &countryCD); err != nil {
+			&countryID, &countryCD, &worldDate); err != nil {
 			return nil, err
 		}
 		sp.DateOfBirth = dob
-		sp.Age = ageAt(dob, time.Now())
+		sp.Age = ageAt(dob, worldDate) // the world's calendar, not the server's (IM25)
 		if sp.NationalityCode != "" {
 			sp.Nationality = &apiref.CountryRef{Code: sp.NationalityCode, Name: sp.NationalityName}
 			if countryID != uuid.Nil {

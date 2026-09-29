@@ -94,6 +94,11 @@ func (s *Service) CreateCup(ctx context.Context, p CupParams) (*Cup, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.recordAdminEvent(ctx, tx, worldID, EventCupCreated, map[string]any{
+		"cup_id": cupID, "name": name, "competition_type": "domestic_cup", "country_id": p.CountryID,
+	}); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit create cup: %w", err)
 	}

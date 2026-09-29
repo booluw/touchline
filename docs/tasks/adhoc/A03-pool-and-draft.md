@@ -1,6 +1,6 @@
 # A03 — Player pool and squad draft system
 
-**Status:** Not started
+**Status:** Implemented (status reconciled by the IM23–IM29 doc audit — see note at the end)
 **Sprint:** Ad-hoc (player lifecycle)
 **Source:** User design session; OPENCODE.md
 **Depends on:** A01, A02
@@ -78,3 +78,13 @@ Payload: `player_id`, `club_id`, `pool_country_id`.
 ## Delivery evidence
 
 - Pending.
+
+
+## Status reconciliation (IM23–IM29 audit)
+
+This file still read "Not started" although `internal/playerpool` exists and
+`bootstrap` drafts every new club's squad from the shared pool
+(`playerpool.DraftSquad`, called from `internal/bootstrap/service.go`), with
+unit tests in `internal/playerpool/pool_test.go` and the bootstrap/competition
+integration suites exercising the draft. The audit only corrected the status;
+it did not re-verify every acceptance criterion above.

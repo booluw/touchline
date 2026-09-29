@@ -248,9 +248,9 @@ func (s *Service) fireScheduledTick(worldID uuid.UUID, granularity string) {
 //   - daily (the only registered granularity): the world's day counter
 //     converges toward the fixed-scale target — the number of whole game-days
 //     the real clock has crossed since the world's epoch — emitting one
-//     WORLD_TICK{daily} per day advanced. A fire with nothing left to roll
-//     over is a no-op, so a stale cron fire or a concurrent poll pass can
-//     never tick the same day twice. Progress is capped at maxDaysPerFire per
+//     WORLD_TICK{daily, day} per day advanced, stamped with that day (IM23).
+//     A fire with nothing left to roll over is a no-op, so a stale cron fire
+//     or a concurrent poll pass can never tick the same day twice. Progress is capped at maxDaysPerFire per
 //     call so a long downtime is played back in bounded passes, day by day.
 //
 //   - legacy granularities (hourly/weekly/monthly/seasonal, only exercised by
@@ -312,11 +312,11 @@ func (s *Service) rolloverDays(ctx context.Context, worldID uuid.UUID, days int6
 	for d := int64(0); d < days; d++ {
 		// The status guard keeps a world that turns non-playable mid-pass from
 		// ticking; the caller's cap already bounds this to the scale target.
-		var tick int64
+		var tick, day int64
 		err = tx.QueryRow(ctx, `
 			UPDATE world.worlds SET current_tick = current_tick + 1, current_day = current_day + 1
 			WHERE id = $1 AND status IN ('active', 'open_beta')
-			RETURNING current_tick`, worldID).Scan(&tick)
+			RETURNING current_tick, current_day`, worldID).Scan(&tick, &day)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // world became non-playable; nothing further to tick
 		}
@@ -324,7 +324,11 @@ func (s *Service) rolloverDays(ctx context.Context, worldID uuid.UUID, days int6
 			return fmt.Errorf("scheduler: advance world tick: %w", err)
 		}
 
-		payload, _ := json.Marshal(map[string]string{"granularity": dailyGranularity})
+		// The emission carries the calendar day it advanced to (IM23): a
+		// multi-day rollover commits every increment in this one tx, so a
+		// consumer re-reading world.worlds.current_day would see only the last
+		// day and miss (or repeat) week/month/season boundaries in between.
+		payload, _ := json.Marshal(map[string]any{"granularity": dailyGranularity, "day": day})
 		actor := "system"
 		ev := eventbus.Event{
 			ID:        uuid.New(),

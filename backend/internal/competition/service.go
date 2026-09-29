@@ -344,8 +344,14 @@ func (s *Service) CreateCountry(ctx context.Context, worldID uuid.UUID, code, na
 	if code == "" || name == "" {
 		return nil, errors.New("code and name are required")
 	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin create country: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	var c Country
-	err := s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO world.countries (world_id, code, name)
 		VALUES ($1, $2, $3) RETURNING id, world_id, code, name, region_id`,
 		worldID, code, name,
@@ -355,6 +361,14 @@ func (s *Service) CreateCountry(ctx context.Context, worldID uuid.UUID, code, na
 			return nil, errors.New("a country with this code already exists in this world")
 		}
 		return nil, fmt.Errorf("create country: %w", err)
+	}
+	if err := s.recordAdminEvent(ctx, tx, worldID, EventCountryCreated, map[string]any{
+		"country_id": c.ID, "code": c.Code, "name": c.Name,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create country: %w", err)
 	}
 	return &c, nil
 }
@@ -475,6 +489,12 @@ func (s *Service) CreateLeague(ctx context.Context, p LeagueParams) (*League, er
 	if err != nil {
 		return nil, err
 	}
+	if err := s.recordAdminEvent(ctx, tx, worldID, EventLeagueCreated, map[string]any{
+		"league_id": leagueID, "country_id": p.CountryID, "name": name, "tier": p.Tier,
+		"team_count": p.TeamCount, "promotions": p.Promotions, "relegations": p.Relegations,
+	}); err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit create league: %w", err)
@@ -557,11 +577,24 @@ func (s *Service) UpdateLeagueAdjacency(ctx context.Context, leagueID uuid.UUID,
 			return ErrBadAdjacency
 		}
 	}
-	if _, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin update adjacency: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `
 		UPDATE competition.competition_rules
 		SET promotes_to_competition_id = $2, relegates_to_competition_id = $3
 		WHERE competition_id = $1`, leagueID, promotesTo, relegatesTo); err != nil {
 		return fmt.Errorf("update adjacency: %w", err)
+	}
+	if err := s.recordAdminEvent(ctx, tx, league.WorldID, EventLeagueAdjacencySet, map[string]any{
+		"league_id": leagueID, "promotes_to": promotesTo, "relegates_to": relegatesTo,
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit update adjacency: %w", err)
 	}
 	return nil
 }

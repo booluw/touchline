@@ -85,30 +85,36 @@ func (s *Service) acceptBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, w
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE finance.wage_commitments w
-		SET end_date = CURRENT_DATE
+		SET end_date = world.club_world_date(w.club_id)
 		FROM player.contracts c
 		WHERE w.contract_id = c.id AND c.player_id = $1 AND c.club_id = $2
-		  AND c.status = 'terminated'`, playerID, sellerClub); err != nil {
+		  AND c.status = 'terminated' AND w.end_date > world.club_world_date(w.club_id)`, playerID, sellerClub); err != nil {
 		return nil, nil, fmt.Errorf("end seller wage commitments: %w", err)
 	}
 
-	// 3. The buyer contract and its commitment, from the agreed terms.
-	endDate := time.Now().UTC().AddDate(0, terms.ContractLengthMonths, 0)
+	// 3. The buyer contract and its commitment, from the agreed terms, dated
+	// on the world's calendar (IM25), not the server's.
+	var startDate time.Time
+	if err := tx.QueryRow(ctx, `SELECT world.world_date($1)`, worldID).Scan(&startDate); err != nil {
+		return nil, nil, fmt.Errorf("world date: %w", err)
+	}
+	endDate := startDate.AddDate(0, terms.ContractLengthMonths, 0)
 	var contractID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO player.contracts
 			(player_id, club_id, weekly_wage, signing_bonus, start_date, end_date,
 			 release_clause, status)
-		VALUES ($1, $2, $3, $4, CURRENT_DATE, $5, $6, 'active')
+		VALUES ($1, $2, $3, $4, $7, $5, $6, 'active')
 		RETURNING id`,
 		playerID, buyerClub, terms.WeeklyWage, terms.SigningBonus, endDate.Format("2006-01-02"), terms.ReleaseClause,
+		startDate.Format("2006-01-02"),
 	).Scan(&contractID); err != nil {
 		return nil, nil, fmt.Errorf("insert buyer contract: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO finance.wage_commitments (contract_id, club_id, weekly_wage, start_date, end_date)
-		VALUES ($1, $2, $3, CURRENT_DATE, $4)`,
-		contractID, buyerClub, terms.WeeklyWage, endDate.Format("2006-01-02")); err != nil {
+		VALUES ($1, $2, $3, $5, $4)`,
+		contractID, buyerClub, terms.WeeklyWage, endDate.Format("2006-01-02"), startDate.Format("2006-01-02")); err != nil {
 		return nil, nil, fmt.Errorf("insert buyer wage commitment: %w", err)
 	}
 
@@ -121,6 +127,7 @@ func (s *Service) acceptBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, w
 	payload := mustJSON(map[string]any{
 		"bid_id": bidID, "player_id": playerID,
 		"from_club_id": sellerClub, "to_club_id": buyerClub, "fee": terms.Fee,
+		"buying_club_id": buyerClub, "selling_club_id": sellerClub,
 	})
 	eventID, err := s.recordEventWithExplanation(ctx, tx, worldID, worldTick, eventType, actor, payload, exJSON)
 	if err != nil {
@@ -222,7 +229,14 @@ func (s *Service) rejectBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, t
 		`UPDATE transfer.bids SET status = 'rejected', responded_at = now() WHERE id = $1`, bidID); err != nil {
 		return fmt.Errorf("reject bid: %w", err)
 	}
-	payload := mustJSON(map[string]any{"bid_id": bidID, "decision": "reject"})
+	buyer, seller, err := bidClubs(ctx, tx, bidID)
+	if err != nil {
+		return err
+	}
+	payload := mustJSON(map[string]any{
+		"bid_id": bidID, "decision": "reject",
+		"buying_club_id": buyer, "selling_club_id": seller,
+	})
 	actorType, actorID := actor.actorTypeAndID()
 	e := eventbus.Event{
 		WorldID:   worldID,
@@ -242,8 +256,13 @@ func (s *Service) counterBid(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, 
 		return err
 	}
 	actorType, actorID := actor.actorTypeAndID()
+	buyer, seller, err := bidClubs(ctx, tx, bidID)
+	if err != nil {
+		return err
+	}
 	payload := mustJSON(map[string]any{
 		"bid_id": bidID, "proposed_by": proposedBy, "fee": terms.Fee,
+		"buying_club_id": buyer, "selling_club_id": seller,
 	})
 	e := eventbus.Event{
 		WorldID:   worldID,

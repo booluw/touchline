@@ -1,6 +1,6 @@
 # IM01 — Season lifecycle: admin start endpoint + configurable off-season + automatic next-season start
 
-**Status:** Not started
+**Status:** Implemented (status reconciled by the IM23–IM29 doc audit — see note at the end)
 **Sprint:** Improvements (season lifecycle)
 **Source:** Product decision (manual session)
 **Depends on:** S04-01 (StartSeason seam + rollover); S05-02 (ledger/wages); S08-01 (academy)
@@ -155,3 +155,16 @@ before `KickoffDue`:
   `competition_rules.scheduling_rules` JSON (no migration).
 - Season #1 stays `in_progress` on creation (existing behaviour); the flip
   step only affects rollover-created `upcoming` seasons.
+
+
+## Status reconciliation (IM23–IM29 audit)
+
+This file still read "Not started" although the behaviour ships: rollover
+creates the next season as `upcoming` anchored to the off-season gap
+(`internal/competition/rollover.go`), and `Service.ActivateDueSeasons`
+(`internal/competition/season.go`) flips it to `in_progress` and emits
+`SEASON_STARTED` from the worker's daily pass (`internal/app/worldtick.go`
+`kickDueWorld`). Covered by `TestOffSeasonGapRolloverAndActivation`
+(`internal/competition/competition_integration_test.go`) and documented in
+`docs/how-to/seasons.md` §3. The audit only corrected the status; it did not
+re-verify every acceptance criterion above.

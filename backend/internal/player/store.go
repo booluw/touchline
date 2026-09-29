@@ -574,13 +574,16 @@ func unresolvedRoles(ctx context.Context, q dbtx, clubID uuid.UUID) ([]uuid.UUID
 }
 
 // expectationRole maps a player's playing_time_expectation preference to the
-// squad role they are entitled to ("" when nothing matches).
+// squad role they are entitled to ("" when nothing matches). The preferences
+// table carries no timestamp, so the strongest expectation wins, with the row
+// id as a stable tie-break (IM30: the old ORDER BY created_at referenced a
+// column that does not exist and failed every weekly player pass).
 func expectationRole(ctx context.Context, q dbtx, playerID uuid.UUID) (string, error) {
 	var v string
 	err := q.QueryRow(ctx, `
 		SELECT preference_value FROM player.player_preferences
 		WHERE player_id = $1 AND preference_type = 'playing_time_expectation'
-		ORDER BY created_at DESC LIMIT 1`, playerID).Scan(&v)
+		ORDER BY strength DESC NULLS LAST, id LIMIT 1`, playerID).Scan(&v)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

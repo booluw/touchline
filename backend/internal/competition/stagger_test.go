@@ -177,3 +177,13 @@ func TestRoundAnchorWalk(t *testing.T) {
 		t.Fatalf("roundLastDay = %s, want 2026-06-06", got)
 	}
 }
+
+// TestNextAllowedWeekdayEmptySetIsUnrestricted: an empty weekday set means no
+// restriction — the start day itself — instead of an endless search (IM30).
+func TestNextAllowedWeekdayEmptySetIsUnrestricted(t *testing.T) {
+	start := time.Date(2026, 9, 29, 17, 30, 0, 0, time.UTC) // a Tuesday
+	got := nextAllowedWeekday(start, nil)
+	if want := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("nextAllowedWeekday(empty) = %v, want %v", got, want)
+	}
+}

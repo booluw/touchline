@@ -51,20 +51,25 @@ match engine (`internal/match/live.go`).
 ## 2. What the daily tick drives on the gameplay side
 
 The dispatch lives in the worker's `WORLD_TICK` handler
-(`backend/internal/app/app.go`, extracted as `handleWorldTick`). In this order:
+(`backend/internal/app/worldtick.go`, `handleWorldTick`). Every gate below reads
+**the day stamped on the emission** (`payload.day`, IM23), not the world's
+counter at processing time — a catch-up pass commits several days at once, and
+each of its emissions must still run its own day's passes. The realtime
+`world_tick` socket push that precedes the dispatch is best-effort: a Redis
+failure is logged and the day's gameplay still runs. In this order:
 
 | When | Effect (in order) |
 | --- | --- |
 | **always** | (1) `Runner.KickoffDue` + live pacing of in-progress matches — but only in the worker that holds the match-runner lock; (2) `Policy.RespondToBidsForAbsent` — the PolicyBot answers bids for away-managed clubs before the market sweep; (3) `Transfers.DailyTick` — expire stale bids, recompute player valuations, and run AI buyer activity. |
 | **every day where `day % days_per_week == 0`** (7/14/21/28…) | (1) `Policy.EnsureTraining` (bot writes plans before the pass); (2) `Training.ApplyWeekly` — apply the club's training archetype deltas + condition; (3) `Players.WeeklyTick` — morale recovery, playing-time shares, squad-role backfill, transfer-request assessment; (4) `Social.ReconcileRivalries` (backfill older fixtures). |
 | **every day where `day % days_per_month == 0`** (30/60/90…) | (1) `Finance.ApplyMonthlyWages` — post `4 × weekly_wage` per active wage commitment (dedup-keyed, idempotent); (2) `Academy.Maintenance` — debit each club's `annual_cost / 12` facility cost; (3) `Board.Review` — score every managed club against its mandates, snapshot the seven factors, and sack human managers at/under the confidence threshold. |
-| **every day where `day % 364 == 0`** (day 364, league-less worlds) | (1) seasonal fallback — drives the full player-lifecycle sweep (intake, retirement, pool replenish) once per season for worlds with no leagues; worlds with leagues ride their own `SEASON_COMPLETED` event instead. |
+| **every day where `day % 364 == 0`** (day 364, league-less worlds only) | (1) seasonal fallback — drives the full player-lifecycle sweep (intake, retirement, pool replenish) once per season for worlds with no leagues. A world with any league skips it (IM24) and rides its countries' `SEASON_COMPLETED` events instead; across all of a season's rollovers, retirement runs once per world. |
 
 A day that is both a week and a month boundary runs weekly before monthly, so
 the board grades post-wage books exactly once.
 
 The home dashboard also receives a best-effort `dashboard_update` sweep once
-per tick after the passes (`internal/app/app.go`, S07-01).
+per tick after the passes (`internal/app/worldtick.go`, S07-01).
 
 ## 3. The world clock and the calendar (IM16)
 
@@ -114,9 +119,13 @@ Consequences:
 ## 4. Reading a `WORLD_TICK` event
 
 Each tick writes a `world.events` row with `world_tick` (a monotonic per-world
-counter) and payload `{"granularity": "daily"}`. Consumers (worker, tests,
-dashboards) use the payload to confirm it is a daily tick; the worker then
-reads the world's calendar config to decide which day-derived passes to run.
+counter) and payload `{"granularity": "daily", "day": N}` — `day` is the
+calendar day this emission advanced the world to (IM23). Consumers (worker,
+tests, dashboards) use the payload to confirm it is a daily tick; the worker
+gates its day-derived passes on `day` and reads the world's calendar config
+(`days_per_week` / `days_per_month`) for the step sizes. Emissions written
+before IM23 have no `day`; the worker falls back to the world's current counter
+for them.
 
 ## 5. Tuning the cadences (admin)
 

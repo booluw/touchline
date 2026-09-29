@@ -197,3 +197,50 @@ func TestLifecycleOnSeasonCompleted(t *testing.T) {
 		t.Error("new season must not be reported as already done")
 	}
 }
+
+// TestLifecycleRetiresOncePerSeasonAcrossCountries asserts the world-wide
+// retirement pass runs only on the season's first rollover (IM24): a second
+// country completing the same season takes its own intake/replenish but must
+// not roll retirement again over the whole world.
+func TestLifecycleRetiresOncePerSeasonAcrossCountries(t *testing.T) {
+	pool, worldID, countryID, _, clubID := seedLifecycleWorld(t)
+	ctx := context.Background()
+	svc := NewService(pool, nil, academy.NewService(pool, nil))
+
+	second, err := internalcompetition.NewService(pool, nil).CreateCountry(ctx, worldID, "sco", "Scotland")
+	if err != nil {
+		t.Fatalf("create second country: %v", err)
+	}
+
+	ref := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	first, err := svc.OnSeasonCompleted(ctx, worldID, &countryID, 1, ref)
+	if err != nil {
+		t.Fatalf("first country rollover: %v", err)
+	}
+	if first.Retired == 0 {
+		t.Fatal("first rollover of the season must run retirement")
+	}
+
+	// Fresh veterans after the first pass: the season's retirement already ran,
+	// so the second country's rollover must leave them active.
+	late := insertVeterans(t, pool, worldID, clubID)
+	res, err := svc.OnSeasonCompleted(ctx, worldID, &second.ID, 1, ref)
+	if err != nil {
+		t.Fatalf("second country rollover: %v", err)
+	}
+	if res.AlreadyDone {
+		t.Fatal("a different country's rollover is not a redelivery")
+	}
+	if res.Retired != 0 {
+		t.Errorf("second country retired %d players, want 0 (once per world-season)", res.Retired)
+	}
+	for _, pid := range late {
+		var status string
+		if err := pool.QueryRow(ctx, `SELECT status FROM player.players WHERE id = $1`, pid).Scan(&status); err != nil {
+			t.Fatalf("load late veteran: %v", err)
+		}
+		if status != "active" {
+			t.Errorf("late veteran %s status = %s, want active", pid, status)
+		}
+	}
+}

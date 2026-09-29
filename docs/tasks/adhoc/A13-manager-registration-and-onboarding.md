@@ -86,3 +86,14 @@ Behaviour:
 - No email verification/recovery (remains open under OPD-02); registration rate
   limiting deferred (S11); device fingerprint captured for future
   anti-multi-accounting hooks (field already exists on `auth.sessions`).
+## Follow-up changes (IM28)
+
+- A failed auto-offer (`OnboardingAIClubID` / `CreateJobOffer`) is now **logged**
+  as this spec requires; registration still succeeds with `offer: null`.
+- A password over 72 bytes (bcrypt's input limit) returns **400**
+  (`ErrPasswordTooLong`) instead of a 500. No minimum length was added — that is
+  a product rule, recorded as open (OPD-54, under OPD-02).
+- **Known open failure:** `TestHTTPRegister_OnboardsWithAutoOffer`
+  (`internal/httpapi/register_integration_test.go`) fails on the base branch
+  and after IM28 alike (offer club is nil; the new manager's login returns 500).
+  It belongs to this in-progress task and was not changed by IM28.

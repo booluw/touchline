@@ -44,8 +44,14 @@ func (s *Service) CreateRegion(ctx context.Context, worldID uuid.UUID, name stri
 		return nil, ErrWorldNotFound
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin create region: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	var r Region
-	err := s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO world.regions (world_id, name)
 		VALUES ($1, $2) RETURNING id, world_id, name`,
 		worldID, name,
@@ -55,6 +61,14 @@ func (s *Service) CreateRegion(ctx context.Context, worldID uuid.UUID, name stri
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create region: %w", err)
+	}
+	if err := s.recordAdminEvent(ctx, tx, worldID, EventRegionCreated, map[string]any{
+		"region_id": r.ID, "name": r.Name,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create region: %w", err)
 	}
 	return &r, nil
 }
@@ -107,12 +121,29 @@ func (s *Service) RenameRegion(ctx context.Context, regionID uuid.UUID, name str
 // DeleteRegion removes a region; its countries fall back to unassigned
 // (world.countries.region_id is ON DELETE SET NULL).
 func (s *Service) DeleteRegion(ctx context.Context, regionID uuid.UUID) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM world.regions WHERE id = $1`, regionID)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin delete region: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var worldID uuid.UUID
+	var name string
+	err = tx.QueryRow(ctx,
+		`DELETE FROM world.regions WHERE id = $1 RETURNING world_id, name`, regionID).Scan(&worldID, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrRegionNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("delete region: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrRegionNotFound
+	if err := s.recordAdminEvent(ctx, tx, worldID, EventRegionDeleted, map[string]any{
+		"region_id": regionID, "name": name,
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete region: %w", err)
 	}
 	return nil
 }
@@ -146,14 +177,28 @@ func (s *Service) SetCountryRegion(ctx context.Context, countryID uuid.UUID, reg
 		}
 	}
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin assign country region: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	var country Country
-	err = s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE world.countries SET region_id = $2 WHERE id = $1
 		RETURNING id, world_id, code, name, region_id`,
 		countryID, regionID,
 	).Scan(&country.ID, &country.WorldID, &country.Code, &country.Name, &country.RegionID)
 	if err != nil {
 		return nil, fmt.Errorf("assign country region: %w", err)
+	}
+	if err := s.recordAdminEvent(ctx, tx, worldID, EventCountryRegionSet, map[string]any{
+		"country_id": countryID, "region_id": regionID,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit assign country region: %w", err)
 	}
 	return &country, nil
 }
@@ -169,10 +214,23 @@ func (s *Service) SetLeagueReputation(ctx context.Context, leagueID uuid.UUID, r
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin update league reputation: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `
 		UPDATE competition.competitions SET reputation = $2
 		WHERE id = $1 AND competition_type = 'league'`, leagueID, reputation); err != nil {
 		return nil, fmt.Errorf("update league reputation: %w", err)
+	}
+	if err := s.recordAdminEvent(ctx, tx, league.WorldID, EventLeagueReputationSet, map[string]any{
+		"league_id": leagueID, "reputation": reputation, "previous": league.Reputation,
+	}); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit update league reputation: %w", err)
 	}
 	league.Reputation = reputation
 	return league, nil

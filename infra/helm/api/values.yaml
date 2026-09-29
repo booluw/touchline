@@ -1,9 +1,12 @@
 replicaCount: 2
 
 image:
-  repository: ghcr.io/touchline/api
+  repository: ghcr.io/touchline/touchline
   tag: latest
   pullPolicy: IfNotPresent
+
+# The single backend image runs one subsystem per chart (IM29).
+args: ["touchline", "api"]
 
 service:
   type: ClusterIP

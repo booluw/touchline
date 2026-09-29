@@ -42,3 +42,17 @@ Build the dedicated backend aggregation endpoint `GET /api/dashboard` and corres
   `dashboard_integration_test.go` (empty feed for club-less manager, board +
   expiry surfacing, realtime push over a live DB).
 - Design doc: `docs/design/dashboard-numerics.md`.
+
+## Follow-up changes (IM26, IM30)
+
+- **IM30:** four dashboard reads (incoming bids, expiring contracts, unhappy
+  players, market events) selected `display_name` from `player.players`, which
+  has no such column — the dashboard read and the worker's per-tick
+  `PushWorldDelta` sweep failed at runtime. They now join `person.people`.
+  `dashboard_integration_test.go` passes against Postgres 16.
+- **IM26:** the worker's bid subscription (now `internal/app/worker.go`) also
+  handles `BID_WITHDRAWN` and pushes the urgent refresh to the human manager on
+  **both** sides of the bid thread, using the `buying_club_id` /
+  `selling_club_id` every bid event now carries.
+- **IM25:** the expiring-contracts window is measured from the world's calendar
+  date, not the server's.

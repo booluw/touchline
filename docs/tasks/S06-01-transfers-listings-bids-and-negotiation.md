@@ -1,6 +1,6 @@
 # S06-01 — Implement transfer listings, bids, and human negotiation workflow
 
-**Status:** In progress  
+**Status:** Implemented (instalment payments + performance add-ons deferred, see ⏳ below)  
 **Sprint:** 06 — Multiplayer market and board consequences  
 **Source:** PRD §§20–22, 60; technical plan §§6, 12, 16; OPENCODE.md  
 **Depends on:** S05-02
@@ -52,15 +52,30 @@ entries (debit `transfer_fee` / credit `player_sale`) in `finance.ledger_entries
   `BID_EXPIRED`, `TRANSFER_COMPLETED`, `MARKET_VALUATIONS_REFRESHED`) with
   `Explanation` objects (market valuation + negotiation rationale) where the domain
   has one.
-- ⏳ Realtime dashboard notifications for incoming bids (S07-01 aggregator surface).
+- ✅ Realtime dashboard notifications for bids (S07-01 aggregator surface): every
+  bid-thread event (placed / countered / accepted / rejected / withdrawn) pushes
+  the urgent dashboard section to the human manager on **both** sides (IM26).
 
 ## Implementation state
 
-Done: `internal/transfer` (model/valuation/store/service), `0038` integrity
-migration, httpapi routes + `transfer_handlers.go` (7 endpoints), openapi.yaml
-spec, daily-tick wiring in `internal/app/app.go`, design numerics doc.
-Pending: integration test suite (compile-checked), final verification.
+Done: `internal/transfer` (model/valuation/store/bid/listing/completion/daily/ai),
+`0038` integrity migration, httpapi routes + `transfer_handlers.go` (7
+endpoints), openapi.yaml spec, daily-tick wiring in `internal/app/worldtick.go`,
+design numerics doc.
 
 ## Delivery evidence
 
-- Pending (integration tests).
+- **Integration suite run against Postgres 16 (IM26):** the first real run of
+  `internal/transfer`'s DB suite exposed defects that had kept it red —
+  listing/bid reads selected `p.display_name` without the `person.people` join,
+  `ExpireStale` failed on an int-in-text-concat, a stale-bid respond rolled its
+  own expiry back, transfer explanations failed `Explanation.Validate`, and three
+  test bugs (same player picked twice, a second open bid on one player, a wrong
+  loan-listing bid count). All fixed in
+  [IM26](improvements/IM26-transfer-market-integrity.md); `go test -tags
+  integration ./internal/transfer/` passes (9 tests incl. the new
+  `TestBidEventsCarryBothClubs`, `TestAIBidsFollowTheBidCommandRules`).
+- Also corrected by IM26: the valuation age curve (18–23 now rises 0.85 → 1.00
+  as the design doc specifies), bid TTL in world days, AI buyers routed through
+  the manager bid command.
+- Contract dates use the world calendar (IM25).

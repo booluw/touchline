@@ -235,7 +235,7 @@ paths:
               required: [email, password]
               properties:
                 email: { type: string, format: email, example: player@touchline.local }
-                password: { type: string, format: password, example: changeme }
+                password: { type: string, format: password, maxLength: 72, example: changeme, description: "At most 72 bytes (the bcrypt input limit)." }
                 display_name:
                   type: string
                   description: Defaults to the email local part.
@@ -289,7 +289,7 @@ paths:
                     world: null
                     offer: null
         "400":
-          description: Malformed body (missing email/password).
+          description: Malformed body (missing email/password), or a password longer than 72 bytes.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -4503,7 +4503,10 @@ components:
       type: object
       required: [error]
       properties:
-        error: { type: string, example: internal error }
+        error:
+          type: string
+          description: Human-readable reason. A 500 always carries the generic "internal server error" — the cause is logged server-side, never returned.
+          example: internal server error
     DashboardItem:
       type: object
       description: |

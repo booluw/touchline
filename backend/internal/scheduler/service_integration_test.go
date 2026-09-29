@@ -291,7 +291,7 @@ func TestFireTickAdvancesCounterAndRecordsPayload(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 event rows, got %d", len(got))
 	}
-	if got[0].tick != 1 || got[0].event != "WORLD_TICK" || got[0].actor != "system" || got[0].payload != `{"granularity": "daily"}` {
+	if got[0].tick != 1 || got[0].event != "WORLD_TICK" || got[0].actor != "system" || got[0].payload != `{"day": 1, "granularity": "daily"}` {
 		t.Fatalf("row 1 mismatch: %+v", got[0])
 	}
 	if got[1].tick != 2 || got[1].event != "WORLD_TICK" || got[1].actor != "system" || got[1].payload != `{"granularity": "weekly"}` {
@@ -426,6 +426,29 @@ func TestFireTickRollsOverMissedDays(t *testing.T) {
 	}
 	if events := countWorldTicks(t, pool, w.ID); events != 30 {
 		t.Fatalf("total WORLD_TICK events = %d, want 30 (one per game-day)", events)
+	}
+	// IM23: each emission is stamped with the day it advanced to, even though
+	// a capped pass commits seven increments in one transaction.
+	dayRows, err := pool.Query(ctx, `
+		SELECT (payload->>'day')::bigint FROM world.events
+		WHERE world_id = $1 AND event_type = 'WORLD_TICK' ORDER BY world_tick`, w.ID)
+	if err != nil {
+		t.Fatalf("query tick days: %v", err)
+	}
+	var want int64 = 1
+	for dayRows.Next() {
+		var d int64
+		if err := dayRows.Scan(&d); err != nil {
+			t.Fatalf("scan tick day: %v", err)
+		}
+		if d != want {
+			t.Fatalf("WORLD_TICK #%d payload day = %d, want %d", want, d, want)
+		}
+		want++
+	}
+	dayRows.Close()
+	if err := dayRows.Err(); err != nil {
+		t.Fatalf("tick day rows: %v", err)
 	}
 
 	// A further fire with nothing left to roll over is a no-op.

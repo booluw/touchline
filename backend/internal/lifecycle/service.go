@@ -94,9 +94,19 @@ func (s *Service) OnSeasonCompleted(ctx context.Context, worldID uuid.UUID, coun
 		return res, nil
 	}
 
-	retired, err := s.retire(ctx, tx, worldID, seasonNumber, ref)
+	// Retirement is world-wide, so it runs once per (world, season) no matter
+	// how many countries complete that season (IM24): the first rollover of
+	// the season retires, later country rollovers only take their intake,
+	// replenish and auto-fill.
+	retireDone, err := retirementDone(ctx, tx, worldID, seasonNumber)
 	if err != nil {
 		return res, err
+	}
+	var retired int
+	if !retireDone {
+		if retired, err = s.retire(ctx, tx, worldID, seasonNumber, ref); err != nil {
+			return res, err
+		}
 	}
 	res.Retired = retired
 
@@ -128,6 +138,28 @@ func (s *Service) OnSeasonCompleted(ctx context.Context, worldID uuid.UUID, coun
 	log.Printf("lifecycle: world %s season %d rolled over (%d retired, %d autofilled, pool=%d)",
 		worldID, seasonNumber, retired, filled, size)
 	return res, nil
+}
+
+// retirementDone reports whether any rollover (country-scoped or world-wide)
+// already ran for this (world, season) — each one ran the world-wide
+// retirement pass. It first takes a transaction-scoped advisory lock on the
+// (world, season) so two countries completing concurrently serialize here and
+// only the first retires.
+func retirementDone(ctx context.Context, tx pgx.Tx, worldID uuid.UUID, season int) (bool, error) {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`,
+		fmt.Sprintf("touchline:lifecycle:%s:%d", worldID, season)); err != nil {
+		return false, fmt.Errorf("lifecycle retirement lock: %w", err)
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM world.events
+			WHERE world_id = $1 AND event_type = 'WORLD_LIFECYCLE_SEASON_COMPLETED'
+			  AND payload->>'season_number' = $2)`,
+		worldID, fmt.Sprintf("%d", season)).Scan(&exists); err != nil {
+		return false, fmt.Errorf("lifecycle retirement guard: %w", err)
+	}
+	return exists, nil
 }
 
 // lifecycleDone reports whether the (world, season) rollover already ran. For

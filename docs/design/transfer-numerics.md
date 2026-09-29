@@ -63,6 +63,9 @@ Proactive bids (on listing and on the daily sweep):
   (`aiInterestClubs`), ranked by thinnest positional squad first (club id as
   the stable tie-break) — so the market never stacks bids from every club.
 - A listing's guard: AI bids are never placed when an open bid already exists.
+- Command parity (IM26): an AI bid is submitted through the same bid command
+  as a manager's (`placeBidTx`) — duplicate open bid, buyer funds, live listing
+  and transferability are enforced identically; a refused AI bid is skipped.
 
 Reacting to a human counter (AI is the buyer):
 - fee ≤ `valuation × 0.95` → **accept**.
@@ -82,10 +85,11 @@ bonus/clauses.
 
 ## 3. Bid lifetime (OPD-05 resolution)
 
-- `BidTTLWorldDays = 3`. An open bid (`pending` or `countered`) that goes
-  unanswered past the wall-clock deadline is expired:
+- `BidTTLWorldDays = 3` **world** days — 3 × `tick.day_length` of real time
+  (IM26). An open bid (`pending` or `countered`) that goes unanswered past that
+  deadline is expired:
   - lazily, on the next `respond` attempt (`bidExpired`), and
-  - by the **daily** sweep (`ExpireStale`, SQL `created_at < now() - interval`),
+  - by the **daily** sweep (`ExpireStale`, SQL `created_at < now() - ttl`),
     which emits one `BID_EXPIRED` system event per world with a pending change.
 - Withdrawing a listing expired its open bids immediately; completing a transfer
   expires every competing open bid on the player.
@@ -132,7 +136,7 @@ Actor types: `manager` / `policy_bot` (from the acting `manager.managers` row
 | `PLAYER_LISTED` | manager | listing created |
 | `PLAYER_LISTING_WITHDRAWN` | manager | listing withdrawn |
 | `BID_PLACED` | manager / policy_bot | incl. AI buyer proactive bids |
-| `BID_ACCEPTED` | manager / policy_bot | explanation: `transfer_value` (market value + bid fee) |
+| `BID_ACCEPTED` | manager / policy_bot | explanation: `transfer_value` scored at the agreed fee = `market_value` + `fee_vs_market_value` (IM26: factors sum to the score) |
 | `BID_REJECTED` | manager / policy_bot | |
 | `BID_COUNTERED` | manager / policy_bot | |
 | `BID_WITHDRAWN` | manager | buyer abandons |

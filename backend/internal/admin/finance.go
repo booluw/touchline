@@ -67,7 +67,7 @@ func (s *Service) topWageBills(ctx context.Context, clubIDs []uuid.UUID) []WageR
 		SELECT c.id, c.short_name, COALESCE(SUM(w.weekly_wage)::bigint, 0), COUNT(w.id)
 		FROM club.clubs c
 		LEFT JOIN finance.wage_commitments w
-		  ON w.club_id = c.id AND w.end_date > CURRENT_DATE
+		  ON w.club_id = c.id AND w.end_date > world.club_world_date(c.id)
 		WHERE c.id = ANY($1)
 		GROUP BY c.id
 		ORDER BY COALESCE(SUM(w.weekly_wage), 0) DESC

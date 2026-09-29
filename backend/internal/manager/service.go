@@ -437,7 +437,7 @@ func (s *Service) AcceptJobOffer(ctx context.Context, offerID, managerID uuid.UU
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO manager.manager_history (manager_id, world_id, club_id, role, start_date)
-		VALUES ($1, $2, $3, 'manager', CURRENT_DATE)`, managerID, worldID, clubID); err != nil {
+		VALUES ($1, $2, $3, 'manager', world.world_date($2))`, managerID, worldID, clubID); err != nil {
 		return nil, fmt.Errorf("open history: %w", err)
 	}
 
@@ -559,7 +559,7 @@ func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason
 		return fmt.Errorf("revert club to AI control: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE manager.manager_history SET end_date = CURRENT_DATE, outcome_summary = $2
+		UPDATE manager.manager_history SET end_date = world.world_date(world_id), outcome_summary = $2
 		WHERE manager_id = $1 AND end_date IS NULL`, managerID, reason); err != nil {
 		return fmt.Errorf("close history: %w", err)
 	}

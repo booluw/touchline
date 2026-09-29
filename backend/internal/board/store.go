@@ -174,7 +174,7 @@ func (s *Store) loadFinances(ctx context.Context, q querier, clubID uuid.UUID, s
 		SELECT COALESCE((SELECT SUM(w.weekly_wage)::bigint * 52
 		                 FROM finance.wage_commitments w
 		                 JOIN player.contracts c ON c.id = w.contract_id
-		                 WHERE w.club_id = $1 AND c.status = 'active' AND w.end_date >= CURRENT_DATE), 0)`,
+		                 WHERE w.club_id = $1 AND c.status = 'active' AND w.end_date >= world.club_world_date($1)), 0)`,
 		clubID).Scan(&in.committedAnnual); err != nil {
 		return fmt.Errorf("committed wage: %w", err)
 	}

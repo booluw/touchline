@@ -25,9 +25,9 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 // listingColumns is the projection shared by every listing read.
 const listingSelect = `
-	SELECT l.id, l.world_id, l.player_id, p.display_name,
+	SELECT l.id, l.world_id, l.player_id, pp.display_name,
 	       pl.primary_position,
-	       (CURRENT_DATE - pp.date_of_birth) / 365,
+	       (world.world_date(pl.world_id) - pp.date_of_birth) / 365,
 	       pl.market_value,
 	       l.listing_club_id, c.name AS club_name,
 	       l.asking_price, l.listing_type, l.status,
@@ -119,7 +119,7 @@ func (s *Store) ListingByPlayerID(ctx context.Context, playerID uuid.UUID) (List
 
 // bidSelect is the projection of one bid thread with its latest round terms.
 const bidSelect = `
-	SELECT b.id, b.world_id, b.listing_id, b.player_id, p.display_name,
+	SELECT b.id, b.world_id, b.listing_id, b.player_id, pp.display_name,
 	       b.bidding_club_id, bc.name AS bidder_name,
 	       b.selling_club_id, sc.name AS seller_name,
 	       (n.terms->>'fee')::bigint,
@@ -134,6 +134,7 @@ const bidSelect = `
 		SELECT n2.id FROM transfer.negotiations n2
 		WHERE n2.bid_id = b.id ORDER BY n2.round DESC LIMIT 1)
 	JOIN player.players p ON p.id = b.player_id
+	JOIN person.people pp ON pp.id = p.person_id
 	JOIN club.clubs bc ON bc.id = b.bidding_club_id
 	JOIN club.clubs sc ON sc.id = b.selling_club_id`
 
@@ -228,8 +229,8 @@ func (s *Store) AttrsForPlayer(ctx context.Context, playerID uuid.UUID) (PlayerA
 	var a PlayerAttrs
 	err := s.pool.QueryRow(ctx, `
 		SELECT pl.id, pl.primary_position, pl.market_value,
-		       (CURRENT_DATE - pp.date_of_birth) / 365,
-		       COALESCE((SELECT (ct.end_date - CURRENT_DATE) FROM player.contracts ct
+		       (world.world_date(pl.world_id) - pp.date_of_birth) / 365,
+		       COALESCE((SELECT (ct.end_date - world.world_date(pl.world_id)) FROM player.contracts ct
 		                  WHERE ct.player_id = pl.id AND ct.status = 'active'
 		                  ORDER BY ct.start_date DESC LIMIT 1), 0),
 		       COALESCE((SELECT AVG(pa.value)::int FROM player.player_attributes pa
@@ -266,8 +267,8 @@ func (s *Store) AttrsForPlayer(ctx context.Context, playerID uuid.UUID) (PlayerA
 func (s *Store) ActiveAttrPlayers(ctx context.Context, worldID uuid.UUID) ([]PlayerAttrs, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT pl.id, pl.primary_position, pl.market_value,
-		       (CURRENT_DATE - pp.date_of_birth) / 365,
-		       COALESCE((SELECT (ct.end_date - CURRENT_DATE) FROM player.contracts ct
+		       (world.world_date(pl.world_id) - pp.date_of_birth) / 365,
+		       COALESCE((SELECT (ct.end_date - world.world_date(pl.world_id)) FROM player.contracts ct
 		                  WHERE ct.player_id = pl.id AND ct.status = 'active'
 		                  ORDER BY ct.start_date DESC LIMIT 1), 0),
 		       COALESCE((SELECT AVG(pa.value)::int FROM player.player_attributes pa

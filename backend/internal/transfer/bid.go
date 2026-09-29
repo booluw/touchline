@@ -39,19 +39,43 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 	}
 	defer tx.Rollback(ctx)
 
-	player, err := s.lockPlayer(ctx, tx, bidTarget(ctx, tx, in))
+	bidID, resolved, exp, err := s.placeBidTx(ctx, tx, actor, worldID, buyerClub, in)
 	if err != nil {
 		return Bid{}, nil, nil, err
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Bid{}, nil, nil, fmt.Errorf("commit bid: %w", err)
+	}
+
+	bid, err := s.store.GetBid(ctx, bidID)
+	if err != nil {
+		return Bid{}, nil, nil, err
+	}
+	return bid, resolved, exp, nil
+}
+
+// placeBidTx is the bid command inside the caller's transaction: every rule a
+// bid must pass (transferable player in the same world, live listing, no
+// duplicate open bid, buyer funds), the bid thread + BID_PLACED event, and —
+// when the seller is AI — the counterpart's immediate answer. Human managers
+// (PlaceBid) and AI buyers (placeAIBid) both go through it, so a policy bot
+// bids through the same command a manager does (Tech Plan §10, IM26).
+// Validation failures return before anything is written.
+func (s *Service) placeBidTx(ctx context.Context, tx pgx.Tx, actor Actor, worldID, buyerClub uuid.UUID, in BidInput) (uuid.UUID, *CompletedTransfer, *explanation.Explanation, error) {
+	player, err := s.lockPlayer(ctx, tx, bidTarget(ctx, tx, in))
+	if err != nil {
+		return uuid.Nil, nil, nil, err
+	}
 	if player.WorldID != worldID {
-		return Bid{}, nil, nil, ErrWorldMismatch
+		return uuid.Nil, nil, nil, ErrWorldMismatch
 	}
 	if player.ClubID == uuid.Nil || player.Status != "active" {
-		return Bid{}, nil, nil, ErrPlayerNotTransferable
+		return uuid.Nil, nil, nil, ErrPlayerNotTransferable
 	}
 	sellingClub := player.ClubID
 	if sellingClub == buyerClub {
-		return Bid{}, nil, nil, ErrSelfBid
+		return uuid.Nil, nil, nil, ErrSelfBid
 	}
 
 	var listingID *uuid.UUID
@@ -65,12 +89,12 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 			`SELECT world_id, player_id, status FROM transfer.listings WHERE id = $1`, *in.ListingID,
 		).Scan(&lWorld, &lOwner, &lStat); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return Bid{}, nil, nil, ErrListingNotFound
+				return uuid.Nil, nil, nil, ErrListingNotFound
 			}
-			return Bid{}, nil, nil, fmt.Errorf("load bid listing: %w", err)
+			return uuid.Nil, nil, nil, fmt.Errorf("load bid listing: %w", err)
 		}
 		if lWorld != worldID || lOwner != player.ID || lStat != "active" {
-			return Bid{}, nil, nil, ErrListingNotFound
+			return uuid.Nil, nil, nil, ErrListingNotFound
 		}
 		listingID = in.ListingID
 	}
@@ -81,23 +105,23 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 		WHERE bidding_club_id = $1 AND player_id = $2 AND status IN ('pending','countered')
 		LIMIT 1`, buyerClub, player.ID).Scan(&dup)
 	if err == nil {
-		return Bid{}, nil, nil, ErrDuplicateOpenBid
+		return uuid.Nil, nil, nil, ErrDuplicateOpenBid
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return Bid{}, nil, nil, fmt.Errorf("duplicate bid check: %w", err)
+		return uuid.Nil, nil, nil, fmt.Errorf("duplicate bid check: %w", err)
 	}
 
 	if err := s.requireFunds(ctx, tx, buyerClub, in.Terms.Fee); err != nil {
-		return Bid{}, nil, nil, err
+		return uuid.Nil, nil, nil, err
 	}
 
 	ticks, err := s.worldTick(ctx, tx, worldID)
 	if err != nil {
-		return Bid{}, nil, nil, err
+		return uuid.Nil, nil, nil, err
 	}
 	bidID, err := s.writeBidThread(ctx, tx, worldID, listingID, player.ID, buyerClub, sellingClub, in.Terms, ProposedByBuyingClub)
 	if err != nil {
-		return Bid{}, nil, nil, err
+		return uuid.Nil, nil, nil, err
 	}
 
 	payload := mustJSON(map[string]any{
@@ -105,7 +129,7 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 		"buying_club_id": buyerClub, "selling_club_id": sellingClub, "fee": in.Terms.Fee,
 	})
 	if err := s.recordEvent(ctx, tx, worldID, EventBidPlaced, actor, payload); err != nil {
-		return Bid{}, nil, nil, err
+		return uuid.Nil, nil, nil, err
 	}
 
 	var (
@@ -114,12 +138,12 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 	)
 	aiSeller, err := s.isAIClubTx(ctx, tx, sellingClub)
 	if err != nil {
-		return Bid{}, nil, nil, err
+		return uuid.Nil, nil, nil, err
 	}
 	if aiSeller {
 		attrs, err := s.attrsForPlayerTx(ctx, tx, player.ID)
 		if err != nil {
-			return Bid{}, nil, nil, err
+			return uuid.Nil, nil, nil, err
 		}
 		val := Valuation(attrs)
 		decision, target := aiSellerDecision(in.Terms.Fee, val, askingForPlayer(ctx, tx, listingID))
@@ -128,34 +152,26 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 		case RespondAccept:
 			resolved, exp, err = s.acceptBid(ctx, tx, worldID, ticks, bidID, bot, EventBidAccepted, val)
 			if err != nil {
-				return Bid{}, nil, nil, err
+				return uuid.Nil, nil, nil, err
 			}
 		case RespondReject:
 			if err := s.rejectBid(ctx, tx, worldID, ticks, bidID, bot, EventBidRejected); err != nil {
-				return Bid{}, nil, nil, err
+				return uuid.Nil, nil, nil, err
 			}
 		case RespondCounter:
 			counter := in.Terms
 			counter.Fee = target
 			if err := s.counterBid(ctx, tx, worldID, ticks, bidID, bot, ProposedBySellingClub, counter); err != nil {
-				return Bid{}, nil, nil, err
+				return uuid.Nil, nil, nil, err
 			}
 			exp, err = counterExplanation("ai_counter", val, target)
 			if err != nil {
-				return Bid{}, nil, nil, err
+				return uuid.Nil, nil, nil, err
 			}
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return Bid{}, nil, nil, fmt.Errorf("commit bid: %w", err)
-	}
-
-	bid, err := s.store.GetBid(ctx, bidID)
-	if err != nil {
-		return Bid{}, nil, nil, err
-	}
-	return bid, resolved, exp, nil
+	return bidID, resolved, exp, nil
 }
 
 // RespondToBid is the single negotiation endpoint: accept the current offer,
@@ -231,6 +247,11 @@ func (s *Service) respondToBid(ctx context.Context, actor Actor, worldID, clubID
 		if _, err := tx.Exec(ctx,
 			`UPDATE transfer.bids SET status = 'expired', responded_at = now() WHERE id = $1`, bidID); err != nil {
 			return Bid{}, nil, nil, err
+		}
+		// Persist the expiry before refusing the response: returning the
+		// error alone would roll the status change back with the tx.
+		if err := tx.Commit(ctx); err != nil {
+			return Bid{}, nil, nil, fmt.Errorf("commit bid expiry: %w", err)
 		}
 		return Bid{}, nil, nil, ErrBidExpired
 	}
@@ -392,7 +413,11 @@ func (s *Service) WithdrawBid(ctx context.Context, actor Actor, worldID, bidID u
 	if _, err := s.worldTick(ctx, tx, worldID); err != nil {
 		return Bid{}, err
 	}
-	payload := mustJSON(map[string]any{"bid_id": bidID})
+	buyer, seller, err := bidClubs(ctx, tx, bidID)
+	if err != nil {
+		return Bid{}, err
+	}
+	payload := mustJSON(map[string]any{"bid_id": bidID, "buying_club_id": buyer, "selling_club_id": seller})
 	if err := s.recordEvent(ctx, tx, worldID, EventBidWithdrawn, actor, payload); err != nil {
 		return Bid{}, err
 	}

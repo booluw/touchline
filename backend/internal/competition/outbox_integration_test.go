@@ -184,8 +184,11 @@ func TestSeedWorldEventFailureAbortsState(t *testing.T) {
 	pool, worldID, countryID := seedWorld(t)
 	ctx := context.Background()
 
+	// Leagues are declared through a working bus: since IM27, CreateLeague
+	// records LEAGUE_CREATED and would itself fail on the injected bus. Only
+	// the seed runs against the failing bus.
+	twoTierLeague(t, NewService(pool, nil), countryID)
 	svc := NewService(pool, failingBus{})
-	twoTierLeague(t, svc, countryID)
 
 	if _, err := svc.SeedWorld(ctx, worldID); err == nil {
 		t.Fatal("seed must fail when the event enqueue fails")

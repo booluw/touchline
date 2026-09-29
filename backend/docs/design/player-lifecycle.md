@@ -121,9 +121,16 @@ match-ineligible until 18.
 On each `WORLD_LIFECYCLE_SEASON_COMPLETED`:
 
 1. Replenish pool: club-academy products + street intake (A04/A05).
-2. Recompute ages; run retirement + aftermath (A06).
+2. Recompute ages; run retirement + aftermath (A06). Retirement is
+   world-wide, so it runs **once per `(world, season)`** — on the season's
+   first rollover, whichever country completes first; later countries'
+   rollovers of the same season skip it (IM24).
 3. Run eligibility/registration gate (A07).
 4. Re-run AI auto-fill so nobody plays short-handed (A09).
+
+The rollover is driven by each country's `SEASON_COMPLETED`; the day-364
+seasonal fallback applies only to worlds with no leagues (IM24). Ages are
+measured against the world's calendar date (`world.world_date`, IM25).
 
 ## 7. Event catalogue
 

@@ -52,8 +52,13 @@ func isAllowedWeekday(t time.Time, weekdays []int) bool {
 }
 
 // nextAllowedWeekday returns the earliest day on or after start whose ISO
-// weekday is in the set. weekdays must be non-empty.
+// weekday is in the set. An empty set means no weekday restriction, so start's
+// own day is returned (IM30: season materialization calls this for every
+// competition, and an empty set used to loop forever).
 func nextAllowedWeekday(start time.Time, weekdays []int) time.Time {
+	if len(weekdays) == 0 {
+		return daysTruncate(start)
+	}
 	for day := daysTruncate(start); ; day = day.AddDate(0, 0, 1) {
 		if isAllowedWeekday(day, weekdays) {
 			return day

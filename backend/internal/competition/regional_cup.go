@@ -389,6 +389,11 @@ func (s *Service) CreateRegionalCup(ctx context.Context, p RegionalCupParams) (*
 	if err != nil {
 		return nil, err
 	}
+	if err := s.recordAdminEvent(ctx, tx, p.WorldID, EventCupCreated, map[string]any{
+		"cup_id": cupID, "name": name, "competition_type": "continental", "region_id": p.RegionID,
+	}); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit regional cup: %w", err)
 	}
@@ -431,6 +436,11 @@ func (s *Service) SetQualification(ctx context.Context, cupID uuid.UUID, inputs 
 		return nil, fmt.Errorf("refresh qualification mirror: %w", err)
 	}
 	if err := insertQualBands(ctx, tx, cupID, bands); err != nil {
+		return nil, err
+	}
+	if err := s.recordAdminEvent(ctx, tx, cup.WorldID, EventCupQualificationSet, map[string]any{
+		"cup_id": cupID, "bands": len(bands),
+	}); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -33,7 +33,9 @@ func internalError(c *gin.Context, err error) {
 	} else {
 		log.Printf("httpapi: %v", err)
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// The cause stays in the server log: raw errors carry SQL and schema
+	// detail that must not reach clients (IM28).
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
 
 type loginRequest struct {
@@ -166,17 +168,26 @@ func (s *server) handleRegister(c *gin.Context) {
 	case errors.Is(err, internalauth.ErrEmailTaken):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
+	case errors.Is(err, internalauth.ErrPasswordTooLong):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	case err != nil:
 		internalError(c, err)
 		return
 	}
 
-	// Auto-offer (best-effort): the deterministic first available AI club.
+	// Auto-offer (best-effort, A13): the deterministic first available AI club.
+	// A failure never fails the registration, but it is logged so an admin
+	// can see why a new manager has no offer (IM28).
 	var offer *internalmanager.JobOffer
 	if res.JoinedWorld != nil {
 		clubID, oErr := s.mgrSvc.OnboardingAIClubID(c.Request.Context(), res.JoinedWorld.ID)
-		if oErr == nil {
-			offer, _ = s.mgrSvc.CreateJobOffer(c.Request.Context(), clubID, *res.ManagerID)
+		if oErr != nil {
+			log.Printf("register %s: no onboarding offer in world %s: %v", res.UserID, res.JoinedWorld.ID, oErr)
+		} else if o, oErr := s.mgrSvc.CreateJobOffer(c.Request.Context(), clubID, *res.ManagerID); oErr != nil {
+			log.Printf("register %s: onboarding offer from club %s failed: %v", res.UserID, clubID, oErr)
+		} else {
+			offer = o
 		}
 	}
 
