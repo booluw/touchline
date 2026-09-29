@@ -153,7 +153,7 @@ async function load() {
     const { clubs } = (await res.json()) as { clubs: { id: string; name: string }[] }
     clubList.value = clubs ?? []
     if (clubs.length > 0) {
-      const detail = await authedFetch(`/api/clubs/${clubs[0].id}`)
+      const detail = await authedFetch(`/api/clubs/${clubs[0]!.id}`)
       if (detail.ok) {
         clubDetail.value = (await detail.json()) as typeof clubDetail.value
       }

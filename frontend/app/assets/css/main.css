@@ -1,7 +1,3 @@
-html {
-  color-scheme: dark;
-}
-
 /*
   Touchline — Cyber Brutalist theme tokens (Tailwind CSS v4)
   --------------------------------------------------------
@@ -30,6 +26,10 @@ html {
 */
 
 @import "tailwindcss";
+
+html {
+  color-scheme: dark;
+}
 
 @theme {
   /* =========================================================

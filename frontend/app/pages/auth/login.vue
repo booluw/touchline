@@ -59,18 +59,12 @@
 </template>
 
 <script setup lang="ts">
-const { login, selectWorld, worlds, needsWorldSelection } = useAuth()
+const { login, selectWorld, confirmWorld, worlds, needsWorldSelection } = useAuth()
 
 const auth = ref({ email: '', password: ''})
 const errorMessage = ref('')
 
 async function submitLogin() {
   await login(auth.value)
-}
-
-async function doLogin() {
-  // if ((res as LoginWorldPicker).status !== 'worlds') {
-  //   useRealtimeStore().connect()
-  // }
 }
 </script>

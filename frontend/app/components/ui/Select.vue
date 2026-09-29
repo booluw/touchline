@@ -10,22 +10,22 @@ import {
   SelectRoot,
   SelectScrollDownButton,
   SelectScrollUpButton,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
   SelectViewport,
 } from 'reka-ui'
+import type { AcceptableValue } from 'reka-ui'
 
-const model = defineModel()
+const model = defineModel<AcceptableValue>()
 const props = withDefaults(defineProps<{
-  options: string[] | { val: string, id: string }[] | Record<string, any>[]
-  'item-id'?: string
-  'item-val'?: string
+  options: string[] | { val: string, id: string }[] | Record<string, unknown>[]
+  itemId?: string
+  itemVal?: string
   title?: string,
   class?: string
 }>(), {
-  'item-id': 'id',
-  'item-val': 'val',
+  itemId: 'id',
+  itemVal: 'val',
   title: 'Select option'
 })
 
@@ -49,7 +49,7 @@ const inputClass = computed(() =>
       :class="inputClass"
       aria-label="Customise options"
     >
-      <SelectValue :placeholder="$attrs.placeholder" />
+      <SelectValue :placeholder="String($attrs.placeholder ?? '')" />
       <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="#fff" viewBox="0 0 256 256">
         <path
           d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z">
@@ -94,7 +94,7 @@ const inputClass = computed(() =>
               <SelectItem
                 v-else
                 class="text-xs leading-none text-grass11 rounded-[3px] flex items-center h-[25px] pr-[35px] pl-[25px] relative select-none data-[disabled]:text-mauve8 data-[disabled]:pointer-events-none data-[highlighted]:outline-none data-[highlighted]:bg-green9 data-[highlighted]:text-green1"
-                :value="option[`${itemId}`]">
+                :value="(option as Record<string, any>)[itemId]">
                 <SelectItemIndicator class="absolute left-0 w-6.25 inline-flex items-center justify-center">
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="#000000" viewBox="0 0 256 256">
                     <path
@@ -103,7 +103,7 @@ const inputClass = computed(() =>
                   </svg>
                 </SelectItemIndicator>
                 <SelectItemText>
-                  {{ option[`${itemVal}`] }}
+                  {{ (option as Record<string, any>)[itemVal] }}
                 </SelectItemText>
               </SelectItem>
             </template>

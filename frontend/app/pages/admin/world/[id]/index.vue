@@ -6,14 +6,15 @@ const store = useAdminStore()
 const router = useRouter()
 const route = useRoute()
 
-const world = computed<World>(() => store.worlds.find((world: World) => world.id === route.params.id))
-const countries = computed<Country[]>(() => store.countries?.filter((cou: Country) => cou.world_id === world.value.id))
+const world = computed(() => store.worlds.find((world: World) => world.id === route.params.id))
+const countries = computed<Country[]>(() => store.countries?.filter((cou: Country) => cou.world_id === world.value?.id) ?? [])
 
-onMounted(() => fetchCountry(world.value.id))
+onMounted(() => fetchCountry(String(route.params.id)))
 </script>
 
 <template>
   <UiSlide
+    v-if="world"
     :title="world.name"
     :description="`All countries under World: ${world.name}`"
     @close="() => router.push({ name: 'admin-world' })"

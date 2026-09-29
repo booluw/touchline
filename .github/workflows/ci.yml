@@ -22,9 +22,12 @@ jobs:
         with:
           go-version: "1.25"
       - name: Lint
-        uses: golangci/golangci-lint-action@v4
+        # defaults.run.working-directory doesn't apply to `uses:` steps, and
+        # golangci-lint v1.x can't typecheck go 1.25 modules.
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.57
+          version: v2.5
+          working-directory: backend
       - name: Vet
         run: go vet ./...
 
@@ -45,6 +48,8 @@ jobs:
   eventbus-integration:
     name: Integration (eventbus, auth, world, manager, scheduler, bootstrap, club, realtime, api)
     runs-on: ubuntu-latest
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
     defaults:
       run:
         working-directory: backend
@@ -75,8 +80,6 @@ jobs:
         # -p 1 serializes packages: the harness truncates a shared database,
         # so concurrent packages would wipe each other's fixtures mid-test.
         run: go test -p 1 -tags integration -race ./pkg/eventbus/... ./pkg/realtime/... ./internal/auth/... ./internal/world/... ./internal/manager/... ./internal/scheduler/... ./internal/bootstrap/... ./internal/club/... ./internal/playerpool/... ./internal/lifecycle/... ./internal/academy/... ./internal/squad/... ./internal/training/... ./internal/injury/... ./internal/faction/... ./internal/httpapi/...
-        env:
-          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/touchline?sslmode=disable
 
   frontend-lint:
     name: Frontend lint + typecheck

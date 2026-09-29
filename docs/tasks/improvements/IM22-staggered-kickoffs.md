@@ -183,3 +183,18 @@ with `scheduling_rules->>'staggered' = 'false'`.
 - The earlier live-finalize fix (`match/live.go`,
   `match/live_integration_test.go`, `player/morale.go`) remains in the working
   tree, uncommitted, at the user's request.
+## Fix: late kickoffs on single-slot rounds (2026-09-29)
+
+- Symptom: matches no longer started at their scheduled time.
+- Cause: `StaggeredCap` capped by configuration alone. Rounds stamped before
+  IM22 (nothing re-paces them automatically — only admin scheduling updates call
+  `repaceLeague`) have every tie at one `scheduled_at`; with `staggered` now
+  defaulting on, only 3 kicked and the rest waited ~30 min per batch.
+- Fix: `competition/pacing.go` `StaggeredCap` returns 0 when the open matchday
+  has fewer than two distinct `scheduled_at` values. Spread rounds keep the cap.
+- Test: `TestRunnerCapOnlyForStaggered` now asserts cap 0 for the single-slot
+  round, then spreads it across two due slots and keeps the 1/3/1 expectation.
+- Verify: gofmt, `go build ./...`, `go vet ./...`,
+  `go vet -tags integration ./internal/... ./pkg/...`, `go test ./...` all pass.
+  Integration tests compile-checked only (no Postgres available); not verified
+  against production data.

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // Auth session flow against the Gin API (S02-01).
 //
 // The API authenticates with httpOnly cookies (access_token + refresh_token),
@@ -44,14 +43,28 @@ export function useAuth() {
   const worlds = ref<WorldOption[]>([])
   const needsWorldSelection = ref(false)
   const pendingWorldId = ref<string | null>(null)
+  let pendingCredentials: { email: string, password: string } | null = null
 
   async function login(payload: { email: string, password: string }) {
     worlds.value = []
     needsWorldSelection.value = false
 
     try {
-      const { club, ...resp} = await $api.post<User>(`${apiBase}/api/auth/login`, payload, { auth: false })
-      
+      const res = await $api.post<LoginResponse | LoginWorldPicker>(
+        `${apiBase}/api/auth/login`,
+        { ...payload, world_id: pendingWorldId.value ?? undefined },
+        { auth: false },
+      )
+      if ('status' in res && res.status === 'worlds') {
+        pendingCredentials = payload
+        worlds.value = res.worlds
+        needsWorldSelection.value = true
+        return
+      }
+      pendingWorldId.value = null
+      pendingCredentials = null
+      const { club, ...resp } = res as LoginResponse
+
       store.setUser(resp)
       clubStore.setClub(club)
 
@@ -93,6 +106,11 @@ export function useAuth() {
     pendingWorldId.value = id
   }
 
+  // Re-posts the credentials from the world-picker round-trip with the chosen world.
+  async function confirmWorld() {
+    if (pendingCredentials && pendingWorldId.value) await login(pendingCredentials)
+  }
+
   // Rotates the session. Returns false when the refresh cookie is gone/revoked.
   async function refresh(): Promise<boolean> {
     const res = await fetch(`${apiBase}/api/auth/refresh`, {
@@ -116,5 +134,5 @@ export function useAuth() {
     return res
   }
 
-  return { user, worlds, needsWorldSelection, login, selectWorld, refresh, authedFetch, register }
+  return { user, worlds, needsWorldSelection, login, selectWorld, confirmWorld, refresh, authedFetch, register }
 }

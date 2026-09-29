@@ -76,8 +76,28 @@ export interface LeaguePyramid {
 
 export interface CountryClubs {
   country: Country;
-  clubs: unknown[];
+  clubs: ClubRow[];
 }
+
+export interface ClubRow {
+  id: string
+  name: string
+  short_name: string
+  is_ai_controlled: boolean
+  tier: number
+  league?: { id: string; name: string } | null
+  league_tier: number
+  squad_size: number
+  top_player_name?: string
+  top_player_market_value: number
+  wage_bill: number
+  wage_allocated: number
+  wage_committed: number
+  transfer_allocated: number
+  transfer_committed: number
+  crisis_stage?: string | null
+}
+
 
 export interface CountryPlayers {
   avg_age: number;

@@ -3,8 +3,8 @@ import z from 'zod';
 
 const emit = defineEmits(["submit"])
 const props = defineProps<{
-  schema: any,
-  state: Record<string, any>,
+  schema: z.ZodType,
+  state: Record<string, unknown>,
   validate?: 'submit' | 'blur'
 }>()
 

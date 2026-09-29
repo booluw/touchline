@@ -517,7 +517,7 @@ function saveCupWeekdays(cupId: string) {
             </div>
             <p class="text-slate-600 text-xs mt-1">Cup rounds play on these weekdays; live rounds keep today's dates until the next round materializes.</p>
             <div v-if="activeCup === cup.id && cupCampaigns[cup.id]">
-              <CupBracketView :campaign="cupCampaigns[cup.id]" />
+              <CupBracketView :campaign="cupCampaigns[cup.id]!" />
             </div>
           </div>
           <p v-if="!cups.length" class="text-slate-500 text-sm">No cups declared yet.</p>

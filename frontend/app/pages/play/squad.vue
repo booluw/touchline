@@ -7,14 +7,22 @@ const { notify } = useToast()
 const loading = ref<"loading" | "loaded" | "error">("loading")
 const saving = ref(false)
 
-const tactics = ref()
-const squad = ref()
-const lineup = ref()
+type SlotPlayer = { id?: string, player_id?: string, display_name?: string, squad_number?: number }
+type Slot = { slot: number, position?: string, player: SlotPlayer }
+type SquadPlayer = {
+  position?: string, squad_number?: number, first_name?: string, last_name?: string, overall?: number,
+  attributes: Record<'goalkeeping' | 'physical' | 'mental' | 'tactical' | 'technical', number>,
+  player: { id: string, name: string }
+}
 
-const slots = ref([])
+const tactics = ref<{ style: string, formation: string, allowed_formations: string[] }>()
+const squad = ref<SquadPlayer[]>([])
+const lineup = ref<{ formation: string, slots: Slot[] }>()
+
+const slots = ref<Slot[]>([])
 const selectedSlot = ref()
 const playersBySelectedSlotPosition = computed(() => {
-  const slot = lineup.value.slots.find((s) => s.slot === selectedSlot.value)
+  const slot = lineup.value?.slots.find((s) => s.slot === selectedSlot.value)
   const matched = squad.value.filter((s) => s?.position === slot?.position)
 
   return [...new Map([...matched, ...squad.value].map(player => [player.player.id, player])).values()]
@@ -39,8 +47,8 @@ async function init() {
 
     state.value.style = res.tactics.style
     state.value.formation = res.lineup.formation
-    slots.value = res.lineup.slots.map((s) => {
-      const player = res.squad.players.find((p) => p?.player?.id === s.player.id)
+    slots.value = res.lineup.slots.map((s: Slot) => {
+      const player = res.squad.players.find((p: SquadPlayer) => p?.player?.id === s.player.id)
 
       return {
         ...s,
@@ -81,11 +89,12 @@ async function saveClubLineup() {
   try {
     await saveLineup({ slots: slots.value.map((s) => ({ slot: s.slot, player_id: s?.player?.player_id ?? s?.player?.id })) })
     await init()
-  } finally {
+  } catch {
+    // saveLineup already notified the user
   }
 }
 
-function saveSlot(player: { squad_number: number, display_name: string, player_id: string }) {
+function saveSlot(player: { squad_number?: number, display_name: string, player_id: string }) {
   if (playersInLineup.value.includes(player.player_id)) {
     notify({
       title: "Player Already in squad",
@@ -126,12 +135,12 @@ onMounted(async () => {
                 v-model="state.style"
                 :options="['balanced', 'possession', 'gegenpress', 'low_block', 'direct']"
               />
-              <UiSelect v-model="state.formation" :options="tactics.allowed_formations" />
+              <UiSelect v-model="state.formation" :options="tactics?.allowed_formations ?? []" />
               <button @click="saveClubTactics()" class="button button--primary" :disabled="saving">Save</button>
             </div>
           </div>
 
-          <PitchView variant="half" :formation="tactics.formation" :slots :clickable="true"
+          <PitchView variant="half" :formation="tactics?.formation ?? ''" :slots :clickable="true"
             @select="(e) => selectedSlot = e" :selected-slot />
           <div class="flex gap-5 items-center justify-end py-5">
             <button @click="emptyLineup()" class="button button--outline">Empty</button>

@@ -98,7 +98,7 @@ onMounted(() => { load().catch(() => { error.value = 'Could not load your compet
             <p class="text-sm text-slate-400 mb-2">
               {{ cup.format }} · top {{ cup.first_tier_bye }} join at {{ cup.survivor_threshold }} survivors
             </p>
-            <CupBracketView v-if="cupCampaigns[cup.id]" :campaign="cupCampaigns[cup.id]" />
+            <CupBracketView v-if="cupCampaigns[cup.id]" :campaign="cupCampaigns[cup.id]!" />
             <p v-else class="text-slate-500 text-sm">No campaign started yet.</p>
           </div>
         </div>

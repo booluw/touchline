@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DrawerContent, DrawerDescription, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle, DrawerTrigger } from 'reka-ui';
+import { DrawerContent, DrawerDescription, DrawerOverlay, DrawerPortal, DrawerRoot, DrawerTitle } from 'reka-ui';
 
 const emit = defineEmits(["close"])
 const props = withDefaults(defineProps<{

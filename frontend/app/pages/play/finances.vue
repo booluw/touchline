@@ -1,22 +1,24 @@
 <script setup lang="ts">
 import { useFinanceStore } from '~/stores/finance'
 const store = useFinanceStore()
-const clubId = ref('')
+const { getFinance } = useClub()
+const loading = ref(false)
 const error = ref('')
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const fmt = (v: number) => usd.format(v)
 const sign = (v: number) => (v < 0 ? '−' : '') + fmt(Math.abs(v))
 const factSum = () => store.summary?.factors.reduce((a, f) => a + f.amount, 0) ?? 0
 
-async function init() {
-  const { authedFetch } = useAuth()
-  const r = await authedFetch('/api/clubs')
-  const clubs = await r.json()
-  clubId.value = clubs[0]?.id ?? ''
-  if (!clubId.value) throw new Error('No club yet.')
-  await store.load(clubId.value)
-}
-onMounted(() => init().catch(() => { error.value = 'Could not load your club finances.' }))
+onMounted(async () => {
+  loading.value = true
+  try {
+    await getFinance()
+  } catch {
+    error.value = 'Could not load your club finances.'
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 
 <template>
@@ -24,7 +26,7 @@ onMounted(() => init().catch(() => { error.value = 'Could not load your club fin
     <div class="mx-auto max-w-5xl space-y-8">
       <h1 class="text-3xl font-bold text-white">Finances</h1>
       <p v-if="error" class="text-red-400">{{ error }}</p>
-      <p v-if="store.loading && !store.summary" class="text-slate-400">Loading…</p>
+      <p v-if="loading && !store.summary" class="text-slate-400">Loading…</p>
 
       <template v-if="store.summary">
         <div class="grid gap-4 sm:grid-cols-3">

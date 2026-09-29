@@ -65,7 +65,7 @@ class ApiClient {
     this.sessionExpiredHandler = handler
   }
 
-  private buildHeaders(options?: CustomFetchOptions): HeadersInit {
+  private buildHeaders(options?: Pick<CustomFetchOptions, 'headers'>): HeadersInit {
     const headers: HeadersInit = { ...this.defaultHeaders }
 
     if (options?.headers) {
@@ -162,7 +162,7 @@ class ApiClient {
 
     for (let attempt = 0; attempt <= retry; attempt++) {
       try {
-        let response = await $fetch<T>(processedUrl, mergedOptions)
+        let response = await $fetch<T>(processedUrl, mergedOptions as any)
 
         // Run response interceptors
         for (const interceptor of this.responseInterceptors) {

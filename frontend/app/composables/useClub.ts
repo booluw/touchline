@@ -16,7 +16,7 @@ export function useClub() {
     try {
       const [summary, ledger, contract] = await Promise.all([
         $api.get<FinanceSummary>(`${apiBase}/api/clubs/${clubId}/finances`),
-        $api.get<LedgerEntry>(`${apiBase}/api/clubs/${clubId}/ledger`),
+        $api.get<LedgerEntry[]>(`${apiBase}/api/clubs/${clubId}/ledger`),
         $api.get<ContractView[]>(`${apiBase}/api/clubs/${clubId}/contracts`)
       ])
 
@@ -97,6 +97,7 @@ export function useClub() {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- consumers type these locally
   async function getTactics(): Promise<{ tactics: any, lineup: any, squad: any }> {
     try {
       const [tactics, lineup, squad] = await Promise.all([
@@ -134,7 +135,7 @@ export function useClub() {
     }
   }
 
-  async function saveLineup(payload: { slots: {slot: number, player_id: string }[]}) {
+  async function saveLineup(payload: { slots: { slot: number, player_id?: string }[]}) {
     try {
       await $api.put(`${apiBase}/api/clubs/${clubId}/lineup`, payload)
       return

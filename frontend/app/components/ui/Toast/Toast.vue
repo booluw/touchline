@@ -16,8 +16,8 @@ const _class = {
     <ToastProvider>
       <ToastRoot
         :open="true"
-        @update:open="(open: boolean) => !open && remove(key)"
-        class="border-brutal p-3 font-mono" :class="_class[type]"
+        @update:open="(open: boolean) => !open && remove(key!)"
+        class="border-brutal p-3 font-mono" :class="_class[type ?? 'success']"
       >
         <ToastTitle class="mb-1.25 text-sm font-bold">
           {{ title }}
@@ -27,9 +27,9 @@ const _class = {
             {{ description }}
         </p>
         </ToastDescription>
-        <ToastAction v-if="btnClick" class="" as-child :alt-text="btnText">
+        <ToastAction v-if="btnClick" class="" as-child :alt-text="btnText ?? 'Click'">
           <button
-            @click="() => btnClick"
+            @click="btnClick"
             class="button button--outline"
           >
             {{ btnText ?? "Click" }}

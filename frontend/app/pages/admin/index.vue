@@ -15,7 +15,7 @@ const worldCardType = {
 }
 
 watch(() => worlds.value, () => {
-  if (worlds.value.length === 1) router.replace({ name: 'admin-world-id', params: { id: worlds.value[0].id }})
+  if (worlds.value.length === 1) router.replace({ name: 'admin-world-id', params: { id: worlds.value[0]!.id }})
 })
 
 onMounted(() => fetchWorlds())

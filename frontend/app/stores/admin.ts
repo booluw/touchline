@@ -1,9 +1,9 @@
 import type { World, Country } from "~/types"
 
 export const useAdminStore = defineStore('admin', () => {
-  const worlds = ref<World[]>()
-  const countries = ref<Country[]>()
-  const leagues = ref<League[]>()
+  const worlds = ref<World[]>([])
+  const countries = ref<Country[]>([])
+  const leagues = ref<League[]>([])
 
   const addWorld = (payload: World) => worlds.value.push(payload)
   const setWorlds = (payload: World[]) => worlds.value = payload

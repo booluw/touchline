@@ -8,7 +8,7 @@ const schema = z.object({ email: z.email(), password: z.string().min(5, "Should 
 const state = ref({ email: '', password: '' })
 const loading = ref(false)
 
-async function logUserIn(valid: boolean, errors: Record<string, string>) {
+async function logUserIn(valid: boolean) {
   if (valid) {
     loading.value = true
 

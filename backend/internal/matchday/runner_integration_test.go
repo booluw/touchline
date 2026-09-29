@@ -608,6 +608,20 @@ func TestRunnerCapOnlyForStaggered(t *testing.T) {
 		t.Fatalf("inserted %d due fixtures, want 4", n)
 	}
 
+	// All four share one kickoff time (a pre-IM22, never re-paced round): no
+	// cap applies, so nothing kicks late. Probe with a dry StaggeredCap.
+	if cap, _, err := compSvc.StaggeredCap(ctx, pool, worldID, target, 5); err != nil || cap != 0 {
+		t.Fatalf("single-slot round cap=%d err=%v, want 0", cap, err)
+	}
+	// Spread the round across two already-due slots: now it is staggered.
+	if _, err := pool.Exec(ctx, `
+		UPDATE match.fixtures SET scheduled_at = scheduled_at - interval '1 hour'
+		WHERE id = (SELECT id FROM match.fixtures
+		            WHERE world_id = $1 AND competition_id = $2 AND matchday = 5 LIMIT 1)`,
+		worldID, target); err != nil {
+		t.Fatalf("spread round: %v", err)
+	}
+
 	sum, err := runner.KickoffDue(ctx, worldID)
 	if err != nil {
 		t.Fatalf("cap run: %v", err)

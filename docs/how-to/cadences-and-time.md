@@ -276,8 +276,9 @@ tail.
 _staggered_ competition's live fixtures per round at kickoff time: the worker
 admits the due round's earliest-scheduled ties up to the cap and defers the
 rest (`Summary.Skipped`) until some finish. The cap does **not** apply to
-single-day rounds, legacy pacing, or the season-final matchday — those kick
-their whole round at once. A competition also never has two rounds live at a
+single-day rounds, legacy pacing, a round whose ties all share one kickoff time
+(e.g. stamped before IM22 and never re-paced), or the season-final matchday —
+those kick their whole round at once. A competition also never has two rounds live at a
 time: before admitting a round, the runner checks the competition has no `live`
 fixture from an earlier matchday (round-order gate, replacing the old world-wide
 "any live match blocks everything" rule).

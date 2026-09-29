@@ -44,10 +44,6 @@ const props = defineProps<{
 
 defineEmits<{ select: [slot: number] }>()
 
-const pitchSrc = computed(() =>
-  props.variant === 'half' ? '~/assets/svgs/pitch-half.svg' : '~/assets/svgs/pitch-full.svg'
-)
-
 const positionedSlots = computed(() =>
   props.slots.map((slot, i) => {
     const coords = FORMATION_COORDS[props.formation]?.[i] ?? { x: 50, y: 50 }

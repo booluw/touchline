@@ -27,3 +27,10 @@ services:
       timeout: 3s
       retries: 10
     restart: "no"
+
+  # Base migrations has no depends_on (Postgres is external in prod); without
+  # this it races the container's startup and exits 1 on connection refused.
+  migrations:
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -1,14 +1,13 @@
 <script lang="ts" setup>
 import z from 'zod';
-import type { World, Country } from '~/types';
+import type { Country } from '~/types';
 
 const route = useRoute()
 const router = useRouter()
 const store = useAdminStore()
 const { createLeague } = useAdmin()
 
-const worldId = computed(() => route.params.id)
-const countryId = computed(() => route.params.countryId)
+const countryId = computed(() => String(route.params.countryId))
 
 const country = computed(() => store.countries?.find((c: Country) => c.id === countryId.value))
 const leagues = computed(() => store.leagues?.filter((l: League) => l.country.id === countryId.value) ?? [])
@@ -49,12 +48,12 @@ async function createNewLeague(valid: boolean, errors: Record<string, string>) {
 </script>
 
 <template>
-  <UiSlide @close="() => router.go(-1)" title="Create League" :description="`Create a new league for ${country.name}`">
+  <UiSlide @close="() => router.go(-1)" title="Create League" :description="`Create a new league for ${country?.name ?? ''}`">
     <UiForm @submit="createNewLeague" class="h-full flex flex-col gap-10" :state :schema>
       <div class="">
         <div class="grid gap-3 md:grid-cols-5">
           <UiFormItem class="col-span-3" label="Name" prop="name">
-            <UiInput v-model="state.name" :placeholder="`The ${country.name} Premier League`" />
+            <UiInput v-model="state.name" :placeholder="`The ${country?.name ?? ''} Premier League`" />
           </UiFormItem>
           <UiFormItem label="Tier" prop="tier">
             <UiInput v-model="state.tier" type="number" placeholder="League Tier" />
@@ -91,7 +90,7 @@ async function createNewLeague(valid: boolean, errors: Record<string, string>) {
       </div>
 
       <button type="submit" class="button button--primary">
-        Create {{ country.name }} League
+        Create {{ country?.name }} League
       </button>
     </UiForm>
   </UiSlide>

@@ -12,7 +12,7 @@ onMounted(() => init().catch(() => error.value = 'Could not load your club.'))
       <h1 class="text-3xl font-bold text-white">Weekly training</h1>
       <p class="text-slate-400">Your plan applies on the next weekly world tick.</p>
       <p v-if="error" class="text-red-400">{{ error }}</p>
-      <div class="grid gap-3 sm:grid-cols-2"><button v-for="p in plans" :key="p[0]" @click="selected = p[0]"
+      <div class="grid gap-3 sm:grid-cols-2"><button v-for="p in plans" :key="p[0]" @click="selected = p[0]!"
           class="rounded border p-4 text-left"
           :class="selected === p[0] ? 'border-emerald-400 bg-emerald-950' : 'border-slate-700 bg-slate-800'"><strong>{{
             p[1] }}</strong><span class="block text-sm text-slate-400">{{ p[2] }}</span></button></div><button

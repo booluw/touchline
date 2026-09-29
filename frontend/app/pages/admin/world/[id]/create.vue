@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import z from 'zod';
 
-const store = useAdminStore()
 const router = useRouter()
 const route = useRoute()
 const { createCountry } = useAdmin()
@@ -10,7 +9,7 @@ const loading = ref(false)
 const state = ref({ code: '', name: '' })
 const schema = z.object({ code: z.string().max(3), name: z.string().min(3) })
 
-const world_id = computed(() => route.params.id)
+const world_id = computed(() => String(route.params.id))
 
 async function createACountry(valid: boolean) {
   if (valid) {

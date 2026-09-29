@@ -8,7 +8,7 @@ definePageMeta({
 })
 
 const route = useRoute()
-const leagueId = computed<string>(() => route.params.leagueId)
+const leagueId = computed(() => String(route.params.leagueId))
 const { getLeagueDetails } = useAdminLeague({ leagueId: leagueId.value })
 
 const status = ref("loading")
@@ -20,7 +20,7 @@ async function loadLeague() {
   try {
     competition.value = await getLeagueDetails()
     status.value = "loaded"
-  } catch (error) {
+  } catch {
     status.value = "error"
   }
 }

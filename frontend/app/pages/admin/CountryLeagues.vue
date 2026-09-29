@@ -2,7 +2,7 @@
 import { useToast } from '~/components/ui/Toast';
 import { useAdminOverview } from '~/composables/admin/overview';
 import { useAuth } from '~/composables/useAuth';
-import type { Country, CountryClubs, CountryStats, League, World, CountryMarketData } from '~/types';
+import type { ClubRow, Country, CountryClubs, CountryStats, World, CountryMarketData } from '~/types';
 import { formatMoney, formatMoneyCompact } from '../../utils/helpers';
 
 definePageMeta({
@@ -47,25 +47,6 @@ const leaguePyramids = ref()
 const overview = ref<CountryStats>()
 const market = ref<CountryMarketData>()
 const newsStories = ref<NewsStory[]>([])
-
-interface ClubRow {
-  id: string
-  name: string
-  short_name: string
-  is_ai_controlled: boolean
-  tier: number
-  league?: { id: string; name: string } | null
-  league_tier: number
-  squad_size: number
-  top_player_name?: string
-  top_player_market_value: number
-  wage_bill: number
-  wage_allocated: number
-  wage_committed: number
-  transfer_allocated: number
-  transfer_committed: number
-  crisis_stage?: string | null
-}
 
 interface NewsStory {
   id: string
@@ -289,7 +270,7 @@ onMounted(() => initCountryDashboard())
             <h4 class="heading heading--small">transfer committed</h4>
           </div>
 
-          <div :class="{ 'text-loss-500': overview.economy.crisis_clubs !== 0 }">
+          <div :class="{ 'text-loss-500': overview?.economy.crisis_clubs !== 0 }">
             <h3 class="heading text-inherit">{{ overview!.economy.crisis_clubs }}</h3>
             <h4 class="heading heading--small text-inherit">clubs in crisis</h4>
           </div>

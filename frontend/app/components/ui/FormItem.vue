@@ -7,6 +7,6 @@ provide('f_prop', props.prop)
   <label class="flex flex-col font-mono uppercase text-sm text-void-500 font-semibold mb-5" :for="label">
     <span>{{ label }}</span>
     <slot />
-    <span class="text-xs text-loss-500 mt-1" v-show="prop">{{ error[prop] || " " }}</span>
+    <span class="text-xs text-loss-500 mt-1" v-show="prop">{{ error[prop ?? ''] || " " }}</span>
   </label>
 </template>

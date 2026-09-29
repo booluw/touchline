@@ -28,7 +28,7 @@ const styles = [
   { key: 'direct', label: 'Direct / Long-Ball' },
 ]
 
-const allowedFormations = computed(() => allowedByStyle[style.value] ?? allowedByStyle.balanced)
+const allowedFormations = computed(() => allowedByStyle[style.value] ?? ['4-3-3'])
 
 async function init() {
   const { authedFetch } = useAuth()
@@ -38,7 +38,7 @@ async function init() {
   if (!clubId.value) return
   await store.load(clubId.value)
   style.value = value.value?.style ?? style.value
-  formation.value = value.value?.formation ?? allowedFormations.value[0]
+  formation.value = value.value?.formation ?? allowedFormations.value[0] ?? '4-3-3'
 }
 
 async function save() {
@@ -56,8 +56,8 @@ async function save() {
 // Local-only validation against the *selected* style (the server was reloaded
 // unnecessarily before, and only reflected the last-saved style).
 watch(style, (next) => {
-  const allowed = allowedByStyle[next] ?? allowedByStyle.balanced
-  if (!allowed.includes(formation.value)) formation.value = allowed[0]
+  const allowed = allowedByStyle[next] ?? ['4-3-3']
+  if (!allowed.includes(formation.value)) formation.value = allowed[0] ?? '4-3-3'
 })
 
 onMounted(() => init().catch(() => (error.value = 'Could not load your club.')))

@@ -59,7 +59,7 @@ export function useAdmin() {
 
   async function fetchCountry(world_id: string) {
     try {
-      const { countries } = await $api.get<Country[]>(`${apiBase}/api/admin/countries?world_id=${world_id}`)
+      const { countries } = await $api.get<{ countries: Country[] }>(`${apiBase}/api/admin/countries?world_id=${world_id}`)
       store.setCountries(countries)
     } catch (error: any | unknown) {
       console.error(error)
@@ -87,7 +87,7 @@ export function useAdmin() {
 
   async function fetchWorldLeagues(world_id: string) {
     try {
-      const { leagues } = await $api.get<League[]>(`${apiBase}/api/admin/leagues?world_id=${world_id}`)
+      const { leagues } = await $api.get<{ leagues: League[] }>(`${apiBase}/api/admin/leagues?world_id=${world_id}`)
       store.setLeagues(leagues)
     } catch (error: any | unknown) {
       console.error(error)
@@ -99,7 +99,7 @@ export function useAdmin() {
     }
   }
 
-  async function createLeague(payload: League) {
+  async function createLeague(payload: Pick<League, "name" | "tier" | "team_count" | "promotions" | "relegations"> & { country_id: string, promotes_to: string | null, relegates_to: string | null }) {
     try {
       const resp = await $api.post<League>(`${apiBase}/api/admin/leagues`, payload)
       store.addLeague(resp)

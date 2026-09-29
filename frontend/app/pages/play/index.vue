@@ -6,7 +6,7 @@ import { useManagerDashboard } from '~/composables/manager/dashboard';
 
 const { getOffers } = useManagerOffer()
 const { getDashboardData, getBoardStatus } = useManagerDashboard()
-const { getFinance, getCompetitions, getFixtures, getNextFixture, getDynamics, getTactics } = useClub()
+const { getFinance, getCompetitions, getNextFixture, getDynamics, getTactics } = useClub()
 
 const financeStore = useFinanceStore()
 const clubStore = useClubStore()
@@ -21,7 +21,6 @@ const club = {
 
 const competitions = computed(() => clubStore.competitions)
 const board = computed(() => clubStore.board)
-const tactics = ref()
 const lineup = ref()
 
 const finance = {
@@ -69,7 +68,7 @@ async function getClubCompetitions() {
     loading.competitions = "loading"
     await getCompetitions()
     loading.competitions = "loaded"
-  } catch (error) {
+  } catch {
     loading.competitions = "error"
   }
 }
@@ -79,7 +78,7 @@ async function getClubNextFixtures() {
     loading.fixtures = "loading"
     club.game = await getNextFixture()
     loading.fixtures = "loaded"
-  } catch (error) {
+  } catch {
     loading.fixtures = "error"
   }
 }
@@ -89,7 +88,7 @@ async function getClubDynamics() {
     loading.dynamics = "loading"
     club.dynamics = await getDynamics()
     loading.dynamics = "loaded"
-  } catch (error) {
+  } catch {
     loading.dynamics = "error"
   }
 }
@@ -99,7 +98,7 @@ async function getBoardManagerStatus() {
     loading.board = "loading"
     await getBoardStatus()
     loading.board = "loaded"
-  } catch (error) {
+  } catch {
     loading.board = "error"
   }
 }
@@ -310,7 +309,7 @@ onMounted(() => init())
         </div>
       </div>
       <div class="border-brutal p-5 space-y-5"
-        :class="[finance.summary.value?.cash <= 0 ? 'border-loss-500' : 'border-void-500']">
+        :class="[(finance.summary.value?.cash ?? 0) <= 0 ? 'border-loss-500' : 'border-void-500']">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Finance</h3>
         </div>

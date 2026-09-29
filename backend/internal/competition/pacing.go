@@ -189,9 +189,11 @@ func cloneWeekdays(wd []int) []int { return append([]int(nil), wd...) }
 // (IM22):
 //
 //   - staggered competition (>= 2 allowed weekdays, not opted out) with an open
-//     matchday before the season-final: max_simultaneous_matches (default 3);
-//   - anything else (single-day rounds, legacy pacing, the season-final
-//     matchday): 0, meaning the whole open round may kick at once.
+//     matchday before the season-final whose ties span more than one kickoff
+//     time: max_simultaneous_matches (default 3);
+//   - anything else (single-day rounds, legacy pacing, a round whose ties all
+//     share one kickoff time, the season-final matchday): 0, meaning the whole
+//     open round may kick at once.
 //
 // The season-final matchday is the greatest matchday among the competition's
 // fixtures (leagues materialize every round at season start, so MAX(matchday)
@@ -201,14 +203,19 @@ func (s *Service) StaggeredCap(ctx context.Context, q rowQueryer, worldID, compe
 	if err != nil {
 		return 0, 0, err
 	}
+	var slots int
 	if err := q.QueryRow(ctx, `
-		SELECT COALESCE(MAX(matchday), 0)
+		SELECT COALESCE(MAX(matchday), 0),
+		       COUNT(DISTINCT scheduled_at) FILTER (WHERE matchday = $3)
 		FROM match.fixtures
 		WHERE competition_id = $1 AND world_id = $2 AND status <> 'cancelled'`,
-		competitionID, worldID).Scan(&maxMatchday); err != nil {
+		competitionID, worldID, openMatchday).Scan(&maxMatchday, &slots); err != nil {
 		return 0, 0, fmt.Errorf("staggered cap: max matchday: %w", err)
 	}
-	if p.staggered && len(p.allowedWeekdays) >= 2 && openMatchday < maxMatchday {
+	// A round stamped before IM22 (or never re-paced) has one kickoff time for
+	// every tie: it is a single-slot round, not a staggered one, so capping it
+	// would push most of its ties back by whole match lengths.
+	if p.staggered && len(p.allowedWeekdays) >= 2 && openMatchday < maxMatchday && slots > 1 {
 		return p.maxSimultaneous, maxMatchday, nil
 	}
 	return 0, maxMatchday, nil
