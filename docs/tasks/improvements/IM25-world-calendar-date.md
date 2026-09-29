@@ -60,6 +60,6 @@ every changed query.
   launch date + `current_day`, in UTC.
 - **Out of scope (follow-up):** timestamps that are genuinely real time
   (`created_at`, `responded_at`, session expiry) stay on `now()`. Player-promise
-  deadlines and injury recovery clocks still use real time; aligning them to
-  world days is a separate product decision (recorded as open in
-  `docs/product_manager.md`, OPD-53).
+  deadlines and injury recovery clocks use real time — which the product owner
+  has since made identical to world time (one world day = one real day,
+  OPD-57; OPD-53 resolved; clock change planned in IM31).

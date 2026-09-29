@@ -54,3 +54,5 @@ See [IM29](IM29-single-backend-image-deploy.md#verification).
   "all state changes emit typed `world.events`" takes precedence, so they now
   record events; the "no news" half of OPD-30(4) still stands. Recorded as
   OPD-52 in `docs/product_manager.md`, with OPD-30(4) annotated.
+- **Confirmed by the product owner (2026-09-29):** all admin changes to
+  regions and reputation are recorded as events.
