@@ -1,0 +1,81 @@
+# Production stack for Coolify. Postgres stays external (Neon).
+# Domains/routing are configured in Coolify, not here.
+name: touchline
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  migrations:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.migrations
+    command: ["-database", "${DATABASE_URL}", "-path", "/migrations", "up"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    restart: "no"
+    exclude_from_hc: true
+
+  ref-seed:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.ref-seed
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    restart: "no"
+    exclude_from_hc: true
+
+  touchline:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    command: ["touchline", "serve"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
+      API_PORT: "8080"
+      APP_ORIGIN: https://touchline.myshort.page
+      ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      ref-seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.frontend
+      args:
+        NUXT_PUBLIC_API_BASE: https://touchline.myshort.page
+    depends_on:
+      touchline:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis-data:

@@ -1,0 +1,3 @@
+# One-shot migrations runner with the SQL baked in.
+FROM migrate/migrate:v4.18.1
+COPY backend/migrations /migrations
