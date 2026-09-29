@@ -112,7 +112,7 @@ match feed and the squad list.
 - Verify (frontend): `pnpm typecheck` reports **no** error in any new or touched
   file. The repo's baseline is not clean — `pnpm typecheck` and `pnpm lint` already
   fail on pre-existing issues (`squad.vue` implicit anys, `tactics.vue` /
-  `training.vue` / `finances.vue` importing `~/app/stores/*` with an extra `app/`
+  `training.vue` / `finances.vue` importing `~/stores*` with an extra `app/`
   prefix, `types/index.ts` duplicate re-exports, `utils/api.ts` generics) and
   `pnpm build` fails on those same three unloadable store modules, none of which
   this change touches.

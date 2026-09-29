@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useFinanceStore } from '~/app/stores/finance'
+import { useFinanceStore } from '~/stores/finance'
 const store = useFinanceStore()
 const clubId = ref('')
 const error = ref('')

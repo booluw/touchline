@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { useTacticsStore } from '~/app/stores/tactics'
+import { useTacticsStore } from '~/stores/tactics'
 
 const store = useTacticsStore()
 const { value, saving } = storeToRefs(store)

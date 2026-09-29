@@ -5,8 +5,8 @@
 // screen — events, scoreline, clock — is produced by the server.
 import { storeToRefs } from 'pinia'
 
-// import type { EventType } from '~/app/stores/match'
-// import { useMatchStore } from '~/app/stores/match'
+// import type { EventType } from '~/storesmatch'
+// import { useMatchStore } from '~/storesmatch'
 
 const route = useRoute()
 const matchStore = useMatchStore()
