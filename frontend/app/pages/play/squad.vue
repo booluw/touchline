@@ -21,7 +21,7 @@ const playersBySelectedSlotPosition = computed(() => {
 })
 
 const playersInLineup = computed(() => {
-  return slots.value.map((s) => s?.player?.player_id ?? false)
+  return slots.value.map((s) => s?.player?.player_id ?? s?.player?.id ?? false)
 })
 
 const state = ref({
@@ -79,7 +79,7 @@ async function saveClubTactics() {
 
 async function saveClubLineup() {
   try {
-    await saveLineup({ slots: slots.value.map((s) => ({ slot: s.slot, player_id: s?.player?.player_id })) })
+    await saveLineup({ slots: slots.value.map((s) => ({ slot: s.slot, player_id: s?.player?.player_id ?? s?.player?.id })) })
     await init()
   } finally {
   }
@@ -100,6 +100,11 @@ function saveSlot(player: { squad_number: number, display_name: string, player_i
   })
 }
 
+function emptyLineup() {
+  slots.value = slots.value.map((s) => ({ ...s, player: {} }))
+  console.log(slots.value)
+}
+
 onMounted(async () => {
   loading.value = "loading"
   await init()
@@ -117,8 +122,10 @@ onMounted(async () => {
           <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
             <h3 class="heading heading--small">Tactics</h3>
             <div class="flex gap-4 items-center">
-              <UiSelect v-model="state.style"
-                :options="['balanced', 'counter', 'attacking', 'defensive', 'press', 'possession']" />
+              <UiSelect
+                v-model="state.style"
+                :options="['balanced', 'possession', 'gegenpress', 'low_block', 'direct']"
+              />
               <UiSelect v-model="state.formation" :options="tactics.allowed_formations" />
               <button @click="saveClubTactics()" class="button button--primary" :disabled="saving">Save</button>
             </div>
@@ -126,7 +133,8 @@ onMounted(async () => {
 
           <PitchView variant="half" :formation="tactics.formation" :slots :clickable="true"
             @select="(e) => selectedSlot = e" :selected-slot />
-          <div class="flex justify-end py-5">
+          <div class="flex gap-5 items-center justify-end py-5">
+            <button @click="emptyLineup()" class="button button--outline">Empty</button>
             <button @click="saveClubLineup()" class="button button--primary">Save Lineup</button>
           </div>
         </div>
@@ -146,11 +154,11 @@ onMounted(async () => {
               @click="saveSlot({ squad_number: player.squad_number, display_name: player.player.name, player_id: player.player.id })"
               v-for="(player, key) in playersBySelectedSlotPosition" :key>
               <div class="col-span-2 heading">
-                {{ player.first_name }} {{ player.last_name }}
-                <!-- <NuxtLink :to="`/play/players/${player.player.id}`"
+                <NuxtLink v-if="!selectedSlot" :to="`/play/players/${player.player.id}`"
                   class="hover:text-slate-100 underline-offset-2 hover:underline">
                   {{ player.first_name }} {{ player.last_name }}
-                </NuxtLink> -->
+                </NuxtLink>
+                <span v-else class="cursor-move">{{ player.first_name }} {{ player.last_name }}</span>
               </div>
               <div class="heading">{{ player.position }}</div>
               <div class="heading text-center">{{ player.overall }}</div>
@@ -175,7 +183,9 @@ onMounted(async () => {
           </div>
         </div>
         <div class="overflow-auto">
-          <!-- {{ slots[0] }} -->
+          {{ selectedSlot }}
+          <!-- {{ playersInLineup }}
+          {{ slots }} -->
           <!-- {{ squad[0] }} -->
           <!-- {{ playersInLineup }} -->
         </div>
