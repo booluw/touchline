@@ -81,13 +81,13 @@ func TestTalentBonusOrdering(t *testing.T) {
 	if TalentJourneyman.potentialBonus() != 0 {
 		t.Fatal("journeyman bonus must be 0")
 	}
-	if !(TalentTopProspect.potentialBonus() > TalentJourneyman.potentialBonus()) {
+	if TalentTopProspect.potentialBonus() <= TalentJourneyman.potentialBonus() {
 		t.Fatal("top prospect bonus must exceed journeyman")
 	}
-	if !(TalentWonderkid.potentialBonus() > TalentTopProspect.potentialBonus()) {
+	if TalentWonderkid.potentialBonus() <= TalentTopProspect.potentialBonus() {
 		t.Fatal("wonderkid bonus must exceed top prospect")
 	}
-	if !(TalentGenerational.potentialBonus() > TalentWonderkid.potentialBonus()) {
+	if TalentGenerational.potentialBonus() <= TalentWonderkid.potentialBonus() {
 		t.Fatal("generational bonus must exceed wonderkid")
 	}
 }

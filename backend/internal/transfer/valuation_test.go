@@ -72,7 +72,7 @@ func TestValuationIsDeterministicRoundedAndMonotonic(t *testing.T) {
 			t.Fatalf("valuation %d must be positive for a rated squad player", v)
 		}
 	}
-	if !(values[0] <= values[1] && values[1] <= values[2]) {
+	if values[0] > values[1] || values[1] > values[2] {
 		t.Fatalf("valuation must be non-decreasing in attributes: %d, %d, %d", values[0], values[1], values[2])
 	}
 	if values[0] == values[2] {
@@ -93,19 +93,19 @@ func TestValuationPositionAndContractEffects(t *testing.T) {
 	base := squad.AttributeSnapshot{Technical: 84, Physical: 84, Mental: 84, Tactical: 84, Goalkeeping: 90, Positional: 88}
 	striker := valuationAttrs("ST", base)
 	fullBack := valuationAttrs("LB", base)
-	if !(Valuation(striker) > Valuation(fullBack)) {
+	if Valuation(striker) <= Valuation(fullBack) {
 		t.Fatal("star positions must carry a premium over cheap full-backs")
 	}
 
 	short := striker
 	short.ContractEndDays = 20
-	if !(Valuation(short) < Valuation(striker)) {
+	if Valuation(short) >= Valuation(striker) {
 		t.Fatal("a running-out contract must reduce the valuation")
 	}
 
 	young := striker
 	young.Age = 31
-	if !(Valuation(young) < Valuation(striker)) {
+	if Valuation(young) >= Valuation(striker) {
 		t.Fatal("decline-phase age must reduce the valuation")
 	}
 }

@@ -89,7 +89,9 @@ func (s *Service) rolloverCountry(ctx context.Context, tx pgx.Tx, worldID, count
 				nextEntries[l.RelegatesTo.ID] = append(nextEntries[l.RelegatesTo.ID], clubID)
 			}
 		}
-		s.emitSeasonCompleted(ctx, tx, worldID, a.season, a.order)
+		if err := s.emitSeasonCompleted(ctx, tx, worldID, a.season, a.order); err != nil {
+			return err
+		}
 	}
 
 	for _, a := range actives {

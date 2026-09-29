@@ -58,7 +58,7 @@ func SignFreeAgent(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 	var age int
 	if err := tx.QueryRow(ctx, `
 		SELECT p.status, p.club_id, p.origin,
-		       COALESCE(EXTRACT(YEAR FROM age($2::date, pe.date_of_birth::date))::int, 0)
+		       COALESCE(EXTRACT(YEAR FROM age($3::date, pe.date_of_birth::date))::int, 0)
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
 		WHERE p.id = $1 AND p.world_id = $2`,

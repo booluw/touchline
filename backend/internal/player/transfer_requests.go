@@ -111,7 +111,7 @@ func (s *Service) resolveAs(ctx context.Context, worldID, managerID, clubID, req
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	req, err := transferRequestByID(ctx, tx, requestID, true)
 	if err != nil {
@@ -191,7 +191,7 @@ func (s *Service) resolveByPlayer(ctx context.Context, worldID, managerID, playe
 	if err != nil {
 		return requestView{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	clubID, err := s.clubByManager(ctx, worldID, managerID)
 	if err != nil {

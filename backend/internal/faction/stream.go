@@ -15,7 +15,7 @@ func PairStream(worldSeed int64, a, b string) uint64 {
 	}
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("faction-pair:"))
-	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s:%s", worldSeed, a, b)))
+	_, _ = fmt.Fprintf(h, "%d:%s:%s", worldSeed, a, b)
 	return h.Sum64()
 }
 
@@ -24,6 +24,6 @@ func PairStream(worldSeed int64, a, b string) uint64 {
 func SeedStream(worldSeed int64, clubID string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("faction-seed:"))
-	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s", worldSeed, clubID)))
+	_, _ = fmt.Fprintf(h, "%d:%s", worldSeed, clubID)
 	return h.Sum64()
 }

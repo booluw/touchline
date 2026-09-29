@@ -155,7 +155,7 @@ func (b *RedisBroker) Subscribe(ctx context.Context, sink func(Event)) error {
 	b.mu.Unlock()
 
 	pubsub := b.client.Subscribe(ctx, b.channel)
-	defer pubsub.Close()
+	defer func() { _ = pubsub.Close() }()
 	// Wait for the SUBSCRIBE acknowledgement so callers can publish immediately
 	// after Run starts without racing the subscription.
 	if _, err := pubsub.Receive(ctx); err != nil {

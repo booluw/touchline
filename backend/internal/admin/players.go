@@ -24,7 +24,7 @@ func (s *Service) PlayerSummary(ctx context.Context, worldID, countryID uuid.UUI
 		ByStatus: map[string]int{}, ByOrigin: map[string]int{},
 		ByPosition: []PositionBreakdown{}, Nationalities: []NationalityMix{}, Intakes: []IntakeRow{}}
 
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*), ROUND(AVG(EXTRACT(EPOCH FROM (age('now'::date, pe.date_of_birth))) / 31536000.0)::numeric, 1)::float8
 		FROM player.players p JOIN person.people pe ON pe.id = p.person_id
 		WHERE p.world_id = $1 AND p.country_id = $2`, worldID, countryID).

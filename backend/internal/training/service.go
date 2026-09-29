@@ -305,8 +305,8 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 		net := make(map[string]int)
 
 		dc := devCtxs[p.id]
-		dc.Input.Skills = attr
-		dc.Input.PlayingTimePct = c.PlayingTimePct
+		dc.Skills = attr
+		dc.PlayingTimePct = c.PlayingTimePct
 		devOut := development.Evaluate(dc.Input)
 
 		for _, key := range distinctKeys(a) {
@@ -594,7 +594,7 @@ func consecutiveRecoveryWeeks(ctx context.Context, tx pgx.Tx, worldID, clubID uu
 func rngFor(weekTick int64, pid uuid.UUID, key string) *rand.Rand {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("training-apply:"))
-	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s:%s", weekTick, pid.String(), key)))
+	_, _ = fmt.Fprintf(h, "%d:%s:%s", weekTick, pid.String(), key)
 	return rand.New(rand.NewSource(int64(h.Sum64())))
 }
 

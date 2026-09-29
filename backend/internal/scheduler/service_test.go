@@ -87,7 +87,7 @@ func (f *fakeScheduler) specs() []string {
 }
 
 // run executes the registered handler for an entry, matching how cron calls it.
-func (f *fakeScheduler) run(id cron.EntryID) {
+func (f *fakeScheduler) run(id cron.EntryID) { //nolint:unused // used by integration tests
 	f.mu.Lock()
 	e, ok := f.entries[id]
 	f.mu.Unlock()

@@ -72,8 +72,8 @@ func (s *Service) GetSeasonCalendar(ctx context.Context, worldID, leagueID uuid.
 		seasonRef apiref.SeasonRef
 		startDate time.Time
 	)
-	switch {
-	case season == nil:
+	switch season {
+	case nil:
 		var err error
 		seasonRef, err = s.seasonRefByLeague(ctx, leagueID, worldID)
 		if err != nil {

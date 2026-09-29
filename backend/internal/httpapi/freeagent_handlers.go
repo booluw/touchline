@@ -106,7 +106,7 @@ func (s *server) handleSignFreeAgent(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if err := playerpool.SignFreeAgent(ctx, tx, s.bus, worldID, req.PlayerID, clubID,
 		req.WeeklyWage, req.Years, time.Now().UTC()); err != nil {
@@ -163,7 +163,7 @@ func (s *server) handleReleasePlayer(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if err := playerpool.ReleasePlayer(ctx, tx, s.bus, playerID, req.Reason); err != nil {
 		poolStatus(c, err)

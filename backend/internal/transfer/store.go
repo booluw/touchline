@@ -76,7 +76,6 @@ func (s *Store) ListListings(ctx context.Context, worldID uuid.UUID, status, pos
 	if sellingClub != uuid.Nil {
 		clause += fmt.Sprintf(" AND l.listing_club_id = $%d", argi)
 		args = append(args, sellingClub)
-		argi++
 	}
 	q += clause + `
 		ORDER BY l.listed_at DESC`

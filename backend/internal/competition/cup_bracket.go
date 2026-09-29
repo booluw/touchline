@@ -171,10 +171,10 @@ func drawRound(seed int64, cupID uuid.UUID, round, ties, byes int, clubs []uuid.
 func cupGap(seed int64, cupID uuid.UUID, round, total int) int {
 	dist := total - round
 	var weight3 int
-	switch {
-	case dist == 1:
+	switch dist {
+	case 1:
 		weight3 = 3
-	case dist == 2:
+	case 2:
 		weight3 = 1
 	}
 	if weight3 == 0 {

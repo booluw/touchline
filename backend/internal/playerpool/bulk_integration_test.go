@@ -34,7 +34,7 @@ func seedBulkWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID, *playerge
 		t.Fatalf("create country: %v", err)
 	}
 
-	generator := &playergen.PoolGenerator{}
+	generator := playergen.NewPoolGenerator()
 	if err := generator.AddPool("eng", []string{"Aaron", "Adam", "Alfie"}, []string{"Adams", "Allen", "Anderson"}); err != nil {
 		t.Fatalf("add name pool: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestBulkCreateIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	opts := BulkOpts{
 		Count:       11,
@@ -78,7 +78,7 @@ func TestBulkCreateIntegration(t *testing.T) {
 			origin string
 			dob    time.Time
 		)
-		if err := pool.QueryRow(ctx, `
+		if err := tx.QueryRow(ctx, `
 			SELECT p.status, p.club_id, p.primary_position, p.origin, pe.date_of_birth
 			FROM player.players p JOIN person.people pe ON pe.id = p.person_id
 			WHERE p.id = $1`, id).Scan(&status, &club, &pos, &origin, &dob); err != nil {
@@ -101,7 +101,7 @@ func TestBulkCreateIntegration(t *testing.T) {
 
 	// Elite offset (+25) must lift the positional overall well above the low band.
 	var lowOverall int
-	if err := pool.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 		SELECT COUNT(*) FROM (
 			SELECT p.id,
 				AVG(a.value) FILTER (WHERE a.attribute_category = 'technical') AS t,
@@ -120,7 +120,7 @@ func TestBulkCreateIntegration(t *testing.T) {
 
 	// Event recorded.
 	var events int
-	if err := pool.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 		SELECT COUNT(*) FROM world.events
 		WHERE world_id = $1 AND event_type = $2`, worldID, EventAdminBulkPlayerCreated).Scan(&events); err != nil {
 		t.Fatalf("count bulk events: %v", err)
@@ -141,7 +141,7 @@ func TestBulkCreateValidatesRejectsBadOpts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if _, err := BulkCreate(ctx, tx, nil, worldID, countryID,
 		BulkOpts{Count: 501, MinAge: 17, MaxAge: 25, Quality: "mid"}, factory, time.Now().UTC()); err == nil {

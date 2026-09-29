@@ -25,6 +25,7 @@ import (
 // created or the first season starts — guaranteeing fresh-slate worlds.
 func main() {
 	ctx := context.Background()
+	log.SetFlags(0) // no timestamps: CI diffs two runs' output to prove idempotency
 
 	databaseURL := flag.String("database", "", "postgres connection URL (or $DATABASE_URL)")
 	dataDir := flag.String("data", "data/names", "path to the curated player name data directory")
@@ -71,7 +72,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("begin transaction: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	for _, n := range data.Nationalities {
 		if _, err := tx.Exec(ctx, `

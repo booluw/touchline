@@ -660,7 +660,7 @@ func hashSeed(worldID, clubID, countryID uuid.UUID, season int) int64 {
 	for _, id := range []uuid.UUID{worldID, clubID, countryID} {
 		_, _ = h.Write(id[:])
 	}
-	_, _ = h.Write([]byte(fmt.Sprintf(":%d", season)))
+	_, _ = fmt.Fprintf(h, ":%d", season)
 	return int64(h.Sum64())
 }
 

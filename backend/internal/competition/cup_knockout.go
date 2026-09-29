@@ -129,7 +129,6 @@ func (s *Service) applyKnockoutResult(ctx context.Context, tx pgx.Tx, fixtureID 
 		if err := s.setEntryQualified(ctx, tx, season.ID, plan.TopNClubIDs); err != nil {
 			return err
 		}
-		joined = true
 		if _, err := tx.Exec(ctx, `
 			UPDATE competition.competition_rules
 			SET qualification_rules = jsonb_set(

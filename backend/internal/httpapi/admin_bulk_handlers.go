@@ -70,7 +70,7 @@ func (s *server) handleAdminBulkCreatePlayers(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	generator, natPool, err := internalbootstrap.LoadPools(ctx, tx)
 	if err != nil {

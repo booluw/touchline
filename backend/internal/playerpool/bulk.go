@@ -121,8 +121,8 @@ func BulkCreate(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 		ids = append(ids, playerID)
 	}
 
-	actor := "admin"
-	_ = eventbus.WriteTx(ctx, pub, tx, &eventbus.Event{
+	actor := "system"
+	if err := eventbus.WriteTx(ctx, pub, tx, &eventbus.Event{
 		WorldID:   worldID,
 		EventType: EventAdminBulkPlayerCreated,
 		ActorType: &actor,
@@ -133,6 +133,8 @@ func BulkCreate(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 			"origin":     opts.Origin,
 			"player_ids": ids,
 		}),
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("record bulk create event: %w", err)
+	}
 	return ids, nil
 }

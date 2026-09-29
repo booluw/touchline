@@ -44,7 +44,7 @@ func (s *Service) clubWeeklyPass(ctx context.Context, worldID uuid.UUID, worldTi
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// 1. Lazy squad-role resolution for contracts signed without one.
 	missing, err := unresolvedRoles(ctx, tx, clubID)
@@ -190,7 +190,7 @@ func (s *Service) autoListStale(ctx context.Context, worldID uuid.UUID, worldTic
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	stale, err := stalePendingRequests(ctx, tx)
 	if err != nil {

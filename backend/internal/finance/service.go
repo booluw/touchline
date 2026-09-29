@@ -228,7 +228,7 @@ func (s *Service) RegisterContract(ctx context.Context, actor Actor, clubID uuid
 	if err != nil {
 		return nil, fmt.Errorf("begin contract tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var contractID uuid.UUID
 	if err := tx.QueryRow(ctx, `
@@ -325,7 +325,7 @@ func (s *Service) applyClubWages(ctx context.Context, clubID uuid.UUID, tick int
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin wage tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var worldID uuid.UUID
 	if err := tx.QueryRow(ctx,

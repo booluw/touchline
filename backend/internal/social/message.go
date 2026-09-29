@@ -96,7 +96,7 @@ func (s *Service) SendMessage(ctx context.Context, worldID, senderID, recipientI
 	if err != nil {
 		return nil, fmt.Errorf("begin send: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO social.messages (world_id, sender_id, sender_type, recipient_id, recipient_type, subject, body, sent_at)

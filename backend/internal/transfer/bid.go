@@ -37,7 +37,7 @@ func (s *Service) PlaceBid(ctx context.Context, actor Actor, worldID uuid.UUID, 
 	if err != nil {
 		return Bid{}, nil, nil, fmt.Errorf("begin bid tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	bidID, resolved, exp, err := s.placeBidTx(ctx, tx, actor, worldID, buyerClub, in)
 	if err != nil {
@@ -213,7 +213,7 @@ func (s *Service) respondToBid(ctx context.Context, actor Actor, worldID, clubID
 	if err != nil {
 		return Bid{}, nil, nil, fmt.Errorf("begin respond tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var (
 		bWorldID, buyerClub, sellerClub uuid.UUID
@@ -381,7 +381,7 @@ func (s *Service) WithdrawBid(ctx context.Context, actor Actor, worldID, bidID u
 	if err != nil {
 		return Bid{}, fmt.Errorf("begin withdraw bid tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var (
 		bWorldID, buyerClub uuid.UUID

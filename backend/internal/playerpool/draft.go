@@ -78,7 +78,7 @@ func DraftSquad(ctx context.Context, tx pgx.Tx, pub eventbus.Publisher,
 		WHERE p.world_id = $1 AND p.club_id IS NULL AND p.status = 'free_agent'
 		  AND ($2::uuid IS NULL OR p.country_id IS NOT DISTINCT FROM $2)
 		GROUP BY p.id, pe.id
-		ORDER BY overall DESC, p.id`,
+		ORDER BY overall DESC, pe.last_name, pe.first_name, pe.nationality_code, pe.date_of_birth, p.primary_position, p.id`, // seed-derived tie-break; p.id is a random UUID
 		worldID, poolCountryID,
 	)
 	if err != nil {

@@ -107,7 +107,7 @@ func NewService(pool *pgxpool.Pool, bus Publishable) *Service {
 
 // newServiceWith builds a service with an injected random source, so tests can
 // reproduce identical squads for a given seed.
-func newServiceWith(pool *pgxpool.Pool, bus Publishable, rng *rand.Rand) *Service {
+func newServiceWith(pool *pgxpool.Pool, bus Publishable, rng *rand.Rand) *Service { //nolint:unused // used by integration tests
 	return &Service{pool: pool, bus: bus, rng: rng}
 }
 

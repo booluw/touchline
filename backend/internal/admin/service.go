@@ -93,7 +93,7 @@ func (s *Service) Overview(ctx context.Context, worldID, countryID uuid.UUID) (*
 
 func (s *Service) populationSummary(ctx context.Context, worldID, countryID uuid.UUID) PopulationSummary {
 	ps := PopulationSummary{ByStatus: map[string]int{}}
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FILTER (WHERE p.status <> 'retired'),
 		       COUNT(*) FILTER (WHERE p.status = 'free_agent'),
 		       COUNT(*) FILTER (WHERE p.status = 'retired'),
@@ -119,10 +119,10 @@ func (s *Service) populationSummary(ctx context.Context, worldID, countryID uuid
 
 func (s *Service) unassignedSummary(ctx context.Context, worldID uuid.UUID) UnassignedSummary {
 	var u UnassignedSummary
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM player.players WHERE world_id = $1 AND country_id IS NULL`, worldID).
 		Scan(&u.WorldPoolPlayers)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM club.clubs c
 		LEFT JOIN world.countries wc ON wc.world_id = c.world_id AND wc.name = c.country
 		WHERE c.world_id = $1 AND wc.id IS NULL`, worldID).
@@ -133,11 +133,11 @@ func (s *Service) unassignedSummary(ctx context.Context, worldID uuid.UUID) Unas
 func (s *Service) clubSummary(ctx context.Context, worldID, countryID uuid.UUID, clubIDs []uuid.UUID) ClubSummary {
 	cs := ClubSummary{Total: len(clubIDs)}
 	if len(clubIDs) > 0 {
-		s.pool.QueryRow(ctx, `
+		_ = s.pool.QueryRow(ctx, `
 			SELECT COUNT(*) FROM finance.financial_crisis_states f
 			WHERE f.club_id = ANY($1) AND f.resolved_at IS NULL`, clubIDs).Scan(&cs.InCrisis)
 	}
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM club.clubs c
 		LEFT JOIN world.countries wc ON wc.world_id = c.world_id AND wc.name = c.country
 		WHERE c.world_id = $1 AND wc.id IS NULL`, worldID).
@@ -170,27 +170,27 @@ func (s *Service) marketSummary(ctx context.Context, worldID, countryID uuid.UUI
 	if len(clubIDs) == 0 {
 		return ms
 	}
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM transfer.listings l
 		WHERE l.world_id = $1 AND l.status = 'active' AND l.listing_club_id = ANY($2)`,
 		worldID, clubIDs).Scan(&ms.OpenListings)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM transfer.bids b
 		WHERE b.world_id = $1 AND b.status IN ('pending','countered') AND b.selling_club_id = ANY($2)`,
 		worldID, clubIDs).Scan(&ms.BidsReceived)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM transfer.bids b
 		WHERE b.world_id = $1 AND b.status IN ('pending','countered') AND b.bidding_club_id = ANY($2)`,
 		worldID, clubIDs).Scan(&ms.BidsMade)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM transfer.completed_transfers t
 		WHERE t.world_id = $1 AND t.to_club_id = ANY($2) AND t.from_club_id IS NOT NULL`,
 		worldID, clubIDs).Scan(&ms.TransfersIn)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM transfer.completed_transfers t
 		WHERE t.world_id = $1 AND t.from_club_id = ANY($2)`,
 		worldID, clubIDs).Scan(&ms.TransfersOut)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM transfer.completed_transfers t
 		WHERE t.world_id = $1 AND t.to_club_id = ANY($2) AND t.from_club_id IS NULL`,
 		worldID, clubIDs).Scan(&ms.FreeAgentSignings)
@@ -202,16 +202,16 @@ func (s *Service) economySummary(ctx context.Context, clubIDs []uuid.UUID) Econo
 	if len(clubIDs) == 0 {
 		return es
 	}
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM finance.financial_crisis_states f
 		WHERE f.club_id = ANY($1) AND f.resolved_at IS NULL`, clubIDs).
 		Scan(&es.CrisisClubs)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(w.weekly_wage)::bigint, 0)
 		FROM finance.wage_commitments w
 		WHERE w.club_id = ANY($1) AND w.end_date > world.club_world_date(w.club_id)`, clubIDs).
 		Scan(&es.WageBill)
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(l.amount) FILTER (WHERE l.entry_type = 'credit')::bigint, 0)
 		     - COALESCE(SUM(l.amount) FILTER (WHERE l.entry_type = 'debit')::bigint, 0)
 		FROM finance.ledger_entries l
@@ -236,10 +236,11 @@ func (s *Service) economySummary(ctx context.Context, clubIDs []uuid.UUID) Econo
 			var typ string
 			var alloc, comm int64
 			if err := rows.Scan(&typ, &alloc, &comm); err == nil {
-				if typ == "wage" {
+				switch typ {
+				case "wage":
 					es.WageAllocated += alloc
 					es.WageCommitted += comm
-				} else if typ == "transfer" {
+				case "transfer":
 					es.TransferAllocated += alloc
 					es.TransferCommitted += comm
 				}
@@ -298,7 +299,7 @@ func (s *Service) headlines(ctx context.Context, countryID uuid.UUID, clubIDs []
 	}
 
 	var crisis *CrisisClubRow
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT c.short_name, f.stage, f.started_at
 		FROM finance.financial_crisis_states f
 		JOIN club.clubs c ON c.id = f.club_id
@@ -311,7 +312,7 @@ func (s *Service) headlines(ctx context.Context, countryID uuid.UUID, clubIDs []
 	}
 
 	var intake *IntakeRow
-	s.pool.QueryRow(ctx, `
+	_ = s.pool.QueryRow(ctx, `
 		SELECT season_number, SUM(player_count) FROM world.country_academy_intakes
 		WHERE world_id = (SELECT world_id FROM world.countries WHERE id = $1)
 		  AND country_id = $1

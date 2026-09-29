@@ -46,7 +46,7 @@ func (s *Service) ExpireStale(ctx context.Context, worldID uuid.UUID, worldTick 
 	if err != nil {
 		return 0, fmt.Errorf("begin expire event tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 	payload := mustJSON(map[string]any{"world_id": worldID, "world_tick": worldTick, "expired": n})
 	if err := s.recordSystemEvent(ctx, tx, worldID, worldTick, EventBidExpired, payload); err != nil {
 		return 0, err
@@ -71,7 +71,7 @@ func (s *Service) RecomputeValuations(ctx context.Context, worldID uuid.UUID, wo
 	if err != nil {
 		return 0, fmt.Errorf("begin valuation tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var n int64
 	for _, p := range players {
@@ -113,7 +113,7 @@ func (s *Service) AIBidActivity(ctx context.Context, worldID uuid.UUID, worldTic
 	if err != nil {
 		return 0, fmt.Errorf("begin ai activity tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var placed int64
 	for _, t := range targets {

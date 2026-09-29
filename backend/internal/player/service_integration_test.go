@@ -108,7 +108,7 @@ func TestRecordMatchAppearancesInsideTx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 	if err := svc.RecordMatchAppearances(ctx, tx, matchID, []player.Appearance{
 		{PlayerID: pid, Started: true, Minutes: 90},
 	}); err != nil {

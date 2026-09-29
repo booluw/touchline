@@ -18,7 +18,7 @@ import (
 func MatchStream(matchSeed int64, playerID uuid.UUID) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("injury-match:"))
-	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s", matchSeed, playerID.String())))
+	_, _ = fmt.Fprintf(h, "%d:%s", matchSeed, playerID.String())
 	return h.Sum64()
 }
 
@@ -27,7 +27,7 @@ func MatchStream(matchSeed int64, playerID uuid.UUID) uint64 {
 func WeekStream(weekTick int64, playerID uuid.UUID, tag string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("injury-week:"))
-	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s:%s", weekTick, playerID.String(), tag)))
+	_, _ = fmt.Fprintf(h, "%d:%s:%s", weekTick, playerID.String(), tag)
 	return h.Sum64()
 }
 
@@ -36,6 +36,6 @@ func WeekStream(weekTick int64, playerID uuid.UUID, tag string) uint64 {
 func SetbackStream(injuryID uuid.UUID, weekTick int64) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte("injury-setback:"))
-	_, _ = h.Write([]byte(fmt.Sprintf("%s:%d", injuryID.String(), weekTick)))
+	_, _ = fmt.Fprintf(h, "%s:%d", injuryID.String(), weekTick)
 	return h.Sum64()
 }

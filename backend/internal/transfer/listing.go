@@ -47,7 +47,7 @@ func (s *Service) CreateListing(ctx context.Context, actor Actor, worldID uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("begin listing tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	player, err := s.lockPlayer(ctx, tx, in.PlayerID)
 	if err != nil {
@@ -133,7 +133,7 @@ func (s *Service) WithdrawListing(ctx context.Context, actor Actor, worldID, lis
 	if err != nil {
 		return Listing{}, fmt.Errorf("begin withdraw tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var (
 		lWorldID uuid.UUID

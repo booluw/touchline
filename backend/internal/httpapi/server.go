@@ -142,13 +142,13 @@ type Server struct {
 
 // Handler returns the fully wired gin engine.
 func (s *Server) Handler() *gin.Engine {
-	return s.server.router()
+	return s.router()
 }
 
 // Hub exposes the realtime hub for tests and producers that publish to
 // connected sockets (e.g. the worker's world-tick bridge).
 func (s *Server) Hub() *realtime.Hub {
-	return s.server.hub
+	return s.hub
 }
 
 // OriginHostPattern converts APP_ORIGIN (e.g. "http://localhost:3000") into a

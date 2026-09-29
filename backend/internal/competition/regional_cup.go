@@ -140,7 +140,7 @@ func DefaultBandForReputation(rep int) (from, to int) {
 func inputsToBands(inputs []QualBandInput) ([]Band, error) {
 	out := make([]Band, 0, len(inputs))
 	for _, in := range inputs {
-		b := Band{LeagueID: in.LeagueID, From: in.From, To: in.To}
+		b := Band(in)
 		if err := validateQualBand(b); err != nil {
 			return nil, err
 		}
@@ -153,7 +153,7 @@ func inputsToBands(inputs []QualBandInput) ([]Band, error) {
 func regionalRulesJSON(tier *int, bands []Band) ([]byte, error) {
 	doc := regionalRulesDoc{Entry: regionalEntryKind, Tier: tier}
 	for _, b := range sortedBands(bands) {
-		doc.Bands = append(doc.Bands, qualBandDoc{LeagueID: b.LeagueID, From: b.From, To: b.To})
+		doc.Bands = append(doc.Bands, qualBandDoc(b))
 	}
 	b, err := json.Marshal(doc)
 	if err != nil {

@@ -62,7 +62,7 @@ func (s *Service) GetDynamics(ctx context.Context, worldID, managerID, clubID uu
 	if err != nil {
 		return Dynamics{}, fmt.Errorf("faction: begin dynamics: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	profiles, err := s.store.ensureSquadRelationships(ctx, tx, worldID, clubID)
 	if err != nil {

@@ -85,7 +85,7 @@ func (s *Service) loadSquadPolicy(ctx context.Context, clubID uuid.UUID) (SquadP
 	if err != nil {
 		return DefaultSquadPolicy, err
 	}
-	if p.Enabled == false {
+	if !p.Enabled {
 		return DefaultSquadPolicy, nil
 	}
 	var sp SquadPolicy

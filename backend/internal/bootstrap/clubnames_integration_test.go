@@ -103,7 +103,7 @@ func TestLoadClubNamePartsEmptyError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 	if _, err := tx.Exec(ctx, `DELETE FROM ref.club_name_parts`); err != nil {
 		t.Fatalf("clear pool: %v", err)
 	}
@@ -159,7 +159,7 @@ func poolRead(t *testing.T, pool *pgxpool.Pool) (stems, suffixes []string) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 	pools, err := LoadClubNamePools(ctx, tx)
 	if err != nil {
 		t.Fatalf("load: %v", err)

@@ -40,7 +40,7 @@ func seedSignWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID, uuid.UUID
 		t.Fatalf("create country: %v", err)
 	}
 
-	generator := &playergen.PoolGenerator{}
+	generator := playergen.NewPoolGenerator()
 	names := []string{"Aaron", "Adam", "Alfie", "Archie", "Arthur", "Benjamin", "Charlie"}
 	surnames := []string{"Adams", "Allen", "Anderson", "Atkinson", "Bailey", "Baker", "Ball"}
 	if err := generator.AddPool("eng", names, surnames); err != nil {
@@ -87,7 +87,7 @@ func TestSignReleaseIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		defer tx.Rollback(ctx)
+		defer tx.Rollback(ctx) //nolint:errcheck
 		if err := SignFreeAgent(ctx, tx, nil, worldID, playerID, clubID, 50000, 3, time.Now().UTC()); err != nil {
 			t.Fatalf("sign: %v", err)
 		}
@@ -136,7 +136,7 @@ func TestSignReleaseIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		defer tx.Rollback(ctx)
+		defer tx.Rollback(ctx) //nolint:errcheck
 		err = SignFreeAgent(ctx, tx, nil, worldID, playerID, clubID, 30000, 1, time.Now().UTC())
 		if !errors.Is(err, ErrNotFreeAgent) {
 			t.Fatalf("re-sign err = %v, want ErrNotFreeAgent", err)
@@ -148,7 +148,7 @@ func TestSignReleaseIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		defer tx.Rollback(ctx)
+		defer tx.Rollback(ctx) //nolint:errcheck
 		if err := ReleasePlayer(ctx, tx, nil, playerID, "test release"); err != nil {
 			t.Fatalf("release: %v", err)
 		}
@@ -197,7 +197,7 @@ func TestSignReleaseIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		defer tx.Rollback(ctx)
+		defer tx.Rollback(ctx) //nolint:errcheck
 		if err := ReleasePlayer(ctx, tx, nil, playerID, "again"); !errors.Is(err, ErrNoActiveContract) {
 			t.Fatalf("release free agent err = %v, want ErrNoActiveContract", err)
 		}
