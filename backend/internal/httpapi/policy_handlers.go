@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 
 	"github.com/touchline/backend/internal/policybot"
 )

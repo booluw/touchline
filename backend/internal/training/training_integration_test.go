@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/touchline/backend/internal/development"
 	"github.com/touchline/backend/internal/bootstrap"
+	"github.com/touchline/backend/internal/development"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"

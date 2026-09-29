@@ -75,7 +75,7 @@ func insertControlledPlayer(t *testing.T, pool *pgxpool.Pool, worldID, clubID, p
 			(player_id, potential, consistency, injury_susceptibility, adaptability,
 			 professionalism, ambition, loyalty, temperament, pressure_handling, learning_speed)
 		VALUES ($1, $2, 50, 50, 50, $3, 60, 60, 60, 50, 60)`,
-		pid, potential, pro, ); err != nil {
+		pid, potential, pro); err != nil {
 		t.Fatalf("insert hidden traits: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `

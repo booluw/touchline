@@ -32,7 +32,6 @@ const (
 // Sentinel errors surfaced to higher layers (HTTP, services).
 var (
 	ErrNoOpenInjury = errors.New("player has no open injury")
-	ErrPlayerGone   = errors.New("player or club context missing for injury")
 )
 
 // Candidate is one engine-attributed match injury forwarded by the match

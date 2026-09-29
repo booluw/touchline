@@ -28,8 +28,8 @@ import (
 	internaltraining "github.com/touchline/backend/internal/training"
 	internaltransfer "github.com/touchline/backend/internal/transfer"
 	internalworld "github.com/touchline/backend/internal/world"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
 	"github.com/touchline/backend/pkg/eventbus"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 	"github.com/touchline/backend/pkg/realtime"
 )
 

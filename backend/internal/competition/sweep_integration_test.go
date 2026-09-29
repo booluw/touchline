@@ -84,16 +84,6 @@ func containsUUID(ids []uuid.UUID, id uuid.UUID) bool {
 	return false
 }
 
-func cupName(t *testing.T, pool *pgxpool.Pool, cupID uuid.UUID) string {
-	t.Helper()
-	var name string
-	if err := pool.QueryRow(context.Background(),
-		`SELECT name FROM competition.competitions WHERE id = $1`, cupID).Scan(&name); err != nil {
-		t.Fatalf("cup name %s: %v", cupID, err)
-	}
-	return name
-}
-
 func clubName(t *testing.T, pool *pgxpool.Pool, clubID uuid.UUID) string {
 	t.Helper()
 	var name string

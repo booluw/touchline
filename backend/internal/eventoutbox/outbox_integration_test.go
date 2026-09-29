@@ -38,18 +38,6 @@ func jobCountForEvent(t *testing.T, pool *pgxpool.Pool, eventID uuid.UUID) int {
 	return n
 }
 
-func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", msg)
-}
-
 // TestSweepReenqueuesOriginalIDsOnce proves the repair sweep end to end: rows
 // in world.events with no dispatch job are found, re-enqueued by their ORIGINAL
 // id (the same id the audit trail carries), delivered to a subscriber, and a

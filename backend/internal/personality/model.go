@@ -13,8 +13,6 @@
 // database, exactly as the sprint-9 gate battery demands.
 package personality
 
-import "fmt"
-
 // TraitSet is the full behavioural vector for one player, formed from the
 // visible personality columns (0006 player.player_personality) plus the hidden
 // trait columns (0006 player.player_hidden_traits). All values are 1..10 except
@@ -116,11 +114,4 @@ type TraitReveal struct {
 	Source     string `json:"source"`     // e.g. "missed_promise_interaction", "scouting_report", "training_observation"
 	Confidence int    `json:"confidence"` // 1..100, grows with more exposure
 	Text       string `json:"text"`
-}
-
-func (x *TraitSet) validateTrait(v int) error {
-	if v < 1 || v > 10 {
-		return fmt.Errorf("personality: trait value %d out of range 1..10", v)
-	}
-	return nil
 }

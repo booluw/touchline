@@ -9,18 +9,18 @@ import (
 
 func seed(field string, skills map[string]int) Input {
 	return Input{
-		PlayerID:          uuid.MustParse("00000000-0000-0000-0000-000000000001"),
-		Age:               25,
-		Position:          "ST",
-		FacilityLevel:     5,
-		Skills:            skills,
-		Potential:         0,
-		ExpansionsLeft:    ExpansionBudget,
-		Professionalism:   75,
-		PlayingTimePct:    0.8,
-		SeasonAvgRating:    7.5,
+		PlayerID:            uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		Age:                 25,
+		Position:            "ST",
+		FacilityLevel:       5,
+		Skills:              skills,
+		Potential:           0,
+		ExpansionsLeft:      ExpansionBudget,
+		Professionalism:     75,
+		PlayingTimePct:      0.8,
+		SeasonAvgRating:     7.5,
 		ConsecutiveStagnant: 0,
-		WeekTick:           120,
+		WeekTick:            120,
 	}
 }
 
@@ -96,7 +96,7 @@ func TestStagnationCounterChains(t *testing.T) {
 func TestPotentialFactorAtCeiling(t *testing.T) {
 	skills := map[string]int{"passing": 70}
 	capped := seed("capped", skills)
-	capped.Potential = 71 // overall 70 → headroom 1
+	capped.Potential = 71        // overall 70 → headroom 1
 	capped.SeasonAvgRating = 5.5 // not elite: no flex, growth trickles
 
 	open := seed("open", skills)
@@ -117,9 +117,9 @@ func TestPotentialExpansion(t *testing.T) {
 	skills := map[string]int{"passing": 90, "pace": 90, "composure": 90}
 	in := seed("wonderkid", skills)
 	in.Age = 19
-	in.Potential = 92              // overall ~90 → headroom ~2, at ceiling
+	in.Potential = 92 // overall ~90 → headroom ~2, at ceiling
 	in.ExpansionsLeft = 3
-	in.SeasonAvgRating = 8.4       // bump 1 + youth extra 1 = +2
+	in.SeasonAvgRating = 8.4 // bump 1 + youth extra 1 = +2
 
 	out := Evaluate(in)
 	if !out.PotentialChanged {

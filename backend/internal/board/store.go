@@ -66,21 +66,6 @@ func (s *Store) seasonYear(ctx context.Context, q querier, worldID uuid.UUID) (i
 	return y, nil
 }
 
-// managerClub resolves the manager's current assignment (world, club, bot flag).
-func (s *Store) managerClub(ctx context.Context, q querier, managerID uuid.UUID) (worldID, clubID uuid.UUID, bot bool, err error) {
-	err = q.QueryRow(ctx, `
-		SELECT world_id, current_club_id, is_policy_bot
-		FROM manager.managers WHERE id = $1 AND status = 'active' AND current_club_id IS NOT NULL`,
-		managerID).Scan(&worldID, &clubID, &bot)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, uuid.Nil, false, ErrNotEmployed
-	}
-	if err != nil {
-		return uuid.Nil, uuid.Nil, false, fmt.Errorf("manager club: %w", err)
-	}
-	return worldID, clubID, bot, nil
-}
-
 // loadReview collects the determinants for one club+manager into
 // reviewInputs. Missing optional rows resolve to documented neutral defaults.
 func (s *Store) loadReview(ctx context.Context, q querier, worldID, clubID, managerID uuid.UUID, season int) (reviewInputs, error) {
@@ -246,21 +231,6 @@ func (s *Store) currentTick(ctx context.Context, q querier, worldID uuid.UUID) (
 		return 0, fmt.Errorf("current tick: %w", err)
 	}
 	return tick, nil
-}
-
-// insertMandates writes a fresh mandate set for a (club, manager, season).
-func (s *Store) insertMandates(ctx context.Context, q querier, clubID, managerID uuid.UUID, season int, seeds []mandateSeed) error {
-	for _, sd := range seeds {
-		if _, err := q.Exec(ctx, `
-			INSERT INTO club.board_mandates
-				(club_id, manager_id, season, category, description, target_type, target_value, status)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
-			ON CONFLICT DO NOTHING`,
-			clubID, managerID, season, sd.Category, sd.Description, sd.TargetType, sd.TargetValue); err != nil {
-			return fmt.Errorf("insert mandate %s: %w", sd.Category, err)
-		}
-	}
-	return nil
 }
 
 // resolveMandate marks a mandate met/broken with its resolution timestamp.

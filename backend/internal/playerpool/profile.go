@@ -163,14 +163,6 @@ func persistEmotionalState(ctx context.Context, tx pgx.Tx, playerID uuid.UUID, e
 	return nil
 }
 
-// daysTruncate strips the time component of the world's season reference date,
-// using the UTC calendar day so the anchor is timezone-independent and matches
-// the matchday world-day counter (see matchday.worldNow / world.TargetDay, IM16).
-func daysTruncate(t time.Time) time.Time {
-	y, m, d := t.UTC().Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-}
-
 // dobFor derives the player's date_of_birth from the world reference date.
 func dobFor(seasonRef time.Time, age int) time.Time {
 	return seasonRef.AddDate(-age, 0, 0)

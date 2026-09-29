@@ -24,8 +24,6 @@ var (
 	ErrPlayerNotInClub  = errors.New("player is not in the caller's club")
 	ErrRequestNotFound  = errors.New("transfer request not found")
 	ErrRequestResolved  = errors.New("transfer request already resolved")
-	ErrOpenRequest      = errors.New("player already has an open transfer request")
-	ErrRequestCooldown  = errors.New("player is not ready to request a transfer yet")
 )
 
 type Service struct {

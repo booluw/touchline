@@ -35,11 +35,6 @@ func ensureAcademyTx(ctx context.Context, tx pgx.Tx, worldID, clubID uuid.UUID) 
 	return nil
 }
 
-// loadAcademyTx reads a club's academy row inside a transaction.
-func loadAcademyTx(ctx context.Context, tx pgx.Tx, clubID uuid.UUID) (Academy, error) {
-	return scanAcademy(tx.QueryRow(ctx, academySelect+` WHERE club_id = $1`, clubID))
-}
-
 // loadAcademy reads a club's academy row via the pool.
 func (s *store) loadAcademy(ctx context.Context, clubID uuid.UUID) (Academy, error) {
 	return scanAcademy(s.pool.QueryRow(ctx, academySelect+` WHERE club_id = $1`, clubID))
@@ -124,32 +119,6 @@ func markClubIntake(ctx context.Context, tx pgx.Tx, clubID uuid.UUID, season int
 		UPDATE club.academies SET last_intake_season = $2
 		WHERE club_id = $1`, clubID, season); err != nil {
 		return fmt.Errorf("stamp club intake: %w", err)
-	}
-	return nil
-}
-
-// tryClaimCountryIntake inserts the (world, country, season) idempotency row,
-// returning true when this caller won the claim. A redelivered season hook
-// loses the race and must not re-run the street intake.
-func tryClaimCountryIntake(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.UUID, season int) (bool, error) {
-	tag, err := tx.Exec(ctx, `
-		INSERT INTO world.country_academy_intakes (world_id, country_id, season_number, player_count)
-		VALUES ($1, $2, $3, 0)
-		ON CONFLICT (world_id, country_id, season_number) DO NOTHING`,
-		worldID, countryID, season)
-	if err != nil {
-		return false, fmt.Errorf("claim country intake: %w", err)
-	}
-	return tag.RowsAffected() > 0, nil
-}
-
-// finishCountryIntake records the generated count on the claim row.
-func finishCountryIntake(ctx context.Context, tx pgx.Tx, worldID, countryID uuid.UUID, season, count int) error {
-	if _, err := tx.Exec(ctx, `
-		UPDATE world.country_academy_intakes SET player_count = $4
-		WHERE world_id = $1 AND country_id = $2 AND season_number = $3`,
-		worldID, countryID, season, count); err != nil {
-		return fmt.Errorf("finish country intake: %w", err)
 	}
 	return nil
 }

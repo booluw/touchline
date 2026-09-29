@@ -22,10 +22,6 @@ import (
 	"github.com/touchline/backend/pkg/eventbus"
 )
 
-// DaysPerFixture approximates how often the league kicks off, used only to
-// bound "next fixture" display.
-const DaysPerFixture = 7
-
 // Service is the policybot engine.
 type Service struct {
 	pool        *pgxpool.Pool

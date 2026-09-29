@@ -1,7 +1,5 @@
 package personality
 
-import "fmt"
-
 // --- Hidden-trait reveal (S09-01 acceptance: "gradual reveal of hidden
 // traits over time; never a one-shot dump"). -------------------------------------------------
 
@@ -145,14 +143,4 @@ func evidenceFor(t TraitSet, src RevealSource) (trait string, value int, text st
 			"A steady presence in a heated squad meeting — leadership is surfacing.", true
 	}
 	return "", 0, "", false
-}
-
-// mustReveal is a test-only convenience: it runs the reveal for a source and
-// panics if the trait set produced no evidence, keeping tests terse.
-func (e *Engine) mustReveal(src RevealSource, t TraitSet) *TraitReveal {
-	r := e.maybeReveal(src, t, 0)
-	if r == nil {
-		panic(fmt.Sprintf("personality: no reveal evidence for source %q", src))
-	}
-	return r
 }

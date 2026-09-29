@@ -94,21 +94,6 @@ type PlayerPersonality struct {
 	EmotionalVolatility int       `json:"emotional_volatility"`
 }
 
-type PlayerHiddenTraits struct {
-	ID                   uuid.UUID `json:"id"`
-	PlayerID             uuid.UUID `json:"player_id"`
-	Potential            int       `json:"potential"`
-	Consistency          int       `json:"consistency"`
-	InjurySusceptibility int       `json:"injury_susceptibility"`
-	Adaptability         int       `json:"adaptability"`
-	Professionalism      int       `json:"professionalism"`
-	Ambition             int       `json:"ambition"`
-	Loyalty              int       `json:"loyalty"`
-	Temperament          int       `json:"temperament"`
-	PressureHandling     int       `json:"pressure_handling"`
-	LearningSpeed        int       `json:"learning_speed"`
-}
-
 type EmotionalState struct {
 	PlayerID uuid.UUID `json:"player_id"`
 	State    string    `json:"state"` // happy, content, motivated, frustrated, anxious, angry, homesick, excited, betrayed, ambitious, confident, isolated

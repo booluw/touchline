@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	internalboard "github.com/touchline/backend/internal/board"
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 // boardStatus maps board sentinel errors to HTTP statuses. Unknown mandates and

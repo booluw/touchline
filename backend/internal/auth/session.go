@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	pkgauth "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 // insertSession records a hashed refresh session inside the caller's tx.
@@ -19,7 +19,7 @@ func insertSession(ctx context.Context, tx pgx.Tx, userID uuid.UUID, refreshToke
 	_, err := tx.Exec(ctx, `
 		INSERT INTO auth.sessions (user_id, refresh_token_hash, device_fingerprint, ip_address, expires_at)
 		VALUES ($1, $2, $3, $4::inet, now() + $5::interval)`,
-		userID, pkgauth.HashRefreshToken(refreshToken), nullIfEmpty(deviceFingerprint), addrToString(ip), ttl,
+		userID, pkgjwt.HashRefreshToken(refreshToken), nullIfEmpty(deviceFingerprint), addrToString(ip), ttl,
 	)
 	if err != nil {
 		return fmt.Errorf("insert session: %w", err)

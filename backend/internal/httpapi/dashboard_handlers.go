@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	pkgjwt "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
 // handleDashboard returns the manager's home feed (S07-01): the urgent /

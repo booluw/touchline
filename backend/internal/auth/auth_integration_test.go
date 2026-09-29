@@ -14,11 +14,11 @@ import (
 
 	"github.com/touchline/backend/internal/auth"
 	"github.com/touchline/backend/internal/testdb"
-	pkgauth "github.com/touchline/backend/pkg/auth"
+	pkgjwt "github.com/touchline/backend/pkg/jwt"
 )
 
-func testCfg() pkgauth.JWTConfig {
-	return pkgauth.JWTConfig{
+func testCfg() pkgjwt.JWTConfig {
+	return pkgjwt.JWTConfig{
 		Secret:     "integration-test-secret",
 		AccessTTL:  time.Hour,
 		RefreshTTL: 30 * 24 * time.Hour,
@@ -72,7 +72,7 @@ func TestLogin_AdminSession(t *testing.T) {
 	if storedHash == res.TokenPair.RefreshToken || storedHash == "" {
 		t.Error("refresh_token_hash must be a hash, not the raw token")
 	}
-	if storedHash != pkgauth.HashRefreshToken(res.TokenPair.RefreshToken) {
+	if storedHash != pkgjwt.HashRefreshToken(res.TokenPair.RefreshToken) {
 		t.Error("stored hash does not match hashed refresh token")
 	}
 }
@@ -504,7 +504,7 @@ func TestLogin_ReplacesPriorSession(t *testing.T) {
 	_, err = pool.Exec(context.Background(),
 		`INSERT INTO auth.sessions (user_id, refresh_token_hash, expires_at)
 		 VALUES ($1, $2, now() + interval '1 day')`,
-		userID, pkgauth.HashRefreshToken("duplicate"))
+		userID, pkgjwt.HashRefreshToken("duplicate"))
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
 		t.Errorf("inserting a second live session: got %v, want unique_violation 23505", err)
