@@ -146,11 +146,6 @@ func (s *Service) reviewManager(ctx context.Context, worldID, managerID uuid.UUI
 		return false, err
 	}
 
-	sentiment := supporterBlend(in.sentiment, score.Performance)
-	if err := s.store.updateSentiment(ctx, tx, clubID, sentiment); err != nil {
-		return false, err
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("commit review: %w", err)
 	}

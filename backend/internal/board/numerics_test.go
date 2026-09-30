@@ -153,18 +153,66 @@ func TestEvaluateOperatingBalance(t *testing.T) {
 	}
 }
 
-func TestSupporterBlend(t *testing.T) {
-	// Clamped to [15,95].
-	if got := supporterBlend(10, 90); got < SupporterSentimentMin {
-		t.Errorf("blend below floor: %d", got)
+func TestMatchRating(t *testing.T) {
+	// Home and a reputation edge both raise the expectation; it is bounded.
+	if !(expectedResult(50, 50, true) > expectedResult(50, 50, false)) {
+		t.Error("home must expect more than away")
 	}
-	if got := supporterBlend(95, 100); got > SupporterSentimentMax {
-		t.Errorf("blend above ceiling: %d", got)
+	if !(expectedResult(80, 40, true) > expectedResult(40, 80, true)) {
+		t.Error("stronger club must expect more")
 	}
-	// EWMA moves toward the performance factor.
-	low, hi := supporterBlend(50, 90), supporterBlend(50, 10)
-	if low <= 50 || hi >= 50 {
-		t.Errorf("EWMA direction wrong: low=%d hi=%d", low, hi)
+	if e := expectedResult(100, 0, true); e != MatchExpectedMax {
+		t.Errorf("expected ceiling = %v", e)
+	}
+	if e := expectedResult(0, 100, false); e != MatchExpectedMin {
+		t.Errorf("expected floor = %v", e)
+	}
+
+	// An upset away win rates above an expected home win; both beat a draw,
+	// which beats a loss; a bigger margin rates higher.
+	upset := matchRating(1, 0, expectedResult(30, 70, false))
+	routine := matchRating(1, 0, expectedResult(70, 30, true))
+	draw := matchRating(1, 1, expectedResult(70, 30, true))
+	loss := matchRating(0, 1, expectedResult(70, 30, true))
+	if !(upset > routine && routine > draw && draw > loss) {
+		t.Errorf("order wrong: upset=%d routine=%d draw=%d loss=%d", upset, routine, draw, loss)
+	}
+	if matchRating(4, 0, 0.5) <= matchRating(1, 0, 0.5) {
+		t.Error("margin must raise the rating")
+	}
+	if matchRating(9, 0, 0.5) != matchRating(3, 0, 0.5) {
+		t.Error("margin bonus must be capped")
+	}
+	if r := matchRating(0, 9, 0.9); r < 0 {
+		t.Errorf("rating below 0: %d", r)
+	}
+	if r := matchRating(9, 0, 0.1); r > 100 {
+		t.Errorf("rating above 100: %d", r)
+	}
+}
+
+func TestSentimentAfterMatch(t *testing.T) {
+	if got := sentimentAfterMatch(SupporterSentimentMin, 0, true); got != SupporterSentimentMin {
+		t.Errorf("below floor: %d", got)
+	}
+	if got := sentimentAfterMatch(SupporterSentimentMax, 100, true); got != SupporterSentimentMax {
+		t.Errorf("above ceiling: %d", got)
+	}
+	up, down := sentimentAfterMatch(50, 90, false), sentimentAfterMatch(50, 10, false)
+	if up <= 50 || down >= 50 {
+		t.Errorf("direction wrong: up=%d down=%d", up, down)
+	}
+	if sentimentAfterMatch(50, 90, true) <= up || sentimentAfterMatch(50, 10, true) >= down {
+		t.Error("rivalry must swing further")
+	}
+}
+
+func TestRunningRating(t *testing.T) {
+	if got := runningRating(nil); got != 50 {
+		t.Errorf("empty = %d, want 50", got)
+	}
+	if got := runningRating([]int{80, 60, 40}); got != 60 {
+		t.Errorf("mean = %d, want 60", got)
 	}
 }
 

@@ -692,6 +692,13 @@ func (s *Service) applySideEffectsTx(ctx context.Context, sess *LiveSession, res
 		}
 	}
 
+	// Board rating + supporter reaction + fan news (IM33).
+	if s.board != nil {
+		if err := s.board.RecordCompletedMatch(ctx, tx, sess.WorldID, sess.FixtureID, ev.ID, sess.HomeClubID, sess.AwayClubID, res.HomeGoals, res.AwayGoals); err != nil {
+			return fmt.Errorf("finalize: board: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("finalize: commit: %w", err)
 	}

@@ -209,8 +209,13 @@ func parsePP(m *Mandate) int {
 	return 0
 }
 
-// perf computes the performance factor (neutral 50 when no league standings).
+// perf computes the performance factor: the running per-match rating when the
+// manager has rated matches at this club (IM33), otherwise league position
+// (neutral 50 when no league standings).
 func (s *Service) perf(in reviewInputs, finish int) int {
+	if len(in.matchRatings) > 0 {
+		return runningRating(in.matchRatings)
+	}
 	if !in.hasLeague {
 		return 50
 	}

@@ -41,6 +41,10 @@ type reviewInputs struct {
 	committedAnnual int64
 
 	mandates []Mandate
+
+	// matchRatings are this manager's most recent per-match board ratings at
+	// this club (IM33), newest first, at most MatchRatingWindow.
+	matchRatings []int
 }
 
 // Store reads board state and writes snapshots/mandates. It references only
@@ -103,7 +107,62 @@ func (s *Store) loadReview(ctx context.Context, q querier, worldID, clubID, mana
 		return in, err
 	}
 	in.mandates = mandates
+
+	rows, err := q.Query(ctx, `
+		SELECT board_rating FROM manager.match_ratings
+		WHERE manager_id = $1 AND club_id = $2
+		ORDER BY created_at DESC LIMIT $3`, managerID, clubID, MatchRatingWindow)
+	if err != nil {
+		return in, fmt.Errorf("load match ratings: %w", err)
+	}
+	if in.matchRatings, err = pgx.CollectRows(rows, pgx.RowTo[int]); err != nil {
+		return in, fmt.Errorf("load match ratings: %w", err)
+	}
 	return in, nil
+}
+
+// matchClub is what the per-match hook needs to know about one side (IM33).
+type matchClub struct {
+	name, country string
+	reputation    int
+	managerID     *uuid.UUID
+	isPolicyBot   bool
+	managerName   string
+	sentiment     int
+}
+
+// loadMatchClub reads one club's match context; sentiment defaults to 50 when
+// the club has no supporter group yet.
+func (s *Store) loadMatchClub(ctx context.Context, q querier, clubID uuid.UUID) (matchClub, error) {
+	var c matchClub
+	err := q.QueryRow(ctx, `
+		SELECT c.name, c.country, c.reputation, c.current_manager_id, COALESCE(m.is_policy_bot, TRUE),
+		       COALESCE(p.first_name || COALESCE(' ' || p.last_name, ''), ''),
+		       COALESCE(sg.current_sentiment, 50)
+		FROM club.clubs c
+		LEFT JOIN manager.managers m ON m.id = c.current_manager_id
+		LEFT JOIN person.people p ON p.id = m.person_id
+		LEFT JOIN club.supporter_groups sg ON sg.club_id = c.id
+		WHERE c.id = $1`, clubID).
+		Scan(&c.name, &c.country, &c.reputation, &c.managerID, &c.isPolicyBot, &c.managerName, &c.sentiment)
+	if err != nil {
+		return c, fmt.Errorf("load match club: %w", err)
+	}
+	return c, nil
+}
+
+// rivalryStrength is the club-to-club rivalry edge strength (0 when none).
+func (s *Store) rivalryStrength(ctx context.Context, q querier, a, b uuid.UUID) (int, error) {
+	var strength int
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE(MAX(strength), 0)::int FROM social.relationships
+		WHERE relationship_type = 'rivalry' AND entity_a_type = 'club' AND entity_b_type = 'club'
+		  AND ((entity_a_id = $1 AND entity_b_id = $2) OR (entity_a_id = $2 AND entity_b_id = $1))`,
+		a, b).Scan(&strength)
+	if err != nil {
+		return 0, fmt.Errorf("rivalry strength: %w", err)
+	}
+	return strength, nil
 }
 
 // loadLeague populates the standings slice of the inputs; a club with no
@@ -253,7 +312,7 @@ func (s *Store) setMandateTarget(ctx context.Context, q querier, id uuid.UUID, t
 	return nil
 }
 
-// updateSentiment persists the blended supporter sentiment.
+// updateSentiment persists the supporter sentiment.
 func (s *Store) updateSentiment(ctx context.Context, q querier, clubID uuid.UUID, sentiment int) error {
 	if _, err := q.Exec(ctx, `
 		INSERT INTO club.supporter_groups (club_id, patience, ambition, loyalty, identity,

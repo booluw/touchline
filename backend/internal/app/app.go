@@ -161,6 +161,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 	socialSvc.WithRealtime(broker)
 	matches.WithSocial(socialSvc)
 	boardSvc := internalboard.NewService(pool, bus, managerSvc)
+	matches.WithBoard(boardSvc)
 	policySvc := policybot.NewService(pool, bus, squadStore, tacticsSvc, trainingSvc, transfersSvc)
 	matches.WithPolicyBot(policySvc)
 	dashSvc := internaldashboard.NewService(pool, bus)

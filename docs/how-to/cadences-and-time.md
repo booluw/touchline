@@ -181,6 +181,15 @@ and evaluation cadence becomes a live `calendar.days_per_month` knob. The scores
 themselves are unchanged (graded by season progress; see
 [board-numerics.md](../design/board-numerics.md)).
 
+**What happens after every match, and what waits for the month?** (IM33) When a
+match finishes, the board rates each manager for that result against
+expectation, supporter sentiment moves (further in a rivalry game), and a
+human-managed club gets a fan-reaction news story. **Board confidence does not
+move per match**: the monthly review recalculates it, using the average of the
+last 8 match ratings as its Performance factor and reading — no longer moving —
+supporter sentiment. Formulas are in
+[board-numerics.md §4a](../design/board-numerics.md).
+
 **Do the daily passes need a playable world?** Yes; the scheduler only registers
 a cadence for playable worlds, and the worker dispatch filters on the same. This
 is why the launch guide's Step 8 launches the world *before* the ticks matter.

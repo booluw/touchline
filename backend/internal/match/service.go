@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	internalboard "github.com/touchline/backend/internal/board"
 	"github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/injury"
 	"github.com/touchline/backend/internal/player"
@@ -69,6 +70,7 @@ type Service struct {
 	standings StandingsContext
 	players   *player.Service
 	social    *internalsocial.Service
+	board     *internalboard.Service
 	absence   AbsenceDelegator
 }
 
@@ -93,6 +95,14 @@ func (s *Service) WithPlayers(p *player.Service) *Service {
 // nil in tests disables it.
 func (s *Service) WithSocial(soc *internalsocial.Service) *Service {
 	s.social = soc
+	return s
+}
+
+// WithBoard installs the IM33 per-match board rating, supporter reaction and
+// fan-reaction news hook, which runs inside the match-completion transaction
+// after the social hook. nil in tests disables it.
+func (s *Service) WithBoard(b *internalboard.Service) *Service {
+	s.board = b
 	return s
 }
 
@@ -212,6 +222,14 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 	if s.social != nil {
 		if socialPush, err = s.social.RecordCompletedMatch(ctx, tx, f.WorldID, fixtureID, f.HomeClub.ID, f.AwayClub.ID, res.HomeGoals, res.AwayGoals, now); err != nil {
 			return nil, fmt.Errorf("play fixture: %w", err)
+		}
+	}
+
+	// Board rating + supporter reaction + fan news (IM33). MATCH_PLAYED is the
+	// last world event.
+	if s.board != nil {
+		if err := s.board.RecordCompletedMatch(ctx, tx, f.WorldID, fixtureID, evs[len(evs)-1].ID, f.HomeClub.ID, f.AwayClub.ID, res.HomeGoals, res.AwayGoals); err != nil {
+			return nil, fmt.Errorf("play fixture: board: %w", err)
 		}
 	}
 

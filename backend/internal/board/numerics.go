@@ -27,13 +27,31 @@ const (
 	FinancialProfitSignal   = 10
 	FinancialNoDataScore    = 60
 
-	// SupporterSentimentAlpha is the EWMA blend of results into supporter
-	// sentiment. Reviews are monthly (IM02), plus a lazy per-tick refresh when a
-	// manager opens the board view; the (manager_id, world_tick) snapshot guard
-	// makes each tick blend at most once.
-	SupporterSentimentAlpha = 0.20
-	SupporterSentimentMin   = 15
-	SupporterSentimentMax   = 95
+	// Supporter sentiment moves after every match (IM33), toward that match's
+	// rating by MatchSentimentAlpha (doubled against a rival). The monthly review
+	// only reads it.
+	SupporterSentimentMin      = 15
+	SupporterSentimentMax      = 95
+	MatchSentimentAlpha        = 0.08
+	MatchSentimentRivalryBoost = 2.0
+	// RivalryStrengthThreshold is the club-to-club rivalry edge strength from
+	// which a fixture counts as a rivalry game. Every meeting grows the edge
+	// (first meeting at most 40), so a plain "edge exists" test would be true for
+	// every opponent.
+	RivalryStrengthThreshold = 50
+
+	// Per-match board rating (IM33): expected points share from the reputation
+	// gap and venue, then 50 + (actual - expected) * swing + goal-margin bonus.
+	MatchExpectedPerRepPoint = 0.004
+	MatchHomeAdvantage       = 0.08
+	MatchExpectedMin         = 0.10
+	MatchExpectedMax         = 0.90
+	MatchRatingSwing         = 60.0
+	MatchMarginPoints        = 5
+	MatchMarginCap           = 3
+	// MatchRatingWindow is how many recent matches the monthly review averages
+	// into its Performance factor.
+	MatchRatingWindow = 8
 
 	// RelationshipPatienceShare lets club DNA patience soften/pressure the
 	// board relationship score.
@@ -337,10 +355,52 @@ func evaluateOperatingBalance(opProfit, wageBudget int64) (met, broken bool) {
 	return false, false
 }
 
-// supporterBlend is the EWMA sentiment update from the computed performance.
-func supporterBlend(current int, performance int) int {
-	next := int(math.Round(float64(current) + SupporterSentimentAlpha*(float64(performance)-float64(current))))
+// expectedResult is the points share (0..1) a club is expected to take from a
+// match, from the club reputation gap plus a home/away shift.
+func expectedResult(ownRep, oppRep int, home bool) float64 {
+	e := 0.5 + MatchExpectedPerRepPoint*float64(ownRep-oppRep)
+	if home {
+		e += MatchHomeAdvantage
+	} else {
+		e -= MatchHomeAdvantage
+	}
+	return math.Max(MatchExpectedMin, math.Min(MatchExpectedMax, e))
+}
+
+// matchRating is the board's 0-100 rating of one result against expectation.
+func matchRating(goalsFor, goalsAgainst int, expected float64) int {
+	actual := 0.5
+	switch {
+	case goalsFor > goalsAgainst:
+		actual = 1
+	case goalsFor < goalsAgainst:
+		actual = 0
+	}
+	margin := clamp(goalsFor-goalsAgainst, -MatchMarginCap, MatchMarginCap)
+	return clamp(int(math.Round(50+(actual-expected)*MatchRatingSwing))+margin*MatchMarginPoints, 0, 100)
+}
+
+// sentimentAfterMatch moves supporter sentiment toward the match rating;
+// rivalry games swing further.
+func sentimentAfterMatch(current, rating int, rivalry bool) int {
+	alpha := MatchSentimentAlpha
+	if rivalry {
+		alpha *= MatchSentimentRivalryBoost
+	}
+	next := int(math.Round(float64(current) + alpha*float64(rating-current)))
 	return clamp(next, SupporterSentimentMin, SupporterSentimentMax)
+}
+
+// runningRating is the mean of the recent match ratings (neutral 50 when none).
+func runningRating(ratings []int) int {
+	if len(ratings) == 0 {
+		return 50
+	}
+	sum := 0
+	for _, r := range ratings {
+		sum += r
+	}
+	return int(math.Round(float64(sum) / float64(len(ratings))))
 }
 
 // negotiationDelta reports the signed proposal movement for a numeric target:

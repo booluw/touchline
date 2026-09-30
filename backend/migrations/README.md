@@ -131,6 +131,7 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0054 | `competition` | Cup final-date policy (IM10): `competitions` gains `final_date_mode` (`calculated`/`fixed`, default `calculated`), `final_date` (absolute pin), `final_offset_days` (default 3) |
 | 0055 | `auth` | One live session per account + server-side logout (IM13): collapse duplicate live `auth.sessions` rows (newest wins) and enforce the invariant with `uq_sessions_one_live_per_user` (partial unique on `user_id` where `revoked_at IS NULL`) |
 | 0056 | `world` | In-game calendar date helpers (IM25): `world.world_date(world_id)` = `COALESCE(launched_at, created_at)` + `current_day` days (OPD-24) and `world.club_world_date(club_id)`, used instead of `CURRENT_DATE` for contract, wage-commitment, age and manager-history dates |
+| 0057 | `manager` / `world` | Per-match ratings (IM33): `manager.match_ratings` (one row per fixture and club: board rating 0-100, supporter sentiment before/after), read by the monthly board review as its Performance factor; adds the `fan_reaction` news category |
 
 ### River migrations (0016–0022)
 

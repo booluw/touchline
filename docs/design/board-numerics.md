@@ -112,18 +112,51 @@ Each lens is a 0–100 score:
 
 | Factor | Formula | Notes |
 | --- | --- | --- |
-| `performance_score` | `clamp(50 + 8·(expectedFinish − position), 0, 100)` | neutral 50 with no league standings |
+| `performance_score` | mean of the manager's last 8 per-match ratings at this club (§4a); with none on record, `clamp(50 + 8·(expectedFinish − position), 0, 100)` | neutral 50 with no ratings and no league standings |
 | `expectations_score` | `clamp(50 + 10·met − 15·broken, 0, 100)` | resolved mandates this/previous reviews this season (month boundaries) |
 | `financial_score` | `50 + round(40·(1 − wageRatio)) ± 10` profit signal | wageRatio = committedAnnual/budget capped at 1; `+10` operating profit / `−10` loss; `60` (or `50` with committed wages) when no budget |
 | `board_relationship_score` | `clamp(50 + (patience − 50)/5 + 25·(met − broken)/resolved, 0, 100)` | patience softens; kept-mandate ratio pressures |
 | `club_dna_alignment_score` | `clamp(50 + 15·met_strategic + 15·met_financial − 25·broken_strategic − 25·broken_financial, 0, 100)` | deeper DNA adherence deferred to S10-03 |
-| `supporter_sentiment_score` | stored `club.supporter_groups.current_sentiment` | EWMA-updated on every review that runs: `sentiment += 0.20·(performance − sentiment)`, clamped [15, 95] |
+| `supporter_sentiment_score` | stored `club.supporter_groups.current_sentiment` | read-only in the review; it moves after every match (§4a), clamped [15, 95] |
 | `alternatives_score` | `clamp(50 + 5·worldReputation, 10, 90)` | manager career-log reputation; replacement-pressure proxy |
 
 **Weighted total** = Σ `round(wᵢ × factorScoreᵢ)` with the persona's seven
 weights (§2), clamped to [0, 100]. Because each explanation factor delta is the
 same rounded contribution, the factor deltas **sum exactly to the total**
 (a tested guarantee).
+
+## 4a. Per-match rating and supporter reaction (IM33)
+
+Every completed match (quick-play and live) rates both managers inside the
+match-completion transaction (`board.RecordCompletedMatch`). Clubs without a
+manager are skipped; bot-managed clubs are rated like human ones. **Board
+confidence is not recalculated here** — it stays on the monthly review, which
+reads the stored ratings.
+
+| Step | Formula |
+|---|---|
+| expected points share | `clamp(0.5 + 0.004·(ownReputation − opponentReputation) ± 0.08 (home +, away −), 0.10, 0.90)` |
+| actual | win 1, draw 0.5, loss 0 |
+| match rating | `clamp(round(50 + 60·(actual − expected)) + 5·clamp(goalDifference, −3, 3), 0, 100)` |
+| supporter sentiment | `sentiment += α·(rating − sentiment)`, `α = 0.08`, doubled (0.16) in a rivalry game, clamped [15, 95] |
+
+A **rivalry game** is one where the two clubs' `rivalry` edge in
+`social.relationships` has strength ≥ 50. Every meeting grows that edge (a first
+meeting reaches at most 40), so the threshold — not the edge's existence — is
+what marks a real rivalry.
+
+Each rating is one row in `manager.match_ratings` keyed `(fixture_id, club_id)`
+(rating, sentiment before/after); the key makes a replayed completion a no-op.
+
+**Fan-reaction news.** For a **human-managed** club the same hook publishes one
+`fan_reaction` story linked to the fixture's `MATCH_PLAYED` event: a headline
+for the result and two or three named fans quoted on the manager. Quotes are
+templates picked by a seed derived from the fixture and club (no LLM, same
+fixture = same story). The mood band is `(sentiment + rating) / 2`: below 30
+angry, below 50 worried, below 70 content, otherwise delighted; about one voice
+in four sits a band away from the crowd. The story is filed under the club's
+country when `club.clubs.country` matches a `world.countries` code or name,
+otherwise it is world-wide.
 
 ## 5. Mandate negotiation (manager-proposed targets)
 
@@ -180,13 +213,11 @@ manager_id, season, category) WHERE status IN ('pending','agreed')`, so a
 - **dna_alignment** resolves only strategic/financial promise-keeping; richer
   DNA adherence curves (style-of-play, player-profile preference) land with
   S10-03.
-- **Supporters** are a single bloc; the EWMA is the only sentiment driver
-  (match results do not feed it directly yet — performance proxies them; live
-  social sentiment lands with S06-04). The seeded `loyality`,
-  `financial_sensitivity` and `rivalry_intensity_base` columns are not read by
-  any scoring path yet. The one non-EWMA mover is the academy shutdown, which
-  applies an immediate `ShutdownSentimentPenalty` (15) and floors at the same
-  15 minimum.
+- **Supporters** are a single bloc; match results are the sentiment driver
+  (§4a, IM33). The seeded `loyality`, `financial_sensitivity` and
+  `rivalry_intensity_base` columns are not read by any scoring path yet. The
+  one other mover is the academy shutdown, which applies an immediate
+  `ShutdownSentimentPenalty` (15) and floors at the same 15 minimum.
 - **Alternatives** uses world reputation only; candidate pool modelling (past
   success, wage expectations) lands with the S07 hiring flow (OPD-09).
 - A review runs at most once per `(manager_id, world_tick)`, triggered either by

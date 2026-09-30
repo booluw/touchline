@@ -422,3 +422,51 @@ func forceLowConfidence(t *testing.T, pool *pgxpool.Pool, w transfertest.World) 
 		}
 	}
 }
+
+// TestReviewReadsMatchRatings proves the IM33 split: with per-match ratings on
+// record the monthly review uses their running mean as the Performance factor
+// and no longer moves supporter sentiment.
+func TestReviewReadsMatchRatings(t *testing.T) {
+	pool := newTestPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	w := transfertest.Provision(t, pool, "Board Ratings", "ratings@example.com")
+	svc := newTestService(t, pool)
+
+	for _, rating := range []int{80, 60} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO manager.match_ratings
+			    (fixture_id, club_id, manager_id, world_id, board_rating, sentiment_before, sentiment_after)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, 50, 50)`, w.HumanClub, w.HumanMgr, w.WorldID, rating); err != nil {
+			t.Fatalf("insert rating: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO club.supporter_groups (club_id, patience, ambition, loyalty, identity,
+		                                   rivalry_intensity_base, financial_sensitivity, current_sentiment)
+		VALUES ($1, 60, 60, 70, 'local', 0, 50, 37)
+		ON CONFLICT (club_id) DO UPDATE SET current_sentiment = 37`, w.HumanClub); err != nil {
+		t.Fatalf("set sentiment: %v", err)
+	}
+
+	if _, _, err := svc.Review(ctx, w.WorldID, 11); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+
+	var performance, sentiment int
+	if err := pool.QueryRow(ctx, `
+		SELECT performance_score FROM manager.job_security_snapshots
+		WHERE manager_id = $1 ORDER BY world_tick DESC LIMIT 1`, w.HumanMgr).Scan(&performance); err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if performance != 70 {
+		t.Errorf("performance = %d, want 70 (mean of the match ratings)", performance)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT current_sentiment FROM club.supporter_groups WHERE club_id = $1`, w.HumanClub).Scan(&sentiment); err != nil {
+		t.Fatalf("load sentiment: %v", err)
+	}
+	if sentiment != 37 {
+		t.Errorf("sentiment = %d, want 37 (the review must not move it)", sentiment)
+	}
+}
