@@ -28,6 +28,7 @@ import (
 	internalsocial "github.com/touchline/backend/internal/social"
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/matchsim"
+	"github.com/touchline/backend/pkg/pitchsim"
 )
 
 // Sentinel errors for manager live-input ingestion (S05-01 surfaces them).
@@ -89,6 +90,9 @@ type simInputs struct {
 	FormAway       form.FormState       `json:"form_away"`
 	WorldTick      int64                `json:"world_tick"`
 	FixtureContext squad.FixtureContext `json:"fixture_context"`
+	// Visual freezes the world's match.visual_engine switch at kickoff (IM34):
+	// the match runs the positional engine for its whole life, or not at all.
+	Visual bool `json:"visual,omitempty"`
 }
 
 // LiveSession is one in-progress live match bound to a pacing goroutine.
@@ -120,7 +124,14 @@ type LiveSession struct {
 	worldTick    int64
 	pacing       time.Duration
 	nextMinute   int
+	visual       bool              // positional engine on for this match (IM34)
+	track        []pitchsim.Minute // movement of the minute(s) PaceMinute last produced
 }
+
+// Track returns the movement PaceMinute produced on its last call: one minute
+// normally, the whole extra-time block on a golden-goal flush, nil when the
+// match runs without the positional engine.
+func (s *LiveSession) Track() []pitchsim.Minute { return s.track }
 
 // NextMinute reports the next simulated minute (1..90; >90 = full time).
 func (s *LiveSession) NextMinute() int { return s.nextMinute }
@@ -278,7 +289,9 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 	}
 
 	pacing := s.resolveMatchPacing(ctx, f.WorldID)
+	visual := pacing >= minVisualPacing && s.resolveVisual(ctx, f.WorldID)
 	raw, err := json.Marshal(simInputs{
+		Visual:         visual,
 		HomeTeam:       homePlan.team,
 		AwayTeam:       awayPlan.team,
 		HomeXI:         homePlan.xi,
@@ -355,6 +368,7 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 		worldTick:    tick,
 		pacing:       pacing,
 		nextMinute:   1,
+		visual:       visual,
 	}, nil
 }
 
@@ -446,15 +460,41 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 	}
 	var lastSeq int
 	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(sequence), 0) FROM match.match_events WHERE match_id = $1`, sess.MatchID).
+		`SELECT COALESCE(MAX(sequence), 0) FROM match.match_events WHERE match_id = $1 AND source = 'matchsim'`, sess.MatchID).
 		Scan(&lastSeq); err != nil {
 		return nil, false, fmt.Errorf("pace minute: last sequence: %w", err)
 	}
 
-	rows, err := persistEvents(ctx, tx, sess.MatchID, minuteEvents, lastSeq)
+	// The positional engine stages this step's minutes (IM34): it fixes where in
+	// the minute each event falls and adds its own extra events. It is generated
+	// from minute 1 each time, like Simulate, so nothing positional is stored.
+	var (
+		track   []pitchsim.Minute
+		offsets map[int]int
+		extras  []pitchsim.Extra
+	)
+	if sess.visual {
+		last := m
+		for _, e := range minuteEvents {
+			if e.Minute > last {
+				last = e.Minute
+			}
+		}
+		evs, _ := simEvents(res.Events, last)
+		track, offsets, extras = trackSlice(
+			pitchsim.Generate(pitchInput(sess.Seed, home, away, sess.homeXI, sess.awayXI, evs, last)), from, last)
+	}
+
+	rows, err := persistEvents(ctx, tx, sess.MatchID, minuteEvents, lastSeq, offsets)
 	if err != nil {
 		return nil, false, fmt.Errorf("pace minute: %w", err)
 	}
+	extraRows, err := persistExtras(ctx, tx, sess.MatchID, extras)
+	if err != nil {
+		return nil, false, fmt.Errorf("pace minute: %w", err)
+	}
+	rows = append(rows, extraRows...)
+	sortFeed(rows)
 	if _, err := tx.Exec(ctx,
 		`UPDATE match.matches SET current_minute = $2 WHERE id = $1`, sess.MatchID, m); err != nil {
 		return nil, false, fmt.Errorf("pace minute: advance clock: %w", err)
@@ -465,6 +505,7 @@ func (s *Service) PaceMinute(ctx context.Context, sess *LiveSession) ([]*MatchEv
 	}
 
 	sess.nextMinute = m + 1
+	sess.track = track
 	resolveEventRefs(ctx, s.pool, rows)
 
 	return rows, liveFinished(sess, m), nil
@@ -805,6 +846,7 @@ func (s *Service) LoadLiveSessions(ctx context.Context, worldID uuid.UUID) ([]*L
 			worldTick:    snap.WorldTick,
 			pacing:       pacing,
 			nextMinute:   currentMinute + 1,
+			visual:       snap.Visual,
 		})
 	}
 	if err := rows.Err(); err != nil {

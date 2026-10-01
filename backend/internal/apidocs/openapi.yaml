@@ -4338,7 +4338,7 @@ paths:
       tags: [match]
       summary: Fixture + match header
       operationId: getFixture
-      description: The fixture header plus live match view once the match has kicked off (world-scoped to the caller).
+      description: The fixture header plus live match view once the match has kicked off. Any signed-in user may read any fixture (IM34).
       parameters:
         - $ref: "#/components/parameters/FixtureID"
       responses:
@@ -4369,7 +4369,7 @@ paths:
       tags: [match]
       summary: Persisted match event feed
       operationId: getMatchEvents
-      description: The full ordered match_events feed (the same list the live socket streams), world-scoped.
+      description: The full match_events feed (the same list the live socket streams), ordered by minute, position in the minute, then sequence. Any signed-in user may read any match (IM34). With the positional engine on it also holds that engine's extra events (source `pitchsim`).
       parameters:
         - $ref: "#/components/parameters/MatchID"
       responses:
@@ -4396,7 +4396,46 @@ paths:
                           home_score: 0
                           away_score: 0
         "404":
-          description: Match not found in the caller's world.
+          description: Match not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/matches/{id}/track:
+    get:
+      tags: [match]
+      summary: 2D simulation track
+      operationId: getMatchTrack
+      description: >-
+        Ball and player keyframes for a range of match minutes (IM34),
+        regenerated from the match seed, kickoff snapshot and event feed; nothing
+        positional is stored. Coordinates are integers 0..1000 (x goal line to
+        goal line, y touchline to touchline); a slot with nobody on the pitch is
+        [-1, -1]. Teams change ends after minute 45. `cues` place every feed
+        event (by sequence) inside its minute. Available only for matches that
+        kicked off with the world setting `match.visual_engine` = `2d`.
+      parameters:
+        - $ref: "#/components/parameters/MatchID"
+        - name: from
+          in: query
+          description: First minute to return (default 1).
+          schema: { type: integer, minimum: 1 }
+        - name: to
+          in: query
+          description: Last minute to return (default the last minute played so far).
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Track for the requested minutes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MatchTrack" }
+        "400":
+          description: Invalid match id or minute range.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Match not found, or it was played without the simulation.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -5984,6 +6023,49 @@ components:
             minute: { type: integer }
             home_score: { type: integer }
             away_score: { type: integer }
+            visual: { type: boolean, description: "The match has a 2D simulation track (IM34)." }
+            pacing_millis: { type: integer, description: "Real milliseconds one match minute takes live; 0 for a quick-played match." }
+    MatchTrack:
+      type: object
+      properties:
+        version: { type: integer }
+        status: { type: string }
+        pacing_millis: { type: integer }
+        last_minute: { type: integer, description: "Last minute that exists so far." }
+        players:
+          type: object
+          additionalProperties: { type: string }
+          description: Player id to display name for every lineup in the range.
+        minutes:
+          type: array
+          items: { $ref: "#/components/schemas/MatchTrackMinute" }
+    MatchTrackMinute:
+      type: object
+      properties:
+        minute: { type: integer }
+        lineup:
+          type: array
+          description: Player id per slot at the start of the minute (home 0-10, away 11-21); empty when nobody holds the slot.
+          items: { type: string }
+        frames:
+          type: array
+          items:
+            type: object
+            properties:
+              t: { type: integer, description: "Milliseconds into the minute (match time)." }
+              b: { type: array, items: { type: integer }, description: "Ball x, y, height." }
+              p: { type: array, items: { type: array, items: { type: integer } }, description: "x, y per slot." }
+        cues:
+          type: array
+          items:
+            type: object
+            properties:
+              seq: { type: integer, description: "Feed event sequence." }
+              t: { type: integer, description: "Milliseconds into the minute." }
+        passes:
+          type: array
+          items: { type: integer }
+          description: Completed passes in the minute, home then away.
     MatchEvent:
       type: object
       properties:
@@ -5995,6 +6077,13 @@ components:
         club: { $ref: "#/components/schemas/NestedClub" }
         player: { $ref: "#/components/schemas/NestedPlayer" }
         related_player: { $ref: "#/components/schemas/NestedPlayer" }
+        source:
+          type: string
+          enum: [matchsim, pitchsim]
+          description: matchsim rows are the result; pitchsim rows are the positional engine's extra events (shot, save, tackle, foul, corner, offside) and never change a score (IM34).
+        offset_millis:
+          type: integer
+          description: Position of the event inside its minute in match milliseconds; absent when the match was played without the positional engine.
         detail:
           type: object
           additionalProperties: true

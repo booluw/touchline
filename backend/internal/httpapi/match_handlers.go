@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -13,17 +14,11 @@ import (
 
 // handleGetFixture serves the match-screen header for one fixture (S04-03):
 // fixture + club names plus the match view (status, live clock, server-computed
-// scoreline). The caller's world scopes the lookup; a fixture outside that
-// world is indistinguishable from a missing one.
+// scoreline). Any signed-in user may read any fixture (see mayViewMatch).
 func (s *server) handleGetFixture(c *gin.Context) {
 	fixtureID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid fixture id"})
-		return
-	}
-	worldID, err := s.callerWorld(c)
-	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
 		return
 	}
 
@@ -36,7 +31,7 @@ func (s *server) handleGetFixture(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	if view.Fixture.WorldID != worldID {
+	if !s.mayViewMatch(c, view.Fixture.WorldID) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "fixture not found"})
 		return
 	}
@@ -44,17 +39,13 @@ func (s *server) handleGetFixture(c *gin.Context) {
 }
 
 // handleGetMatchEvents serves the full ordered match event feed (S04-03), the
-// same persisted match_events list the live socket streams. The caller's world
-// must own the match.
+// same persisted match_events list the live socket streams, in feed order
+// (minute, position in the minute, sequence). With the positional engine on
+// (IM34) it also holds that engine's extra events (source "pitchsim").
 func (s *server) handleGetMatchEvents(c *gin.Context) {
 	matchID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid match id"})
-		return
-	}
-	worldID, err := s.callerWorld(c)
-	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
 		return
 	}
 
@@ -68,7 +59,7 @@ func (s *server) handleGetMatchEvents(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	if m.WorldID != worldID {
+	if !s.mayViewMatch(c, m.WorldID) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
 		return
 	}
@@ -83,4 +74,55 @@ func (s *server) handleGetMatchEvents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"events": events})
+}
+
+// mayViewMatch is the one place that decides who may watch a match (fixture
+// header, event feed, simulation track). IM34 decision: any signed-in user may
+// watch any match, in any world. The planned shareable link becomes a second
+// way to pass this check (a per-match token on a public route).
+func (s *server) mayViewMatch(_ *gin.Context, _ uuid.UUID) bool { return true }
+
+// handleGetMatchTrack serves the 2D simulation track for a match (IM34): the
+// ball and player keyframes for minutes ?from..?to (both optional), regenerated
+// from the match seed, kickoff snapshot and event feed. 404 when the match was
+// played without the positional engine.
+func (s *server) handleGetMatchTrack(c *gin.Context) {
+	matchID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid match id"})
+		return
+	}
+	from, to := 1, 0
+	if v := c.Query("from"); v != "" {
+		if from, err = strconv.Atoi(v); err != nil || from < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "from must be a minute of 1 or more"})
+			return
+		}
+	}
+	if v := c.Query("to"); v != "" {
+		if to, err = strconv.Atoi(v); err != nil || to < from {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "to must be a minute not before from"})
+			return
+		}
+	}
+
+	ctx := c.Request.Context()
+	m, err := s.matchSvc.GetMatch(ctx, matchID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !s.mayViewMatch(c, m.WorldID)) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
+		return
+	}
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	view, err := s.matchSvc.GetTrack(ctx, matchID, from, to)
+	switch {
+	case errors.Is(err, internalmatch.ErrNoTrack):
+		c.JSON(http.StatusNotFound, gin.H{"error": "this match has no simulation"})
+	case err != nil:
+		internalError(c, err)
+	default:
+		c.JSON(http.StatusOK, view)
+	}
 }

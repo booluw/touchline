@@ -60,20 +60,24 @@ func loadExisting(ctx context.Context, tx pgx.Tx, fixtureID uuid.UUID) (*MatchRe
 	return &MatchResult{Match: m, Events: evs}, nil
 }
 
-func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, seed int64, res matchsim.MatchResult) (uuid.UUID, time.Time, error) {
+// snapshot is the sim_inputs JSON to keep with a quick-played match, or nil.
+func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, seed int64, res matchsim.MatchResult, snapshot []byte) (uuid.UUID, time.Time, error) {
 	var id uuid.UUID
 	var now time.Time
 	err := tx.QueryRow(ctx, `
 		INSERT INTO match.matches
-			(fixture_id, world_id, seed, engine_version, home_score, away_score, status, started_at, ended_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, $7)
+			(fixture_id, world_id, seed, engine_version, home_score, away_score, status, started_at, ended_at, sim_inputs)
+		VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, $7, $8)
 		RETURNING id, ended_at`,
-		fixtureID, worldID, seed, matchsim.EngineVersion, res.HomeGoals, res.AwayGoals, time.Now().UTC()).
+		fixtureID, worldID, seed, matchsim.EngineVersion, res.HomeGoals, res.AwayGoals, time.Now().UTC(), snapshot).
 		Scan(&id, &now)
 	return id, now, err
 }
 
-func persistEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, startSeq int) ([]*MatchEventRow, error) {
+// persistEvents stores matchsim's events past startSeq. offsets (sequence →
+// milliseconds into the minute) comes from the positional engine and is nil
+// when the match runs without it.
+func persistEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matchsim.MatchEvent, startSeq int, offsets map[int]int) ([]*MatchEventRow, error) {
 	out := make([]*MatchEventRow, 0, len(evs))
 	for _, ev := range evs {
 		playerID, relatedID := eventPlayers(ev)
@@ -91,11 +95,15 @@ func persistEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matc
 			return nil, err
 		}
 		rowID := uuid.New()
+		var offset *int
+		if t, ok := offsets[ev.Sequence]; ok {
+			offset = &t
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO match.match_events
-				(id, match_id, sequence, minute, event_type, club_id, player_id, related_player_id, detail)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-			rowID, matchID, ev.Sequence, ev.Minute, ev.Type, clubID, playerID, relatedID, detail); err != nil {
+				(id, match_id, sequence, minute, event_type, club_id, player_id, related_player_id, detail, offset_millis)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			rowID, matchID, ev.Sequence, ev.Minute, ev.Type, clubID, playerID, relatedID, detail, offset); err != nil {
 			return nil, fmt.Errorf("insert match event: %w", err)
 		}
 		out = append(out, &MatchEventRow{
@@ -108,6 +116,8 @@ func persistEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID, evs []matc
 			Player:        playerRef(playerID),
 			RelatedPlayer: playerRef(relatedID),
 			Detail:        append(json.RawMessage(nil), detail...),
+			Source:        sourceMatchsim,
+			Offset:        offset,
 		})
 	}
 	return out, nil

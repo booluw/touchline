@@ -2,6 +2,7 @@ package match
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/pkg/eventbus"
 	"github.com/touchline/backend/pkg/matchsim"
+	"github.com/touchline/backend/pkg/pitchsim"
 )
 
 // Fixture statuses (match.fixtures.status).
@@ -184,12 +186,39 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 		GoldenGoal: fc.GoldenGoal,
 	})
 
-	matchID, now, err := persistMatch(ctx, tx, fixtureID, f.WorldID, seed, res)
+	// With the world's positional engine on (IM34) a quick-played match keeps
+	// its kickoff snapshot and the engine's extra events, so it can be replayed
+	// in 2D exactly like a live one.
+	var (
+		snapshot []byte
+		offsets  map[int]int
+		extras   []pitchsim.Extra
+	)
+	if s.resolveVisual(ctx, f.WorldID) {
+		if snapshot, err = json.Marshal(simInputs{
+			HomeTeam: homePlan.team, AwayTeam: awayPlan.team,
+			HomeXI: homePlan.xi, AwayXI: awayPlan.xi,
+			HomeBench: homePlan.bench, AwayBench: awayPlan.bench,
+			HomeTaker: homePlan.taker, AwayTaker: awayPlan.taker,
+			FormHome: homePlan.formState, FormAway: awayPlan.formState,
+			WorldTick: tick, FixtureContext: fc, Visual: true,
+		}); err != nil {
+			return nil, fmt.Errorf("play fixture: marshal snapshot: %w", err)
+		}
+		evs, last := simEvents(res.Events, matchsim.GoldenGoalMaxMinute)
+		_, offsets, extras = trackSlice(
+			pitchsim.Generate(pitchInput(seed, homePlan.team, awayPlan.team, homePlan.xi, awayPlan.xi, evs, last)), 1, last)
+	}
+
+	matchID, now, err := persistMatch(ctx, tx, fixtureID, f.WorldID, seed, res, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}
 
-	if _, err := persistEvents(ctx, tx, matchID, res.Events, 0); err != nil {
+	if _, err := persistEvents(ctx, tx, matchID, res.Events, 0, offsets); err != nil {
+		return nil, fmt.Errorf("play fixture: %w", err)
+	}
+	if _, err := persistExtras(ctx, tx, matchID, extras); err != nil {
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}
 

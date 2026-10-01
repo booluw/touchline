@@ -174,7 +174,7 @@ func TestMatchRating(t *testing.T) {
 	routine := matchRating(1, 0, expectedResult(70, 30, true))
 	draw := matchRating(1, 1, expectedResult(70, 30, true))
 	loss := matchRating(0, 1, expectedResult(70, 30, true))
-	if !(upset > routine && routine > draw && draw > loss) {
+	if upset <= routine || routine <= draw || draw <= loss {
 		t.Errorf("order wrong: upset=%d routine=%d draw=%d loss=%d", upset, routine, draw, loss)
 	}
 	if matchRating(4, 0, 0.5) <= matchRating(1, 0, 0.5) {

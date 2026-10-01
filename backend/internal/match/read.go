@@ -63,9 +63,10 @@ func (s *Service) GetFixtureMatch(ctx context.Context, fixtureID uuid.UUID) (*Fi
 	defer conn.Release()
 	mv := &MatchView{}
 	err = conn.QueryRow(ctx, `
-		SELECT id, status, COALESCE(current_minute, 0), COALESCE(home_score, 0), COALESCE(away_score, 0)
+		SELECT id, status, COALESCE(current_minute, 0), COALESCE(home_score, 0), COALESCE(away_score, 0),
+		       COALESCE((sim_inputs->>'visual')::boolean, FALSE), COALESCE(pacing_millis, 0)
 		FROM match.matches WHERE fixture_id = $1`, fixtureID).
-		Scan(&mv.ID, &mv.Status, &mv.Minute, &mv.HomeScore, &mv.AwayScore)
+		Scan(&mv.ID, &mv.Status, &mv.Minute, &mv.HomeScore, &mv.AwayScore, &mv.Visual, &mv.PacingMillis)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return out, nil // not kicked off yet
@@ -89,27 +90,12 @@ func (s *Service) GetMatchEvents(ctx context.Context, matchID uuid.UUID) ([]*Mat
 		return nil, err
 	}
 	defer conn.Release()
-	rows, err := conn.Query(ctx, `
-		SELECT id, match_id, sequence, minute, event_type, club_id, player_id, related_player_id, detail
-		FROM match.match_events WHERE match_id = $1 ORDER BY sequence`, matchID)
+	rows, err := conn.Query(ctx, feedQuery, matchID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []*MatchEventRow
-	for rows.Next() {
-		e := &MatchEventRow{}
-		var clubID, playerID, relatedID *uuid.UUID
-		if err := rows.Scan(&e.ID, &e.Match.ID, &e.Sequence, &e.Minute, &e.Type,
-			&clubID, &playerID, &relatedID, &e.Detail); err != nil {
-			return nil, err
-		}
-		e.Club = clubRef(clubID)
-		e.Player = playerRef(playerID)
-		e.RelatedPlayer = playerRef(relatedID)
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
+	out, err := scanFeed(rows)
+	if err != nil {
 		return nil, err
 	}
 	resolveEventRefs(ctx, s.pool, out)
