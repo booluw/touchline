@@ -1,6 +1,6 @@
 # IM34 — 2D match simulation (positional engine), 3D later
 
-**Status:** Not started (plan)
+**Status:** Implemented
 **Owner:** unassigned
 **Branch:** `feat/simulation`
 **Sprint:** Improvements (match experience)
@@ -11,6 +11,12 @@ only — no ball or player positions), live pacing in `internal/match/live.go`
 (`PaceMinute`, one simulated minute per `tick.match_cadence`, default 20s), the
 `match_tick` realtime envelope, formations/lineup slots in `internal/squad`,
 the match page `frontend/app/pages/play/matches/[fixtureId].vue`.
+
+## Current status (2026-09-30, `feat/simulation`, uncommitted on `b90731b`)
+
+Phases 1-5 are implemented; see **Delivery evidence** at the end. Phase 6 (3D)
+is a separate task. The 2D view has **not been seen running in a browser** yet —
+that manual check is the next action.
 
 ## Recorded decisions (product owner, 2026-09-30)
 
@@ -179,3 +185,63 @@ live path at all, which is the low-risk start.
 ## Open decisions
 
 None.
+
+## Delivery evidence
+
+### Files
+
+- `backend/pkg/pitchsim/` — engine, tests, README (contract and track format).
+- `backend/migrations/0058_pitchsim_events.{up,down}.sql` + README matrix row.
+- `backend/internal/match/pitch.go` (switch, input, extra-event storage,
+  `GetTrack`), and edits to `live.go`, `service.go`, `persist.go`, `read.go`,
+  `events.go`, `match.go`; `internal/matchday/runner.go` (track on the tick);
+  `internal/world/service.go` (default key).
+- `backend/internal/httpapi/match_handlers.go`, `router.go`,
+  `internal/apidocs/openapi.yaml` — `GET /api/matches/:id/track`, open reads
+  through `mayViewMatch`.
+- `frontend/app/components/MatchPitch.vue`, `stores/match.ts`,
+  `pages/play/matches/[fixtureId].vue` — canvas view, playback clock, feed and
+  score revealed by playback, replay controls, stats, polling fallback.
+- Docs: `docs/how-to/match-simulation.md`, `docs/product_manager.md` (OPD-59).
+
+### Verification (2026-09-30; Go run in a `golang:1.26` container because the
+host toolchain is x86_64 and Rosetta is unavailable)
+
+- `gofmt`, `go build ./...`, `go vet ./...`,
+  `go vet -tags integration ./internal/... ./pkg/...`, `go test ./...` — pass,
+  including the OpenAPI gates.
+- `pitchsim` unit tests: determinism; a minute is identical in a partial and a
+  full generation; every matchsim event cued exactly once; extras limited to the
+  six types; positions in bounds and consistent with the lineup; ball in the
+  correct goal for goals in both halves and extra time; red card and
+  substitution; pass share follows the ball share over ten seeds.
+- Integration, against a throwaway `postgres:16`
+  (`go test -p 1 -tags integration`): `./internal/match/...` and
+  `./internal/world/...` pass, including the new `TestQuickPlayPitchsim`
+  (switch off = unchanged feed and no track; switch on = offsets on every row,
+  extras stored, score unchanged, track regenerates the stored extras, range
+  query, feed order) and `TestLivePitchsim` (one track minute per paced minute,
+  matchsim rows equal an instant `Simulate`, stored extras equal a
+  regeneration).
+- Migration 0058 applied down, up, down, up without error.
+- Frontend: `eslint` clean on the three touched files. `pnpm typecheck` reports
+  one error, in `app/middleware/route.global.ts`, a file this work did not touch.
+
+### Not verified
+
+- **The 2D view has not been run in a browser.** Rendering, playback timing and
+  the delayed feed are unexercised outside lint and type checks.
+- The track endpoint has no HTTP-level test; `./internal/httpapi/...` under the
+  integration tag did not finish within 600s and reported 13 failures in
+  unrelated flows (login, admin, board, club — see IM32) before timing out.
+- `./internal/matchday/...` has two failing tests
+  (`TestRunnerAdvancesMatchdaysAndRollsOver`, `TestRunnerCapOnlyForStaggered`)
+  that fail identically on untouched `b90731b`.
+- Golden-goal playback and the cross-world polling fallback have no test.
+- Real golden-goal lengths and live pacing cost were not measured.
+
+### Follow-ups
+
+- Shareable match link (second path through `mayViewMatch`).
+- 3D renderer over the same track; give the ball height.
+- Team shape reacting to live tactic changes.

@@ -222,6 +222,7 @@ func (s *server) router() *gin.Engine {
 		// the persisted event feed. Both are world-scoped to the caller.
 		api.GET("/fixtures/:id", s.requireAuth, s.handleGetFixture)
 		api.GET("/matches/:id/events", s.requireAuth, s.handleGetMatchEvents)
+		api.GET("/matches/:id/track", s.requireAuth, s.handleGetMatchTrack)
 		api.POST("/matches/:id/tactical", s.requireAuth, s.handleLiveTacticChange)
 
 		// Free agents (A08): pool browsing is world-scoped to the caller's own

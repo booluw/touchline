@@ -54,6 +54,9 @@ var defaultConfigKeys = map[string]any{
 	"calendar.days_per_week":  DaysPerWeekDefault,
 	"calendar.days_per_month": DaysPerMonthDefault,
 	"season.off_season_ticks": 30,
+	// match.visual_engine is the IM34 rollout switch: "2d" runs the positional
+	// engine (2D match view) for matches that kick off afterwards.
+	"match.visual_engine": "off",
 }
 
 // Publishable is the event sink used to fan lifecycle events out to

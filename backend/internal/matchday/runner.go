@@ -321,7 +321,14 @@ func (r *Runner) publishTick(ctx context.Context, sess *match.LiveSession, minut
 	if err != nil {
 		return fmt.Errorf("match tick: scoreline: %w", err)
 	}
+	// One minute of movement travels with the tick; a longer block (the
+	// golden-goal flush) is left for the client to fetch from the track endpoint.
+	track := sess.Track()
+	if len(track) != 1 {
+		track = nil
+	}
 	ev := realtime.MustEvent(realtime.EventMatchTick, sess.WorldID, match.MatchTickPayload{
+		Track:     track,
 		Match:     apiref.MatchRef{ID: sess.MatchID},
 		Fixture:   apiref.FixtureRef{ID: sess.FixtureID},
 		Minute:    minute,

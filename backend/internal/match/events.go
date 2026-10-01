@@ -96,28 +96,9 @@ func (s *Service) recordEvent(ctx context.Context, tx pgx.Tx, ev *eventbus.Event
 
 // loadEvents reads the full typed, player-cast feed for a match.
 func loadEvents(ctx context.Context, tx pgx.Tx, matchID uuid.UUID) ([]*MatchEventRow, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT id, match_id, sequence, minute, event_type, club_id, player_id, related_player_id, detail
-		FROM match.match_events WHERE match_id = $1 ORDER BY sequence`, matchID)
+	rows, err := tx.Query(ctx, feedQuery, matchID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []*MatchEventRow
-	for rows.Next() {
-		e := &MatchEventRow{}
-		var clubID, playerID, relatedID *uuid.UUID
-		if err := rows.Scan(&e.ID, &e.Match.ID, &e.Sequence, &e.Minute, &e.Type,
-			&clubID, &playerID, &relatedID, &e.Detail); err != nil {
-			return nil, err
-		}
-		e.Club = clubRef(clubID)
-		e.Player = playerRef(playerID)
-		e.RelatedPlayer = playerRef(relatedID)
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return scanFeed(rows)
 }

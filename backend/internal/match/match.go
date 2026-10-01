@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/touchline/backend/pkg/apiref"
+	"github.com/touchline/backend/pkg/pitchsim"
 )
 
 // Fixture mirrors match.fixtures for the read/feed path (nested refs).
@@ -39,6 +40,10 @@ type MatchView struct {
 	Minute    int       `json:"minute"`
 	HomeScore int       `json:"home_score"`
 	AwayScore int       `json:"away_score"`
+	// Visual reports that the match has a 2D simulation track (IM34);
+	// PacingMillis is the real time one match minute takes live.
+	Visual       bool `json:"visual"`
+	PacingMillis int  `json:"pacing_millis"`
 }
 
 // FixtureMatch is the aggregated GET /api/fixtures/:id response: the fixture
@@ -74,6 +79,12 @@ type MatchEventRow struct {
 	Player        *apiref.PlayerRef `json:"player,omitempty"`
 	RelatedPlayer *apiref.PlayerRef `json:"related_player,omitempty"`
 	Detail        json.RawMessage   `json:"detail,omitempty"` // JSONB commentary
+	// Source is the engine that produced the row: "matchsim" rows are the
+	// result, "pitchsim" rows are the positional engine's extra events (IM34).
+	// Offset is the event's position inside its minute in match milliseconds;
+	// nil when the match was played without the positional engine.
+	Source string `json:"source"`
+	Offset *int   `json:"offset_millis,omitempty"`
 }
 
 // MatchResult is the full outcome of one fixture.
@@ -97,4 +108,8 @@ type MatchTickPayload struct {
 	HomeScore int               `json:"home_score"`
 	AwayScore int               `json:"away_score"`
 	Events    []*MatchEventRow  `json:"events,omitempty"`
+	// Track is this minute's movement (IM34), present only when the match runs
+	// the positional engine and the tick covers a single minute; a client that
+	// is missing minutes fetches them from GET /api/matches/:id/track.
+	Track []pitchsim.Minute `json:"track,omitempty"`
 }
