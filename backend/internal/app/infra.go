@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,12 +12,27 @@ import (
 	"github.com/touchline/backend/pkg/realtime"
 )
 
+// defaultMaxConns sizes the pool when DATABASE_URL does not.
+const defaultMaxConns = 20
+
 func connectDB(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	pool, err := pgxpool.New(ctx, databaseURL)
+	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+	// pgxpool's default (max(4, CPUs)) is too small for `serve`: the scheduler
+	// leader lock, the match-runner lock and River's listener each hold one
+	// connection for the life of the process, which left a 2-CPU host one
+	// connection for everything else and failed /health/db. A pool_max_conns in
+	// DATABASE_URL still wins.
+	if !strings.Contains(databaseURL, "pool_max_conns") {
+		cfg.MaxConns = defaultMaxConns
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("connect DATABASE_URL: %w", err)
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
