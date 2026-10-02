@@ -5,7 +5,6 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   // Protect `/play`
   if (to.fullPath.startsWith("/play")) {
-    console.log(authStore.user)
     if (!authStore.user || Object.keys(authStore.user ?? {}).length === 0) {
       return navigateTo("/")
     }

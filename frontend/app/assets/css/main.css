@@ -331,7 +331,7 @@ body {
 
 @layer components {
   .button {
-    @apply flex font-mono text-sm font-semibold p-3 cursor-pointer ease-brutal duration-80;
+    @apply flex items-center justify-center font-mono text-sm font-semibold p-3 cursor-pointer ease-brutal duration-80;
 
     &:hover {
       @apply text-cyan-500;
@@ -364,6 +364,10 @@ body {
 
     &.button--outline {
       @apply border-brutal border-void-500 text-white;
+    }
+
+    &:disabled {
+      @apply translate-0 shadow-none grayscale-75 cursor-not-allowed;
     }
   }
 

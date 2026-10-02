@@ -137,8 +137,8 @@ onMounted(() => init())
 <template>
   <section class="space-y-5 font-mono">
     <h2 class="page__header"></h2>
-    <div class="grid gap-5 grid-cols-4 grid-rows-2">
-      <div class="col-span-2 bg-void-900 border-brutal border-cyan-300 p-5 overflow-x-auto">
+    <div class="grid gap-5 md:grid-cols-4 grid-rows-2">
+      <div class="md:col-span-2 bg-void-900 border-brutal border-cyan-300 p-5 overflow-x-auto">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Overview</h3>
         </div>
@@ -146,53 +146,64 @@ onMounted(() => init())
           <UiLoader v-if="loading.fixtures === 'loading'" />
           <div v-else-if="loading.fixtures === 'loaded'">
             <template v-if="club.game">
-              <div class="flex items-center gap-3">
-                <div class="flex items-end">
-                  <h3 class="heading"
-                    :class="[club.game.fixture.status !== 'scheduled' ? 'text-sm text-void-300 w-15' : 'text-2xl w-40 text-center']">
-                    {{ club.game.fixture.home_club.name }}</h3>
-                  <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
+              <div class="flex items-center text-xs heading heading--small">
+                <nuxt-link :to="`/competitions/${club.game.fixture.competition.id}`" class="text-cyan-600 underline">{{ club.game.fixture.competition.name }}</nuxt-link>
+                <svg class="fill-void-500 w-4" viewBox="0 0 256 256">
+                  <path d="M128,96a32,32,0,1,0,32,32A32,32,0,0,0,128,96Zm0,48a16,16,0,1,1,16-16A16,16,0,0,1,128,144Z">
+                  </path>
+                </svg>
+                GW-{{ club.game.fixture.matchday }}
+              </div>
+              <div class="grid grid-cols-3 items-center gap-3">
+                <div class="flex md:items-end">
+                  <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">
+                    {{ club.game.fixture.home_club.short }}
+                    0
+                  </h2>
+                  <div v-else class="flex gap-1 flex-col">
+                    <h3 class="heading md:text-2xl">
+                      {{ club.game.fixture.home_club.name }}
+                    </h3>
+                  </div>
                 </div>
                 <div v-if="club.game.fixture.status === 'scheduled'" class="flex flex-col items-center gap-2">
-                  <span class="heading heading--medium text-void-400">vs</span>
-                  <div class="pill flex items-center gap-2">
+                  <span class="heading text-lg text-void-400">vs</span>
+                  <div class="pill hidden md:flex items-center gap-2">
                     <div class="">
                       {{ formatFixtureDateTimeSmart(club.game.fixture.scheduled_at) }}
                     </div>
                   </div>
                 </div>
-                <nuxt-link :to="`/play/matches/${club.game.fixture.id}`" v-else class="flex flex-col items-center gap-2">
-                  <span class="heading heading--medium text-void-400">-</span>
+                <nuxt-link :to="`/play/matches/${club.game.fixture.id}`" v-else
+                  class="flex flex-col items-center gap-2">
+                  <span class="heading text-lg text-void-400">-</span>
                   <div class="pill pill--live flex items-center gap-2">
-                    <div class="h-2 w-2 bg-live-500 rounded-full" /> 78'
+                    <div class="h-2 w-2 bg-live-500 rounded-full" /> Live
                   </div>
                 </nuxt-link>
                 <div class="flex items-end gap-2">
-                  <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">0</h2>
-                  <h3 class="heading"
-                    :class="[club.game.fixture.status !== 'scheduled' ? 'text-sm text-void-300 w-15' : 'text-2xl w-40 text-center']">
-                    {{ club.game.fixture.away_club.name }}</h3>
+                  <h2 v-if="club.game.fixture.status !== 'scheduled'" class="heading text-7xl">
+                    0
+                    {{ club.game.fixture.away_club.short }}
+                  </h2>
+                  <h3 v-else class="heading md:text-2xl">
+                    {{ club.game.fixture.away_club.name }}
+                  </h3>
                 </div>
               </div>
 
-              <div class="mt-5 grid grid-cols-2 gap-5">
-                <div class="">
-                  <div class="flex items-center justify-between pb-3">
-                    <h3 class="heading heading--small">Scout Report</h3>
-                  </div>
-                  <div class="carousel carousel--hide mt-0 max-h-32.5 overflow-y-hidden">
-                    <div class="carousel__item w-1/2 bg-void-700 p-1"
-                      v-for="(player, key) in club.game.opponent.top_players" :key>
-                      <h2 class="font-bold uppercase p-3">
-                        {{ player.first_name }} {{ player.last_name }}
-                        <br />
-                        ({{ player.primary_position }}) {{ player.rating }}
-                      </h2>
-                    </div>
-                  </div>
+              <div class="mt-6">
+                <div class="flex items-center justify-between pb-3">
+                  <h3 class="heading heading--small">scot report</h3>
                 </div>
-                <div class="h-32.5 overflow-auto">
-                  <!-- {{ club.game.opponent }} -->
+                <div class="carousel carousel--hide mt-0 max-h-32.5 overflow-y-hidden">
+                  <div class="carousel__item md:w-1/4 bg-void-700 p-1"
+                    v-for="(player, key) in club.game.opponent.top_players" :key>
+                    <h2 class="font-bold uppercase p-3 text-sm">
+                      {{ player.first_name }} {{ player.last_name }} <br />
+                      ({{ player.primary_position }}) {{ player.rating }}
+                    </h2>
+                  </div>
                 </div>
               </div>
             </template>
@@ -231,7 +242,8 @@ onMounted(() => init())
               <!-- League Competitions -->
               <template v-if="competition[competition.competition_type as 'league']">
                 <template v-if="competition[competition.competition_type as 'league']?.started">
-                  <div v-if="competition.league!.standings!.rows.length === 0" class="pt-5 uppercase text-xs text-void-400">
+                  <div v-if="competition.league!.standings!.rows.length === 0"
+                    class="pt-5 uppercase text-xs text-void-400">
                     League has not yet started
                   </div>
                   <div v-else>
@@ -245,18 +257,13 @@ onMounted(() => init())
                       <h4 class="heading heading--small text-center">pts</h4>
                     </div>
                     <div class="h-55 overflow-auto">
-                      <div
-                        class="grid grid-cols-10 text-sm py-1 border-b border-void-500"
-                        :class="{
-                          'bg-void-600': row.club.short === club!.club!.short,
-                          'bg-loss-500/10 text-loss-500 border-loss-500!' : [17, 18, 19].includes(index),
-                          'bg-win-500/10 text-win-500 border-win-500!': [0, 1, 2].includes(index)
-                        }"
-                        v-for="(row, index) in competition.league?.standings?.rows"
-                        :key="index"
-                      >
+                      <div class="grid grid-cols-10 text-sm py-1 border-b border-void-500" :class="{
+                        'bg-void-600': row.club.short === club!.club!.short,
+                        'bg-loss-500/10 text-loss-500 border-loss-500!': [17, 18, 19].includes(index),
+                        'bg-win-500/10 text-win-500 border-win-500!': [0, 1, 2].includes(index)
+                      }" v-for="(row, index) in competition.league?.standings?.rows" :key="index">
                         <div class="col-span-4 grid grid-cols-7">
-                          {{ index+1 }}
+                          {{ index + 1 }}
                           <span class="col-span-6 line-clamp-1" :title="row.club.name">
                             <span class="heading heading--small border px-1">{{ row.club.short }}</span>
                             {{ row.club.name }}
@@ -289,7 +296,7 @@ onMounted(() => init())
           <button class="uppercase text-cyan-300" @click="getClubCompetitions()">Retry</button>
         </div>
       </div>
-      <div class="row-span-2 border-brutal border-void-800 p-5">
+      <div class="md:row-span-2 border-brutal border-void-800 p-5">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">News</h3>
         </div>
@@ -355,7 +362,7 @@ onMounted(() => init())
           <div class="mt-3 flex gap-5" v-else-if="loading.board === 'loaded'">
             <div class="flex flex-col gap-1">
               <div class="flex gap-2 items-center">
-                <h4 class="heading text-2xl">{{ board?.confidence }}</h4> 
+                <h4 class="heading text-2xl">{{ board?.confidence }}</h4>
                 <IconsHappy class="w-6" v-if="board?.confidence! > 50" />
                 <IconsNeutral class="w-6" v-else-if="board?.confidence! === 50" />
                 <IconsSad class="w-6" v-else-if="board?.confidence! < 45" />
@@ -395,7 +402,7 @@ onMounted(() => init())
           </div>
         </div>
       </div>
-      <div class="col-span-2 row-span-2 border-brutal border-void-700 p-5">
+      <div class="md:col-span-2 row-span-2 border-brutal border-void-700 p-5">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Squad</h3>
           <nuxt-link to="/play/squad" class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
@@ -405,13 +412,9 @@ onMounted(() => init())
 
         <UiLoader v-if="loading.tactics === 'loading'" />
         <template v-else-if="loading.tactics === 'loaded'">
-          <div class="flex gap-5 mt-5">
-            <div class="w-120 shrink-0">
-              <PitchView
-                variant="half"
-                :formation="lineup.formation"
-                :slots="lineup.slots"
-              />
+          <div class="md:flex gap-5 mt-5">
+            <div class="w-full md:w-120 shrink-0">
+              <PitchView variant="half" :formation="lineup.formation" :slots="lineup.slots" />
             </div>
             <div class="flex flex-col gap-3 capitalize">
               <div class="">
@@ -480,7 +483,7 @@ onMounted(() => init())
                   <h4 class="heading heading--small">competition</h4>
                   <div class="flex justify-between">
                     <nuxt-link :to="`/play/league/${offer.league.id}`" class="text-cyan-700">{{ offer.league.name
-                      }}:</nuxt-link>
+                    }}:</nuxt-link>
                     <p class="font-semibold capitalize">{{ offer.league.position ?? "-" }}</p>
                   </div>
                   <div class="flex justify-between">

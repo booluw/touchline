@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="flex items-center gap-5">
+    <div class="md:flex items-center gap-5">
       <button class="button button--primary">Confirm</button>
       <button class="button button--outline">Save draft</button>
       <button class="button button--danger">Terminate contract</button>

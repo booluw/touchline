@@ -111,6 +111,8 @@ class ApiClient {
       return this.refreshPromise
     }
 
+    const authStore = useAuthStore()
+
     this.refreshPromise = $fetch(this.authRefreshUrl, {
       baseURL: this.baseURL,
       method: 'POST',
@@ -118,9 +120,10 @@ class ApiClient {
       headers: this.defaultHeaders,
     })
       .then(() => undefined)
-      .catch((err) => {
+      .catch(() => {
         this.sessionExpiredHandler?.()
-        throw err
+        authStore.$reset()
+        // throw err
       })
       .finally(() => {
         this.refreshPromise = null
@@ -189,7 +192,8 @@ class ApiClient {
               _retriedAfterRefresh: true,
             })
           } catch (refreshError) {
-            return this.handleError(refreshError)
+            return refreshError as any
+            // return this.handleError(refreshError)
           }
         }
 

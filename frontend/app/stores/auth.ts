@@ -11,6 +11,7 @@ export const useAuthStore = defineStore('auth', () => {
   const $reset = () => {
     user.value = undefined
     offer.value = undefined
+    club.value = undefined
   }
 
   return {

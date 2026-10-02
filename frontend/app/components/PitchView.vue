@@ -21,7 +21,7 @@
 
     <button v-for="slot in positionedSlots" :key="slot.slot" class="token"
       :class="{ empty: !slot.player, selected: slot.slot === props.selectedSlot, 'cursor-pointer': clickable }"
-      :style="{ left: slot.x + '%', top: slot.y + '%' }" @click="clickable ? $emit('select', slot.slot) : undefined">
+      :style="{ left: slot.x + '%', top: slot.y + '%' }" @click="clickable ? $emit('select', props.selectedSlot !== slot.slot ? slot.slot : null) : undefined">
       <span class="token-number">{{ slot.player?.squad_number ?? '' }}</span>
       <span class="token-name">{{ slot.player?.display_name ?? 'Empty' }}</span>
     </button>
@@ -38,11 +38,11 @@ const props = defineProps<{
   variant: 'full' | 'half'
   formation: string // e.g. "4-3-3" — key into FORMATION_COORDS
   slots: LineupSlot[]
-  selectedSlot?: number
+  selectedSlot?: number | null
   clickable?: boolean
 }>()
 
-defineEmits<{ select: [slot: number] }>()
+defineEmits<{ select: [slot: number | null] }>()
 
 const positionedSlots = computed(() =>
   props.slots.map((slot, i) => {
@@ -50,7 +50,6 @@ const positionedSlots = computed(() =>
     return { ...slot, x: coords.x, y: coords.y }
   })
 )
-
 </script>
 
 <style scoped>

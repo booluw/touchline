@@ -1,18 +1,18 @@
 <script lang="ts" setup>
 const store = useAuthStore()
 
-const ROUTES = computed(() => store.user?.is_admin ? ADMIN_ROUTES : MANAGER_ROUTES)
+const ROUTES = computed(() => store.user ? store.user?.is_admin ? ADMIN_ROUTES : MANAGER_ROUTES : undefined)
 </script>
 
 <template>
-  <section class="min-h-screen px-5">
-    <header class="border-b-brutal border-void-800 flex items-center justify-between">
+  <section class="relative h-screen px-5">
+    <header class="border-b-brutal border-void-800 flex items-center justify-between py-2">
       <nuxt-link to="/" class="font-mono flex gap-3 font-bold text-xl py-5">
         <img src="~/assets/svgs/logomark.svg" class="h-6" />
         TouchLine
       </nuxt-link>
 
-      <nav class="">
+      <nav v-if="ROUTES" class="hidden">
         <nuxt-link
           :to="link.to" v-for="(link, key) in ROUTES.links"
           :key
@@ -26,12 +26,12 @@ const ROUTES = computed(() => store.user?.is_admin ? ADMIN_ROUTES : MANAGER_ROUT
         <nuxt-link v-if="!store.user" to="/login" class="button button--primary uppercase">
           start your career
         </nuxt-link>
-        <nuxt-link :to="ROUTES.cta.to" v-else class="button button--primary uppercase">
+        <nuxt-link :to="ROUTES.cta.to" v-else-if="ROUTES" class="button button--primary uppercase">
           {{ ROUTES.cta.text }}
         </nuxt-link>
       </nav>
     </header>
-    <section class="py-5">
+    <section class="py-5 h-[90vh] overflow-auto">
       <slot />
     </section>
   </section>

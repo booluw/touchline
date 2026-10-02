@@ -20,10 +20,10 @@ const squad = ref<SquadPlayer[]>([])
 const lineup = ref<{ formation: string, slots: Slot[] }>()
 
 const slots = ref<Slot[]>([])
-const selectedSlot = ref()
+const selectedSlot = ref<number|null>(null)
+const slot = computed(() => lineup.value?.slots.find((s) => s.slot === selectedSlot.value))
 const playersBySelectedSlotPosition = computed(() => {
-  const slot = lineup.value?.slots.find((s) => s.slot === selectedSlot.value)
-  const matched = squad.value.filter((s) => s?.position === slot?.position)
+  const matched = squad.value.filter((s) => s?.position === slot.value?.position)
 
   return [...new Map([...matched, ...squad.value].map(player => [player.player.id, player])).values()]
 })
@@ -86,11 +86,19 @@ async function saveClubTactics() {
 }
 
 async function saveClubLineup() {
+  saving.value = true
   try {
-    await saveLineup({ slots: slots.value.map((s) => ({ slot: s.slot, player_id: s?.player?.player_id ?? s?.player?.id })) })
+    await saveLineup({
+      slots: slots.value.map((s) => ({ slot: s.slot, player_id: s?.player?.player_id ?? s?.player?.id }))
+    })
+
+    notify({
+      title: "Line up saved, your team is ready",
+      type: "success"
+    })
     await init()
-  } catch {
-    // saveLineup already notified the user
+  } finally {
+    saving.value = false
   }
 }
 
@@ -107,6 +115,8 @@ function saveSlot(player: { squad_number?: number, display_name: string, player_
       s.player = player
     }
   })
+
+  selectedSlot.value = null
 }
 
 function emptyLineup() {
@@ -126,7 +136,7 @@ onMounted(async () => {
     <h2 class="page__header"></h2>
     <UiLoader v-if="loading === 'loading'" />
     <template v-else-if="loading === 'loaded'">
-      <section class="grid gap-5 grid-cols-3 row-span-2">
+      <section class="grid gap-5 md:grid-cols-3 md:row-span-2">
         <div class="p-5">
           <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
             <h3 class="heading heading--small">Tactics</h3>
@@ -136,20 +146,37 @@ onMounted(async () => {
                 :options="['balanced', 'possession', 'gegenpress', 'low_block', 'direct']"
               />
               <UiSelect v-model="state.formation" :options="tactics?.allowed_formations ?? []" />
-              <button @click="saveClubTactics()" class="button button--primary" :disabled="saving">Save</button>
+              <UiButton
+                @click="saveClubTactics()"
+                :loading="saving"
+              >
+                Save
+              </UiButton>
             </div>
           </div>
 
           <PitchView variant="half" :formation="tactics?.formation ?? ''" :slots :clickable="true"
-            @select="(e) => selectedSlot = e" :selected-slot />
+            @select="(e: number | null) => selectedSlot = e" :selected-slot />
           <div class="flex gap-5 items-center justify-end py-5">
-            <button @click="emptyLineup()" class="button button--outline">Empty</button>
-            <button @click="saveClubLineup()" class="button button--primary">Save Lineup</button>
+            <UiButton
+              @click="emptyLineup()"
+              type="outline"
+            >
+              Empty
+            </UiButton>
+            <UiButton
+              @click="saveClubLineup()"
+              :loading="saving"
+            >
+              Save Lineup
+            </UiButton>
           </div>
         </div>
-        <div class="border-brutal p-5 border-void-700">
+        <div class="border-brutal p-5 border-void-700 bg-void-900 md:block" :class="selectedSlot !== null ? 'block fixed bottom-1 right-5 left-5' : 'hidden'">
           <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
             <h3 class="heading heading--small">Squad</h3>
+
+            <div v-if="selectedSlot !== null" class="text-sm md:hidden">Select player for <b>{{ slot?.position }}</b></div>
           </div>
           <div class="grid grid-cols-8 gap-2 mt-5">
             <div class="col-span-2 heading heading--small">Name</div>
@@ -157,13 +184,13 @@ onMounted(async () => {
             <div class="heading heading--small text-center">OVR</div>
             <div class="col-span-4 heading heading--small">Attributes</div>
           </div>
-          <div class="mt-2 h-100 overflow-auto flex gap-3 flex-col">
+          <div class="mt-2 h-100 overflow-auto flex gap-3 flex-col" :class="selectedSlot !== null ? 'h-[40vh] overflow-auto' : ''">
             <div class="grid grid-cols-8 gap-2 text-sm py-1 border-b border-void-500"
               :class="{ 'bg-win-500/20': playersInLineup.includes(player.player.id) }"
               @click="saveSlot({ squad_number: player.squad_number, display_name: player.player.name, player_id: player.player.id })"
               v-for="(player, key) in playersBySelectedSlotPosition" :key>
               <div class="col-span-2 heading">
-                <NuxtLink v-if="!selectedSlot" :to="`/play/players/${player.player.id}`"
+                <NuxtLink v-if="selectedSlot === null" :to="`/play/players/${player.player.id}`"
                   class="hover:text-slate-100 underline-offset-2 hover:underline">
                   {{ player.first_name }} {{ player.last_name }}
                 </NuxtLink>
@@ -192,20 +219,9 @@ onMounted(async () => {
           </div>
         </div>
         <div class="overflow-auto">
-          {{ selectedSlot }}
-          <!-- {{ playersInLineup }}
-          {{ slots }} -->
-          <!-- {{ squad[0] }} -->
-          <!-- {{ playersInLineup }} -->
         </div>
         <div class="overflow-auto">
-          <!-- {{ slots }} -->
         </div>
-        <div class="">
-          <!-- {{ tactics.allowed_formations }} -->
-        </div>
-        <div>Kollow</div>
-        <div class="">Challow</div>
       </section>
     </template>
   </main>
