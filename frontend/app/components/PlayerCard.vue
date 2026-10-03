@@ -58,8 +58,8 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="">
-        <Bar :value="70" label="Shooting" class="w-6" />
+      <div class="mt-5">
+        <Bar :value="70" label="Shooting" class="w-60" />
       </div>
     </template>
     <!-- {{ playerId }} -->
