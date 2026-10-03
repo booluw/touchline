@@ -35,7 +35,7 @@ func seedAutofillWorld(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID, []uui
 		t.Fatalf("create country: %v", err)
 	}
 	if _, err := compSvc.CreateLeague(ctx, internalcompetition.LeagueParams{
-		CountryID: country.ID, Name: "Ligue 1", Tier: 1, TeamCount: 2,
+		CountryID: country.ID, Name: "Ligue 1", Tier: 1, TeamCount: 4,
 	}); err != nil {
 		t.Fatalf("create league: %v", err)
 	}
@@ -80,6 +80,11 @@ func TestAutoFillRestoresThinSquad(t *testing.T) {
 	// Simulate a squad gutted by retirements: every active player becomes a
 	// free agent (the retirement path already nulls club_id + terminates
 	// contracts; here we skip straight to the outcome).
+	if _, err := pool.Exec(ctx, `
+		UPDATE player.contracts SET status = 'terminated'
+		WHERE club_id = $1 AND status = 'active'`, club); err != nil {
+		t.Fatalf("terminate contracts: %v", err)
+	}
 	if _, err := pool.Exec(ctx, `
 		UPDATE player.players SET club_id = NULL, status = 'free_agent', squad_number = NULL
 		WHERE club_id = $1 AND status = 'active'`, club); err != nil {

@@ -107,7 +107,7 @@ func (s *Service) RushReturn(ctx context.Context, worldID, managerID, playerID u
 		return nil, fmt.Errorf("rush return: %w", err)
 	}
 
-	var v PlayerInjury
+	v := PlayerInjury{Player: &apiref.PlayerRef{}}
 	var actual time.Time
 	err = tx.QueryRow(ctx, `
 		SELECT i.id, i.player_id, pe.display_name, i.injury_type, i.severity, i.occurred_at,
@@ -132,7 +132,7 @@ func (s *Service) RushReturn(ctx context.Context, worldID, managerID, playerID u
 
 // loadInjury reads the player's most recent open injury row, or nil.
 func (s *Service) loadInjury(ctx context.Context, playerID uuid.UUID) (*PlayerInjury, error) {
-	var v PlayerInjury
+	v := PlayerInjury{Player: &apiref.PlayerRef{}}
 	err := s.pool.QueryRow(ctx, `
 		SELECT i.id, i.player_id, pe.display_name, i.injury_type, i.severity, i.occurred_at, i.expected_recovery_date,
 		       i.recurrence_risk::float8

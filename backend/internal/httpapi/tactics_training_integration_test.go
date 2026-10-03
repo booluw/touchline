@@ -122,6 +122,8 @@ func decodedSlots(t *testing.T, resp *http.Response, key string) []string {
 		player, _ := m["player"].(map[string]any)
 		if id, ok := player["id"].(string); ok {
 			out = append(out, id)
+		} else if m["player"] == nil {
+			out = append(out, uuid.Nil.String()) // unfilled slot: player is null
 		}
 	}
 	return out

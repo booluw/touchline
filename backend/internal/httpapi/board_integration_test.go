@@ -37,7 +37,8 @@ func TestHTTPBoardRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("board body = %v", body)
 	}
-	total, _ := snap["total_score"].(float64)
+	scores, _ := snap["scores"].(map[string]any)
+	total, _ := scores["total_score"].(float64)
 	if int(total) != int(confidence) {
 		t.Errorf("snapshot total %v != confidence %v", total, confidence)
 	}

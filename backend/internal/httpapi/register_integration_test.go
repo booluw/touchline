@@ -91,10 +91,12 @@ func TestHTTPRegister_OnboardsWithAutoOffer(t *testing.T) {
 			Status  string    `json:"status"`
 		} `json:"world"`
 		Offer *struct {
-			ID       uuid.UUID `json:"id"`
-			ClubID   uuid.UUID `json:"club_id"`
-			Status   string    `json:"status"`
-			ClubName string    `json:"club_name"`
+			ID   uuid.UUID `json:"id"`
+			Club struct {
+				ID   uuid.UUID `json:"id"`
+				Name string    `json:"name"`
+			} `json:"club"`
+			Status string `json:"status"`
 		} `json:"offer"`
 	}
 	if err := decodeJSON(t, resp, &created); err != nil {
@@ -109,8 +111,8 @@ func TestHTTPRegister_OnboardsWithAutoOffer(t *testing.T) {
 	if created.Offer == nil {
 		t.Fatal("expected an auto-issued first offer")
 	}
-	if created.Offer.ClubID != club {
-		t.Errorf("offer club = %s, want the seeded AI club %s", created.Offer.ClubID, club)
+	if created.Offer.Club.ID != club {
+		t.Errorf("offer club = %s, want the seeded AI club %s", created.Offer.Club.ID, club)
 	}
 	if created.Offer.Status != "proposed" {
 		t.Errorf("offer status = %s, want proposed", created.Offer.Status)

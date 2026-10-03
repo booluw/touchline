@@ -236,6 +236,11 @@ func (a *App) HTTPHandler() http.Handler {
 	return a.http.Handler()
 }
 
+// HTTPServer returns the wired API server (integration tests reach its hub).
+func (a *App) HTTPServer() *httpapi.Server {
+	return a.http
+}
+
 // Close releases the pool and the realtime broker.
 func (a *App) Close() {
 	if a.Broker != nil {

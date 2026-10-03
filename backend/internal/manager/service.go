@@ -216,6 +216,7 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 	}
 	o.WorldID = clubWorld
 	o.ClubID = clubID
+	o.ClubName = clubName
 	o.Club = &apiref.ClubRef{ID: clubID, Name: clubName}
 	o.ManagerID = candidateID
 	if name, err := managerDisplayName(ctx, tx, candidateID); err == nil {

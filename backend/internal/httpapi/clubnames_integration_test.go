@@ -24,10 +24,10 @@ func TestHTTPClubNameParts(t *testing.T) {
 	testdb.CreateUser(t, pool, "poolsplain@example.com", "s3cret", []testdb.Join{{WorldID: w}})
 	adminCookies := login(t, ts, client, "poolsadmin@example.com", "s3cret")
 
-	// Non-admins are forbidden — they cannot even obtain a session.
-	if r := post(t, ts, client, "/api/auth/login",
-		`{"email":"poolsplain@example.com","password":"s3cret"}`, ""); r.StatusCode != http.StatusForbidden {
-		t.Fatalf("non-admin login = %d, want 403", r.StatusCode)
+	// Non-admins log in as managers but are forbidden from the admin pools.
+	plainCookies := login(t, ts, client, "poolsplain@example.com", "s3cret")
+	if r := get(t, ts, client, "/api/admin/club-name-parts", plainCookies); r.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-admin list = %d, want 403", r.StatusCode)
 	}
 	if r := get(t, ts, client, "/api/admin/club-name-parts", ""); r.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated list = %d, want 401", r.StatusCode)

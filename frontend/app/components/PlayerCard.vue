@@ -15,7 +15,7 @@ async function fetchPlayerData() {
   try {
     player.value = await getPlayer(props.playerId)
     loading.value = "loaded"
-  } catch (error) {
+  } catch {
    loading.value = "error" 
   }
 }

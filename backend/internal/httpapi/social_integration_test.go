@@ -117,8 +117,9 @@ func TestHTTPManagerProfile(t *testing.T) {
 	h2h, _ := body["h2h_vs_viewer"].(map[string]any)
 	if h2h == nil {
 		t.Errorf("h2h missing for a pair that played")
-	} else if h2h["wins"].(float64) != 1 {
-		t.Errorf("h2h wins = %v, want 1", h2h["wins"])
+	} else if h2h["wins"].(float64) != 0 || h2h["losses"].(float64) != 1 {
+		// Viewer-club perspective (OpenAPI H2HRecord): the target won 2-1 at home.
+		t.Errorf("h2h wins/losses = %v/%v, want 0/1", h2h["wins"], h2h["losses"])
 	}
 	if rivalries := body["rivalries"].([]any); len(rivalries) == 0 {
 		t.Errorf("rivalries empty, want the seeded manager edge")

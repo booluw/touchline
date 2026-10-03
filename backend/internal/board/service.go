@@ -184,6 +184,9 @@ func (s *Service) BoardView(ctx context.Context, worldID, managerID uuid.UUID) (
 	if err != nil {
 		return nil, err
 	}
+	if err := s.store.ensureMandates(ctx, s.pool, snap.ClubID, managerID, season); err != nil {
+		return nil, err
+	}
 	mandates, err := s.store.listMandates(ctx, s.pool, snap.ClubID, managerID, season)
 	if err != nil {
 		return nil, err
@@ -222,12 +225,12 @@ func (s *Service) NegotiateMandate(ctx context.Context, worldID, managerID uuid.
 		return nil, nil, ErrNotMandateManager
 	}
 
-	var worldOf uuid.UUID
+	var currentClub uuid.UUID
 	if err := tx.QueryRow(ctx, `SELECT current_club_id FROM manager.managers WHERE id = $1`, managerID).
-		Scan(&worldOf); err != nil {
+		Scan(&currentClub); err != nil {
 		return nil, nil, ErrNotEmployed
 	}
-	if worldOf != mandate.ClubID {
+	if currentClub != mandate.ClubID {
 		return nil, nil, ErrWorldMismatch
 	}
 	if mandate.Status != MandatePending && mandate.Status != MandateAgreed {
@@ -271,7 +274,7 @@ func (s *Service) NegotiateMandate(ctx context.Context, worldID, managerID uuid.
 	mandate.Club = &apiref.ClubRef{ID: mandate.ClubID, Name: clubName}
 	exp := explanation.New("board_mandate_negotiation", 0).
 		Add(fmt.Sprintf("%s target changed to %s", mandate.TargetType, in.TargetValue), 0)
-	if err := s.emitNegotiation(ctx, tx, worldOf, &mandate, exp); err != nil {
+	if err := s.emitNegotiation(ctx, tx, worldID, &mandate, exp); err != nil {
 		return nil, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

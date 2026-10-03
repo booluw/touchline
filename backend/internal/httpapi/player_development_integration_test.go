@@ -81,9 +81,11 @@ func TestHTTPPlayerDevelopmentDetail(t *testing.T) {
 	if !ok || len(deltas) != 2 {
 		t.Fatalf("recent_deltas = %v, want 2 (morale pseudo-key excluded)", body["recent_deltas"])
 	}
-	first := deltas[0].(map[string]any)
-	if first["attribute_key"] != "finishing" || first["applied_week"].(float64) != 100 {
-		t.Fatalf("recent_deltas[0] = %v, want financing week 100 newest-first", first)
+	// The eight most recent movements, returned oldest first (OpenAPI contract).
+	first, last := deltas[0].(map[string]any), deltas[1].(map[string]any)
+	if first["attribute_key"] != "stamina" || first["applied_week"].(float64) != 99 ||
+		last["attribute_key"] != "finishing" || last["applied_week"].(float64) != 100 {
+		t.Fatalf("recent_deltas = %v, want stamina@99 then finishing@100 (oldest first)", deltas)
 	}
 	drivers, ok := body["drivers"].(map[string]any)
 	if !ok || drivers["subject"] != "player_development" {
@@ -112,7 +114,7 @@ func TestHTTPPlayerDevelopmentDetail(t *testing.T) {
 	if deltas, ok := emptyBody["recent_deltas"].([]any); !ok || len(deltas) != 0 {
 		t.Fatalf("unevaluated recent_deltas = %v, want empty array", emptyBody["recent_deltas"])
 	}
-	if _, present := emptyBody["drivers"]; present {
+	if v, present := emptyBody["drivers"]; present && v != nil {
 		t.Fatalf("unevaluated drivers should be absent/null, got %v", emptyBody["drivers"])
 	}
 

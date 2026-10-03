@@ -334,6 +334,8 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 				p.id, cat, key, next); err != nil {
 				return false, fmt.Errorf("attribute %s: %w", key, err)
 			}
+			// later passes (detrain, veteran decay) build on this week's value
+			attr[key] = next
 		}
 
 		// Recovery detrain decay (independent of age scaling, §2.1).
@@ -356,6 +358,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 					p.id, cat, key, next); err != nil {
 					return false, fmt.Errorf("detrain %s: %w", key, err)
 				}
+				attr[key] = next
 			}
 		}
 
@@ -379,6 +382,7 @@ func (s *Service) applyClubWeekly(ctx context.Context, worldID uuid.UUID, clubID
 				p.id, cat, key, next); err != nil {
 				return false, fmt.Errorf("veteran decay %s: %w", key, err)
 			}
+			attr[key] = next
 		}
 
 		// S08-01: persist the week's net attribute movement (and the weekly

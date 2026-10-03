@@ -14,31 +14,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	internalacademy "github.com/touchline/backend/internal/academy"
-	internalauth "github.com/touchline/backend/internal/auth"
-	internalboard "github.com/touchline/backend/internal/board"
-	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
-	internalclub "github.com/touchline/backend/internal/club"
+	"github.com/touchline/backend/internal/app"
 	internalcompetition "github.com/touchline/backend/internal/competition"
-	internalfinance "github.com/touchline/backend/internal/finance"
-	internalform "github.com/touchline/backend/internal/form"
 	"github.com/touchline/backend/internal/httpapi"
-	internalmanager "github.com/touchline/backend/internal/manager"
-	internalmatch "github.com/touchline/backend/internal/match"
-	internalplayer "github.com/touchline/backend/internal/player"
-	internalsocial "github.com/touchline/backend/internal/social"
-	internalsquad "github.com/touchline/backend/internal/squad"
-	internaltactics "github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/testdb"
-	internaltraining "github.com/touchline/backend/internal/training"
-	internaltransfer "github.com/touchline/backend/internal/transfer"
-	internalworld "github.com/touchline/backend/internal/world"
-	"github.com/touchline/backend/pkg/eventbus"
 	pkgauth "github.com/touchline/backend/pkg/jwt"
-	"github.com/touchline/backend/pkg/realtime"
 )
 
 // newTestServer builds a server wired like main(): real services, a realtime
@@ -48,57 +30,42 @@ func newTestServer(t *testing.T) (*httpapi.Server, *pgxpool.Pool) {
 	t.Helper()
 	pool := testdb.New(t)
 
-	cfg := pkgauth.JWTConfig{Secret: "api-integration-secret", AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
-
-	broker := realtime.NewLocalBroker()
-	hub := realtime.NewHub(broker,
-		realtime.WithOriginPatterns(httpapi.OriginHostPattern("http://localhost:3000")))
-	go func() { _ = hub.Run(context.Background()) }()
-	t.Cleanup(func() { _ = hub.Close() })
-
-	transfersSvc := internaltransfer.NewService(pool, nil)
-	playersSvc := internalplayer.NewService(pool, nil, transfersSvc)
-	transfersSvc.WithPlayerLifecycle(playersSvc)
-	matchSvc := internalmatch.NewService(pool, nil, internalsquad.NewStore(pool), internalform.NewStore(pool))
-	matchSvc.WithPlayers(playersSvc)
-	socialSvc := internalsocial.NewService(pool, nil)
-	socialSvc.WithRealtime(broker)
-	matchSvc.WithSocial(socialSvc)
-
-	s := httpapi.New(httpapi.Options{
-		Auth:          internalauth.NewService(pool, cfg),
-		World:         internalworld.NewService(pool, nil),
-		Manager:       internalmanager.NewService(pool, nil),
-		Club:          internalclub.NewService(pool),
-		Bootstrap:     internalbootstrap.NewService(pool, nil),
-		Competition:   internalcompetition.NewService(pool, nil),
-		Match:         matchSvc,
-		Tactics:       internaltactics.NewService(pool, nil, internalsquad.NewStore(pool)),
-		Training:      internaltraining.NewService(pool, nil),
-		Transfers:     transfersSvc,
-		Board:         internalboard.NewService(pool, nil, internalmanager.NewService(pool, nil)),
-		Finance:       internalfinance.NewService(pool, nil),
-		Player:        playersSvc,
-		Social:        socialSvc,
-		Academy:       internalacademy.NewService(pool, logOnlyBus{}),
-		JWT:           cfg,
-		Pool:          pool,
-		CookiesSecure: false,
+	// Build the production service graph (internal/app) instead of a
+	// hand-copied one, so the harness can never drift from real wiring. The
+	// River bus is started so admin seed jobs actually run.
+	ctx, cancel := context.WithCancel(context.Background())
+	a, err := app.Build(ctx, app.Config{
+		DatabaseURL:   pool.Config().ConnConfig.ConnString(),
+		JWTSecret:     testJWTSecret,
+		JWTAccessTTL:  time.Hour,
+		JWTRefreshTTL: 30 * 24 * time.Hour,
 		AppOrigin:     "http://localhost:3000",
-		Hub:           hub,
+		Env:           "development", // non-Secure cookies over httptest's plain HTTP
 	})
-	return s, pool
+	if err != nil {
+		cancel()
+		t.Fatalf("build app: %v", err)
+	}
+	if err := a.Bus.Start(ctx); err != nil {
+		cancel()
+		a.Close()
+		t.Fatalf("start bus: %v", err)
+	}
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stopCancel()
+		if err := a.Bus.Stop(stopCtx); err != nil {
+			t.Errorf("stop bus: %v", err)
+		}
+		cancel()
+		a.Close()
+	})
+	return a.HTTPServer(), pool
 }
 
-// logOnlyBus satisfies eventbus.Publisher by recording events into world.events
-// inside the caller's transaction without dispatching any river job — the
-// academy service short-circuits when handed a nil bus, so the test server
-// hands it a bus that at least persists the audit row.
-type logOnlyBus struct{}
-
-func (logOnlyBus) PublishTx(ctx context.Context, tx pgx.Tx, e *eventbus.Event) error {
-	return eventbus.RecordTx(ctx, tx, e)
-}
+// testJWTSecret signs sessions for both the app under test and tests that
+// mint their own cookies.
+const testJWTSecret = "api-integration-secret"
 
 // testHTTPServer boots the real Gin router against a migrated, truncated DB
 // and returns the test server plus its pool (for fixtures).
@@ -113,8 +80,9 @@ func testHTTPServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 func TestHTTPLoginSetsCookiesAndProtectsDashboard(t *testing.T) {
 	ts, pool := testHTTPServer(t)
 	w := testdb.CreateWorld(t, pool, "W-HTTP-A")
-	userID := testdb.CreateUser(t, pool, "http@example.com", "s3cret", []testdb.Join{{WorldID: w}})
-	testdb.MakeAdmin(t, pool, userID)
+	// A plain manager: admin sessions carry no manager identity, so the
+	// manager dashboard is 403 for them by design.
+	testdb.CreateUser(t, pool, "http@example.com", "s3cret", []testdb.Join{{WorldID: w}})
 	client := ts.Client()
 
 	// 401 without any session.
@@ -337,7 +305,7 @@ func managerCookies(t *testing.T, ts *httptest.Server, pool *pgxpool.Pool, manag
 		`SELECT world_id FROM manager.managers WHERE id = $1`, managerID).Scan(&worldID); err != nil {
 		t.Fatalf("manager world: %v", err)
 	}
-	cfg := pkgauth.JWTConfig{Secret: "api-integration-secret", AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
+	cfg := pkgauth.JWTConfig{Secret: testJWTSecret, AccessTTL: time.Hour, RefreshTTL: 30 * 24 * time.Hour}
 	pair, err := pkgauth.GenerateTokenPair(cfg, pkgauth.ManagerIdentity{ManagerID: managerID, WorldID: worldID, UserID: userID})
 	if err != nil {
 		t.Fatalf("mint manager tokens: %v", err)
@@ -432,7 +400,6 @@ func TestHTTPJobOfferFlow(t *testing.T) {
 	w := testdb.CreateWorld(t, pool, "W-OFFERS")
 	clubID, _ := testdb.CreateClubWithAIManager(t, pool, w)
 	candidate := testdb.CreateUser(t, pool, "candidate@example.com", "s3cret", []testdb.Join{{WorldID: w}})
-	testdb.MakeAdmin(t, pool, candidate) // only admins may log in during phase 1
 	admin := testdb.CreateUser(t, pool, "admin2@example.com", "s3cret", []testdb.Join{{WorldID: w}})
 	testdb.MakeAdmin(t, pool, admin)
 
@@ -620,10 +587,6 @@ func TestHTTPStartSeasonEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create league: %v", err)
 	}
-	unseeded, err := svc.CreateLeague(ctx, internalcompetition.LeagueParams{CountryID: country.ID, Name: "League Two", Tier: 2, TeamCount: 4})
-	if err != nil {
-		t.Fatalf("create unseeded league: %v", err)
-	}
 	kickoffLeague, err := svc.CreateLeague(ctx, internalcompetition.LeagueParams{CountryID: country.ID, Name: "Kickoff", Tier: 2, TeamCount: 4})
 	if err != nil {
 		t.Fatalf("create kickoff league: %v", err)
@@ -634,6 +597,11 @@ func TestHTTPStartSeasonEndpoint(t *testing.T) {
 	}
 	if _, err := svc.SeedWorld(ctx, w); err != nil {
 		t.Fatalf("seed world: %v", err)
+	}
+	// Created after the seed (which fills every league), so it has no members.
+	unseeded, err := svc.CreateLeague(ctx, internalcompetition.LeagueParams{CountryID: country.ID, Name: "League Two", Tier: 2, TeamCount: 4})
+	if err != nil {
+		t.Fatalf("create unseeded league: %v", err)
 	}
 
 	client := ts.Client()
@@ -701,7 +669,8 @@ func TestHTTPStartSeasonEndpoint(t *testing.T) {
 		kickoffLeague.ID, w).Scan(&md1); err != nil {
 		t.Fatalf("kickoff matchday 1: %v", err)
 	}
-	if !md1.Equal(kickoff) {
+	// Compare calendar dates: date_trunc follows the session time zone.
+	if md1.Format("2006-01-02") != kickoff.Format("2006-01-02") {
 		t.Fatalf("matchday 1 = %v, want the pinned kickoff %v", md1, kickoff)
 	}
 

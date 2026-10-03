@@ -228,7 +228,7 @@ func (b *detailBase) regionRef() *RegionRef {
 func (s *Service) detailBase(ctx context.Context, competitionID uuid.UUID) (*detailBase, error) {
 	var b detailBase
 	err := s.pool.QueryRow(ctx, `
-		SELECT c.id, c.world_id, c.country_id, c.region_id, c.tier, c.team_count, c.reputation,
+		SELECT c.id, c.world_id, c.country_id, c.region_id, c.tier, COALESCE(c.team_count, 0), c.reputation,
 		       c.name, c.competition_type, c.status,
 		       COALESCE(wc.name, ''), COALESCE(wc.code, ''), COALESCE(wr.name, '')
 		FROM competition.competitions c

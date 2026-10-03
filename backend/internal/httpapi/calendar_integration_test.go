@@ -64,6 +64,14 @@ func TestHTTPSeasonCalendarAndClubFixtures(t *testing.T) {
 	if resp := get(t, ts, client, "/api/competitions/"+leagueID+"/calendar", plainCookies); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("calendar before season = %d, want 404", resp.StatusCode)
 	}
+	// Pin the exact IM03 pacing: the IM22 staggered default snaps matchdays to
+	// allowed weekdays, so its week count depends on the day the test runs.
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE competition.competition_rules
+		SET scheduling_rules = COALESCE(scheduling_rules, '{}'::jsonb) || '{"staggered": false}'::jsonb
+		WHERE competition_id = $1`, leagueID); err != nil {
+		t.Fatalf("opt out of staggered scheduling: %v", err)
+	}
 	resp = post(t, ts, client, "/api/admin/worlds/"+worldID+"/leagues/"+leagueID+"/season", "", adminCookies)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("start season = %d, want 201", resp.StatusCode)

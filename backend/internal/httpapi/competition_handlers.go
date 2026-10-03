@@ -145,7 +145,7 @@ func (s *server) handleSeedWorld(c *gin.Context) {
 			errors.Is(err, internalcompetition.ErrWorldHasNoLeagues):
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			internalError(c, err)
 		}
 		return
 	}
@@ -155,7 +155,7 @@ func (s *server) handleSeedWorld(c *gin.Context) {
 	}
 	jobID, err := s.seedJobs(c.Request.Context(), worldID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		internalError(c, err)
 		return
 	}
 	log.Printf("admin: seed queued for world %s (job=%d)", worldID, jobID)
@@ -249,11 +249,11 @@ func (s *server) handleSeedWorldStatus(c *gin.Context) {
 	err = s.pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM world.worlds WHERE id = $1), 
 		        COALESCE((SELECT world_seed IS NOT NULL FROM world.worlds WHERE id = $1), FALSE)`,
-		worldID, worldID,
+		worldID,
 	).Scan(&worldExists, &worldSeed)
 	if err != nil {
 		log.Printf("seed-status world %s: check world: %v", worldID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		internalError(c, err)
 		return
 	}
 	if !worldExists {
@@ -273,11 +273,11 @@ func (s *server) handleSeedWorldStatus(c *gin.Context) {
 		                           WHERE cc.competition_id = c.id AND cc.role = 'league')),
 		  (SELECT COUNT(*) FROM club.clubs WHERE world_id = $1),
 		  (SELECT COUNT(*) FROM player.players WHERE world_id = $1 AND club_id IS NULL AND status = 'free_agent')`,
-		worldID, worldID, worldID, worldID,
+		worldID,
 	).Scan(&leaguesTotal, &leaguesSeeded, &clubs, &poolSize)
 	if err != nil {
 		log.Printf("seed-status world %s: read progress: %v", worldID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		internalError(c, err)
 		return
 	}
 
@@ -301,7 +301,7 @@ func (s *server) handleSeedWorldStatus(c *gin.Context) {
 	).Scan(&jobID, &state, &attempt, &maxAttempts, &attemptedAt, &finishedAt, &lastError)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		log.Printf("seed-status world %s: read seed job: %v", worldID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		internalError(c, err)
 		return
 	}
 	if err == nil {

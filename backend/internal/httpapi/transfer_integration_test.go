@@ -156,7 +156,8 @@ func TestHTTPTransferMarketRoundTrip(t *testing.T) {
 		t.Fatalf("bid status = %s, want accepted", got)
 	}
 	ct, ok := bidResp["transfer"].(map[string]any)
-	if !ok || ct["to_club_id"] != tw.HumanClub.String() {
+	toClub, _ := ct["to_club"].(map[string]any)
+	if !ok || toClub["id"] != tw.HumanClub.String() {
 		t.Fatalf("completed transfer missing from response: %v", bidResp["transfer"])
 	}
 

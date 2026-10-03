@@ -52,8 +52,8 @@ func TestHTTPAdminCompetitionDetail(t *testing.T) {
 		t.Fatalf("insert cup: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO competition.competition_rules (competition_id, format, final_date_mode)
-		VALUES ($1, 'knockout', 'calculated')`, cupID); err != nil {
+		INSERT INTO competition.competition_rules (competition_id, format)
+		VALUES ($1, 'knockout')`, cupID); err != nil {
 		t.Fatalf("insert cup rules: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestHTTPAdminCompetitionDetail(t *testing.T) {
 	}
 
 	// Non-admin is denied by the admin gate.
-	plain := testdb.CreateUser(t, pool, "detailplain@example.com", "s3cret", nil)
+	plain := testdb.CreateUser(t, pool, "detailplain@example.com", "s3cret", []testdb.Join{{WorldID: worldID}})
 	plainCookies := login(t, ts, client, "detailplain@example.com", "s3cret")
 	resp = get(t, ts, client, "/api/admin/competitions/"+leagueID.String()+"/detail", plainCookies)
 	if resp.StatusCode != http.StatusForbidden {

@@ -103,11 +103,15 @@ func TestMatchFeedFixtureHeader(t *testing.T) {
 	}
 	var view struct {
 		Fixture struct {
-			ID           string `json:"id"`
-			WorldID      string `json:"world_id"`
-			HomeClubName string `json:"home_club_name"`
-			AwayClubName string `json:"away_club_name"`
-			Status       string `json:"status"`
+			ID       string `json:"id"`
+			WorldID  string `json:"world_id"`
+			HomeClub struct {
+				Name string `json:"name"`
+			} `json:"home_club"`
+			AwayClub struct {
+				Name string `json:"name"`
+			} `json:"away_club"`
+			Status string `json:"status"`
 		} `json:"fixture"`
 		Match *struct {
 			ID        string `json:"id"`
@@ -123,8 +127,8 @@ func TestMatchFeedFixtureHeader(t *testing.T) {
 	if view.Fixture.ID != fixtureID.String() || view.Fixture.WorldID != world.String() {
 		t.Fatalf("fixture id/world = %s/%s, want %s/%s", view.Fixture.ID, view.Fixture.WorldID, fixtureID, world)
 	}
-	if view.Fixture.HomeClubName != "Rovers FC" || view.Fixture.AwayClubName != "United AFC" {
-		t.Fatalf("club names = %q / %q, want Rovers FC / United AFC", view.Fixture.HomeClubName, view.Fixture.AwayClubName)
+	if view.Fixture.HomeClub.Name != "Rovers FC" || view.Fixture.AwayClub.Name != "United AFC" {
+		t.Fatalf("club names = %q / %q, want Rovers FC / United AFC", view.Fixture.HomeClub.Name, view.Fixture.AwayClub.Name)
 	}
 	if view.Match == nil {
 		t.Fatal("match must be present for a kicked-off fixture")
@@ -151,11 +155,13 @@ func TestMatchFeedEventsEndpoint(t *testing.T) {
 	}
 	var body struct {
 		Events []struct {
-			Sequence int             `json:"sequence"`
-			Minute   int             `json:"minute"`
-			Type     string          `json:"type"`
-			ClubID   *string         `json:"club_id"`
-			Detail   json.RawMessage `json:"detail"`
+			Sequence int    `json:"sequence"`
+			Minute   int    `json:"minute"`
+			Type     string `json:"type"`
+			Club     *struct {
+				ID string `json:"id"`
+			} `json:"club"`
+			Detail json.RawMessage `json:"detail"`
 		} `json:"events"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -178,8 +184,8 @@ func TestMatchFeedEventsEndpoint(t *testing.T) {
 	if err := json.Unmarshal(body.Events[1].Detail, &detail); err != nil || detail.Commentary == "" {
 		t.Fatalf("detail commentary must be a JSON object with a commentary line (got %s, err %v)", body.Events[1].Detail, err)
 	}
-	if body.Events[1].ClubID == nil || *body.Events[1].ClubID != home.String() {
-		t.Fatalf("goal club_id = %v, want %s", body.Events[1].ClubID, home)
+	if body.Events[1].Club == nil || body.Events[1].Club.ID != home.String() {
+		t.Fatalf("goal club = %v, want %s", body.Events[1].Club, home)
 	}
 
 	// Unauthenticated callers are rejected by requireAuth.

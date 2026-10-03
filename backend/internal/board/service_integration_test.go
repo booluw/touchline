@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -201,7 +202,11 @@ func TestNegotiateMandateLifecycle(t *testing.T) {
 		`UPDATE club.boards SET personality_type = 'demanding_owner' WHERE club_id = $1`, w.HumanClub); err != nil {
 		t.Fatalf("force persona: %v", err)
 	}
-	newTarget := finish.TargetValue + "2" // +2 places is in-window but beyond tolerance 0
+	cur, err := strconv.Atoi(finish.TargetValue)
+	if err != nil {
+		t.Fatalf("finish target %q: %v", finish.TargetValue, err)
+	}
+	newTarget := strconv.Itoa(cur + 2) // +2 places is in-window but beyond tolerance 0
 	_, _, err = svc.NegotiateMandate(ctx, w.WorldID, w.HumanMgr,
 		internalboard.NegotiateInput{MandateID: finish.ID, TargetValue: newTarget})
 	if !errors.Is(err, internalboard.ErrNegotiationRejected) {
@@ -396,9 +401,9 @@ func forceLowConfidence(t *testing.T, pool *pgxpool.Pool, w transfertest.World) 
 	for i := 0; i < 8; i++ {
 		fake := uuid.New()
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO club.clubs (world_id, name, short_name, country, is_ai_controlled)
-			VALUES ($1, $2, $3, 'england', TRUE)`,
-			w.WorldID, "Filler "+fake.String()[0:6], "FLL"+fake.String()[0:3]); err != nil {
+			INSERT INTO club.clubs (id, world_id, name, short_name, country, is_ai_controlled)
+			VALUES ($1, $2, $3, $4, 'england', TRUE)`,
+			fake, w.WorldID, "Filler "+fake.String()[0:6], "FLL"+fake.String()[0:3]); err != nil {
 			t.Fatalf("insert filler club: %v", err)
 		}
 		clubs = append(clubs, fake)

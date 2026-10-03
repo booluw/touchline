@@ -231,8 +231,8 @@ func (s *Service) mintManagerSession(ctx context.Context, userID uuid.UUID, mana
 func (s *Service) managerClub(ctx context.Context, managerID uuid.UUID) (*apiref.ClubRef, error) {
 	var (
 		clubID    *uuid.UUID
-		name      string
-		shortName string
+		name      *string
+		shortName *string
 	)
 	err := s.pool.QueryRow(ctx, `
 		SELECT m.current_club_id, c.name, c.short_name
@@ -242,10 +242,10 @@ func (s *Service) managerClub(ctx context.Context, managerID uuid.UUID) (*apiref
 	if err != nil {
 		return nil, fmt.Errorf("load manager club: %w", err)
 	}
-	if clubID == nil {
+	if clubID == nil || name == nil || shortName == nil {
 		return nil, nil
 	}
-	return &apiref.ClubRef{ID: *clubID, Name: name, Short: shortName}, nil
+	return &apiref.ClubRef{ID: *clubID, Name: *name, Short: *shortName}, nil
 }
 
 // completeLogin mints the token pair, records the hashed refresh session in one

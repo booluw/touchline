@@ -85,11 +85,7 @@ func insertControlledPlayer(t *testing.T, pool *pgxpool.Pool, worldID, clubID, p
 	}
 
 	if rating > 0 {
-		var away uuid.UUID
-		if err := pool.QueryRow(ctx,
-			`SELECT id FROM club.clubs WHERE id <> $1 LIMIT 1`, clubID).Scan(&away); err != nil {
-			t.Fatalf("load away club: %v", err)
-		}
+		away, _ := testdb.CreateClubWithAIManager(t, pool, worldID)
 		compID := uuid.MustParse("00000000-0000-0000-0000-00000000a001")
 		fixtureID := uuid.MustParse("00000000-0000-0000-0000-000000000f01")
 		matchID := uuid.MustParse("00000000-0000-0000-0000-0000000f0001")
@@ -139,7 +135,8 @@ func TestDevelopmentWeeklyFlexExpansion(t *testing.T) {
 
 	wonderkid := uuid.MustParse("00000000-0000-0000-0000-000000000d01")
 	insertControlledPlayer(t, pool, worldID, clubID, wonderkid, 19, "ST", 85, 85, 8, 0.8,
-		map[string]int{"finishing": 84, "off_the_ball": 80, "pace": 75, "composure": 82})
+		// overall ≈ 84.5 vs potential 85: within the 2-point flex headroom
+		map[string]int{"finishing": 86, "off_the_ball": 84, "pace": 82, "composure": 85})
 
 	setTick(t, pool, worldID, 100)
 	if err := svc.SubmitPlan(ctx, Actor{ManagerID: managerID}, clubID, "attacking"); err != nil {

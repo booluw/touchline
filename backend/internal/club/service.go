@@ -90,7 +90,7 @@ func (s *Service) GetClubDetail(ctx context.Context, clubID uuid.UUID) (*ClubDet
 	var d ClubDetail
 	var (
 		countryID uuid.UUID
-		countryCD string
+		countryCD *string // NULL when the club's country isn't a world country
 	)
 	err := s.pool.QueryRow(ctx, `
 		SELECT c.id, c.world_id, c.name, c.short_name, c.country, c.is_ai_controlled,
@@ -106,8 +106,8 @@ func (s *Service) GetClubDetail(ctx context.Context, clubID uuid.UUID) (*ClubDet
 	if err != nil {
 		return nil, err
 	}
-	if countryID != uuid.Nil {
-		d.CountryRef = &apiref.CountryRef{ID: countryID, Name: d.Country, Code: countryCD}
+	if countryID != uuid.Nil && countryCD != nil {
+		d.CountryRef = &apiref.CountryRef{ID: countryID, Name: d.Country, Code: *countryCD}
 	} else {
 		d.CountryRef = &apiref.CountryRef{Name: d.Country}
 	}
@@ -164,7 +164,7 @@ func (s *Service) GetClubSquad(ctx context.Context, clubID uuid.UUID) ([]SquadPl
 		var sp SquadPlayer
 		var dob time.Time
 		var countryID uuid.UUID
-		var countryCD string
+		var countryCD *string // NULL for nationalities with no world country
 		var worldDate time.Time
 		if err := rows.Scan(&sp.ID, &sp.PersonID, &sp.FirstName, &sp.LastName, &sp.DisplayName,
 			&sp.NationalityCode, &sp.NationalityName, &dob, &sp.PrimaryPosition, &sp.SquadNumber,
@@ -175,9 +175,9 @@ func (s *Service) GetClubSquad(ctx context.Context, clubID uuid.UUID) ([]SquadPl
 		sp.Age = ageAt(dob, worldDate) // the world's calendar, not the server's (IM25)
 		if sp.NationalityCode != "" {
 			sp.Nationality = &apiref.CountryRef{Code: sp.NationalityCode, Name: sp.NationalityName}
-			if countryID != uuid.Nil {
+			if countryID != uuid.Nil && countryCD != nil {
 				sp.Nationality.ID = countryID
-				sp.Nationality.Code = countryCD
+				sp.Nationality.Code = *countryCD
 			}
 		}
 		out = append(out, sp)

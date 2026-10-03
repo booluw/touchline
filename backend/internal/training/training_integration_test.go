@@ -4,6 +4,7 @@ package training
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/touchline/backend/internal/bootstrap"
@@ -129,6 +131,79 @@ func rngForTest(weekTick int64, pid uuid.UUID, key string) *rand.Rand {
 	return rand.New(rand.NewSource(int64(h.Sum64())))
 }
 
+// expectedDevOutputs evaluates the S08-02 development pass through the same
+// loaders ApplyWeekly uses (hidden traits, playing time, facilities, ratings),
+// so expected growth tracks the engine instead of a hand-built neutral input.
+// Call it before ApplyWeekly: it reads the pre-apply state.
+func expectedDevOutputs(t *testing.T, pool *pgxpool.Pool, clubID uuid.UUID, weekTick int64) map[uuid.UUID]development.Outcome {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			t.Errorf("rollback: %v", err)
+		}
+	})
+
+	players, err := loadPlayers(ctx, tx, clubID)
+	if err != nil {
+		t.Fatalf("load players: %v", err)
+	}
+	attrs, err := loadAttributes(ctx, tx, clubID)
+	if err != nil {
+		t.Fatalf("load attributes: %v", err)
+	}
+	ids := make([]uuid.UUID, 0, len(players))
+	for _, p := range players {
+		ids = append(ids, p.id)
+	}
+	conds, err := loadConditions(ctx, tx, ids)
+	if err != nil {
+		t.Fatalf("load conditions: %v", err)
+	}
+	devCtxs, err := loadDevelopmentContexts(ctx, tx, players, clubID, weekTick, ids)
+	if err != nil {
+		t.Fatalf("load development contexts: %v", err)
+	}
+	out := make(map[uuid.UUID]development.Outcome, len(players))
+	for _, p := range players {
+		c := conds[p.id]
+		if c.PlayerID == uuid.Nil {
+			c = defaultCondition(p.id, p.injury)
+		}
+		dc := devCtxs[p.id]
+		dc.Skills = attrs[p.id]
+		dc.PlayingTimePct = c.PlayingTimePct
+		out[p.id] = development.Evaluate(dc.Input)
+	}
+	return out
+}
+
+// conditionBefore reads pid's stored condition the way ApplyWeekly does; ok is
+// false when the player has no row yet and the service will use the lazy default.
+func conditionBefore(t *testing.T, pool *pgxpool.Pool, pid uuid.UUID) (squad.PlayerCondition, bool) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() {
+		if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			t.Errorf("rollback: %v", err)
+		}
+	}()
+	conds, err := loadConditions(ctx, tx, []uuid.UUID{pid})
+	if err != nil {
+		t.Fatalf("load condition: %v", err)
+	}
+	c := conds[pid]
+	return c, c.PlayerID != uuid.Nil
+}
+
 func setTick(t *testing.T, pool *pgxpool.Pool, worldID uuid.UUID, tick int64) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
@@ -222,6 +297,13 @@ func TestApplyWeeklyMatchesDeterministicModel(t *testing.T) {
 	}
 
 	before := loadPlayerModel(t, pool, clubID)
+	devOuts := expectedDevOutputs(t, pool, clubID, 42)
+	var pid uuid.UUID
+	for p := range before {
+		pid = p
+		break
+	}
+	baseline, hasBaseline := conditionBefore(t, pool, pid)
 
 	n, err := svc.ApplyWeekly(ctx, worldID, 42)
 	if err != nil {
@@ -250,10 +332,8 @@ func TestApplyWeeklyMatchesDeterministicModel(t *testing.T) {
 		// a deterministic function of (age, key) applied to positive deltas only.
 		for _, key := range distinctKeys(plan) {
 			d := attrDelta(plan, bm.age, key)
-			devIn := development.Input{Age: bm.age, Position: "ST", Skills: bm.attrs}
-			devMult := development.Evaluate(devIn).Multiplier(key)
 			if d > 0 {
-				d *= devMult
+				d *= devOuts[pid].Multiplier(key)
 			}
 			curr := applyDelta(bm.attrs[key], d, rngForTest(42, pid, key))
 			// veteran decay pass (mirrors service.go lines 316-335).
@@ -277,11 +357,6 @@ func TestApplyWeeklyMatchesDeterministicModel(t *testing.T) {
 
 	// Condition row for the first squad member: exact attacking deltas from
 	// its lazy baseline, using its real injury susceptibility and position.
-	var pid uuid.UUID
-	for p := range before {
-		pid = p
-		break
-	}
 	var (
 		position string
 		injury   int
@@ -299,7 +374,10 @@ func TestApplyWeeklyMatchesDeterministicModel(t *testing.T) {
 		&c.Fatigue, &c.Fitness, &c.Sharpness, &c.InjuryRisk, &c.TacticalFamiliarity); err != nil {
 		t.Fatalf("load condition: %v", err)
 	}
-	wantCondition := applyCondition(defaultCondition(pid, injury), plan, position)
+	if !hasBaseline {
+		baseline = defaultCondition(pid, injury)
+	}
+	wantCondition := applyCondition(baseline, plan, position)
 	// player_condition columns are NUMERIC(5,4), so the DB rounds to 4dp.
 	if !feqEps(c.Fatigue, wantCondition.Fatigue, 1e-4) || !feqEps(c.Fitness, wantCondition.Fitness, 1e-4) ||
 		!feqEps(c.Sharpness, wantCondition.Sharpness, 1e-4) || !feqEps(c.InjuryRisk, wantCondition.InjuryRisk, 1e-4) ||
@@ -403,6 +481,7 @@ func TestRecoveryDetrainsAfterThreeConsecutiveWeeks(t *testing.T) {
 	}
 
 	before := loadPlayerModel(t, pool, clubID)
+	devOuts := expectedDevOutputs(t, pool, clubID, 63)
 	if n, err := svc.ApplyWeekly(ctx, worldID, 63); err != nil || n != 1 {
 		t.Fatalf("apply week 63 = %d, err %v; want 1, nil", n, err)
 	}
@@ -416,8 +495,11 @@ func TestRecoveryDetrainsAfterThreeConsecutiveWeeks(t *testing.T) {
 			t.Fatalf("player %s vanished during apply", pid)
 		}
 		// decision_making growth (seeded binary rounding at tick 63).
-		want := applyDelta(bm.attrs["decision_making"],
-			attrDelta(plan, bm.age, "decision_making"), rngForTest(63, pid, "decision_making"))
+		dm := attrDelta(plan, bm.age, "decision_making")
+		if dm > 0 {
+			dm *= devOuts[pid].Multiplier("decision_making")
+		}
+		want := applyDelta(bm.attrs["decision_making"], dm, rngForTest(63, pid, "decision_making"))
 		if am.attrs["decision_making"] != want {
 			t.Fatalf("decision_making = %d, want %d", am.attrs["decision_making"], want)
 		}

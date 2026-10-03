@@ -74,7 +74,7 @@ func TestPersistMatchRoundTrip(t *testing.T) {
 		tick      = int64(1201)
 	)
 	now := time.Date(2026, 4, 13, 14, 30, 0, 0, time.UTC)
-	matchID := uuid.New()
+	matchID := insertMatch(t, pool, worldID, clubID)
 
 	// Expected outcome: evaluate with the exact context the store loads.
 	var out Outcome
@@ -181,6 +181,33 @@ func TestPersistMatchRoundTrip(t *testing.T) {
 	if re != 0 {
 		t.Errorf("re-persist stored = %d, want 0 (open injury guard)", re)
 	}
+}
+
+// insertMatch creates a completed match (competition → fixture → match) so
+// injuries.match_id satisfies fk_injuries_match.
+func insertMatch(t *testing.T, pool *pgxpool.Pool, worldID, homeID uuid.UUID) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	awayID, _ := testdb.CreateClubWithAIManager(t, pool, worldID)
+	compID, fixtureID, matchID := uuid.New(), uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competition.competitions (id, world_id, name, competition_type)
+		VALUES ($1, $2, 'Injury Cup', 'league')`, compID, worldID); err != nil {
+		t.Fatalf("insert competition: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO match.fixtures (id, world_id, competition_id, home_club_id, away_club_id, scheduled_at, status)
+		VALUES ($1, $2, $3, $4, $5, now(), 'completed')`,
+		fixtureID, worldID, compID, homeID, awayID); err != nil {
+		t.Fatalf("insert fixture: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO match.matches (id, fixture_id, world_id, seed, engine_version, home_score, away_score, status, ended_at)
+		VALUES ($1, $2, $3, 0, '1.6', 1, 0, 'completed', now())`,
+		matchID, fixtureID, worldID); err != nil {
+		t.Fatalf("insert match: %v", err)
+	}
+	return matchID
 }
 
 func persistInTx(t *testing.T, pool *pgxpool.Pool, ctx context.Context, worldID uuid.UUID, tick int64,

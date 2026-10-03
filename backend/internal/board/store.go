@@ -240,6 +240,41 @@ func (s *Store) loadFinances(ctx context.Context, q querier, clubID uuid.UUID, s
 	return nil
 }
 
+// ensureMandates lazily seeds the four-category mandate set for a new
+// (club, manager, season) from the club DNA targets (board-numerics §3). A
+// season that already has any mandate — even resolved ones — is left alone;
+// uq_board_mandate_open_per_category (0039) absorbs concurrent first views.
+func (s *Store) ensureMandates(ctx context.Context, q querier, clubID, managerID uuid.UUID, season int) error {
+	var exists bool
+	if err := q.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM club.board_mandates
+		               WHERE club_id = $1 AND manager_id = $2 AND season = $3)`,
+		clubID, managerID, season).Scan(&exists); err != nil {
+		return fmt.Errorf("check mandates: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	ambition, patience := 50, 50 // neutral defaults, as in loadReview
+	if err := q.QueryRow(ctx, `
+		SELECT competitive_ambition, patience FROM club.club_dna WHERE club_id = $1`, clubID).
+		Scan(&ambition, &patience); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("club dna: %w", err)
+	}
+	finish := expectedFinish(ambition, patience)
+	for _, sd := range mandateSet(finish, expectedPoints(finish)) {
+		if _, err := q.Exec(ctx, `
+			INSERT INTO club.board_mandates
+				(club_id, manager_id, season, category, description, target_type, target_value, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+			ON CONFLICT DO NOTHING`,
+			clubID, managerID, season, sd.Category, sd.Description, sd.TargetType, sd.TargetValue); err != nil {
+			return fmt.Errorf("insert mandate %s: %w", sd.Category, err)
+		}
+	}
+	return nil
+}
+
 // listMandates returns the mandates for a (club, manager, season), open first
 // then by category; manager_id NULL rows (pre-assignment scaffolds) are
 // excluded.
