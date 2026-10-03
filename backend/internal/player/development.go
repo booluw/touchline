@@ -35,6 +35,8 @@ type PlayerDevelopmentDetail struct {
 	Stagnating               bool                     `json:"stagnating"`
 	RecentDeltas             []AttributeDelta         `json:"recent_deltas"`
 	Drivers                  *explanation.Explanation `json:"drivers"`
+	Hidden                   *HiddenAttributes        `json:"hidden_attributes,omitempty"`
+	Dossier                  *PlayerDossier           `json:"dossier"`
 }
 
 // AttributeDelta is one weekly net movement of an attribute key.
@@ -112,6 +114,12 @@ func (s *Service) GetPlayerDevelopmentDetail(ctx context.Context, worldID, manag
 
 	d.Drivers, err = s.latestDevelopmentDrivers(ctx, worldID, playerID)
 	if err != nil {
+		return nil, err
+	}
+	if d.Hidden, err = playerHiddenAttributes(ctx, s.pool, playerID); err != nil {
+		return nil, err
+	}
+	if d.Dossier, err = playerDossier(ctx, s.pool, playerID, true); err != nil {
 		return nil, err
 	}
 	return d, nil

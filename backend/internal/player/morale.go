@@ -70,6 +70,18 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]uuid.UUID, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].Player.ID
+	}
+	hidden, err := squadHiddenAttributes(ctx, s.pool, ids)
+	if err != nil {
+		return nil, err
+	}
+	dossiers, err := loadDossiers(ctx, s.pool, ids)
+	if err != nil {
+		return nil, err
+	}
 	var byPlayer map[uuid.UUID]string
 	if len(open) > 0 {
 		byPlayer = make(map[uuid.UUID]string, len(open))
@@ -81,6 +93,8 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 		if st, ok := byPlayer[rows[i].Player.ID]; ok {
 			rows[i].TransferRequest = st
 		}
+		rows[i].Hidden = hidden[rows[i].Player.ID]
+		rows[i].Dossier = dossiers[rows[i].Player.ID]
 		att := attrs[rows[i].Player.ID]
 		rows[i].Attributes = att
 		rows[i].Overall = squad.PositionalOverall(rows[i].Position, squad.AttributeSnapshot{
@@ -159,6 +173,12 @@ func (s *Service) GetPlayerMoraleDetail(ctx context.Context, worldID, managerID,
 		return nil, err
 	}
 	d.RelationshipEvents = hist
+	if d.Hidden, err = playerHiddenAttributes(ctx, s.pool, playerID); err != nil {
+		return nil, err
+	}
+	if d.Dossier, err = playerDossier(ctx, s.pool, playerID, true); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 

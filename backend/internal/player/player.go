@@ -80,6 +80,31 @@ type PlayerAttributes struct {
 	Positional  int `json:"positional"`
 }
 
+// HiddenAttributes is player.player_hidden_traits ([1,100] each) minus the
+// potential ceiling and its lock (OPD-59, widened by OPD-60). Exact values,
+// and only ever for the caller's own players. nil when the player has no
+// hidden-traits row (unseeded).
+type HiddenAttributes struct {
+	Professionalism      int `json:"professionalism"`
+	Temperament          int `json:"temperament"`
+	Adaptability         int `json:"adaptability"`
+	Consistency          int `json:"consistency"`
+	InjurySusceptibility int `json:"injury_susceptibility"`
+	Ambition             int `json:"ambition"`
+	Loyalty              int `json:"loyalty"`
+	PressureHandling     int `json:"pressure_handling"`
+	LearningSpeed        int `json:"learning_speed"`
+}
+
+// hiddenColumns is the shared SELECT list behind HiddenAttributes, in field order.
+const hiddenColumns = `professionalism, temperament, adaptability, consistency,
+	injury_susceptibility, ambition, loyalty, pressure_handling, learning_speed`
+
+func (h *HiddenAttributes) scanTargets() []any {
+	return []any{&h.Professionalism, &h.Temperament, &h.Adaptability, &h.Consistency,
+		&h.InjurySusceptibility, &h.Ambition, &h.Loyalty, &h.PressureHandling, &h.LearningSpeed}
+}
+
 type PlayerPersonality struct {
 	ID                  uuid.UUID `json:"id"`
 	PlayerID            uuid.UUID `json:"player_id"`
@@ -130,6 +155,8 @@ type PlayerMoraleRow struct {
 	SquadNumber     *int              `json:"squad_number,omitempty"`
 	Attributes      PlayerAttributes  `json:"attributes"`
 	Overall         int               `json:"overall"`
+	Hidden          *HiddenAttributes `json:"hidden_attributes,omitempty"`
+	Dossier         *PlayerDossier    `json:"dossier"`
 }
 
 // TransferRequest is the read model of one player transfer request. Internal
@@ -172,6 +199,8 @@ type PlayerMoraleDetail struct {
 	Explanation        map[string]any         `json:"explanation"`
 	TransferRequest    *TransferRequest       `json:"transfer_request,omitempty"`
 	RelationshipEvents []RelationshipEventRow `json:"relationship_history"`
+	Hidden             *HiddenAttributes      `json:"hidden_attributes,omitempty"`
+	Dossier            *PlayerDossier         `json:"dossier"`
 }
 
 // MoraleExpectation contrasts the agreed role vs the whole-season share.

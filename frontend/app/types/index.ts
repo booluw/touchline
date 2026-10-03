@@ -6,3 +6,5 @@ export * from "./manager"
 // admin and manager both declare these; pick the side each consumer of "~/types" uses.
 export type { League } from "./admin"
 export type { Cup, Fixture, NextFixture } from "./manager"
+
+export * from "./player"

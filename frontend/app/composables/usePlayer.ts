@@ -1,4 +1,5 @@
 import { useToast } from "~/components/ui/Toast"
+import type { Player } from "~/types"
 
 /**
  * One player's detail card (IM20). The wire shape is the backend's
@@ -68,9 +69,9 @@ export function usePlayer() {
    * readable — a cup opponent or a signing target included; the wage is the one
    * field the API withholds when the player is not at the caller's own club.
    */
-  async function getPlayer(playerId: string): Promise<PlayerDetail> {
+  async function getPlayer(playerId: string): Promise<Player> {
     try {
-      return await $api.get<PlayerDetail>(`${apiBase}/api/players/${playerId}`)
+      return await $api.get<Player>(`${apiBase}/api/players/${playerId}`)
     } catch (error) {
       console.error(error)
       notify({

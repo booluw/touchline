@@ -36,7 +36,7 @@ const _class = {
           </button>
         </ToastAction>
       </ToastRoot>
-      <ToastViewport class="fixed top-4 left-1/2 -translate-x-1/2 w-1/5" />
+      <ToastViewport class="fixed z-999 top-4 left-1/2 -translate-x-1/2 w-1/5" />
     </ToastProvider>
   </template>
 </template>

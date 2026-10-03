@@ -172,6 +172,37 @@ func squadRows(ctx context.Context, q dbtx, clubID uuid.UUID) ([]PlayerMoraleRow
 	return out, rows.Err()
 }
 
+// playerHiddenAttributes reads the manager-visible hidden traits of one player,
+// or nil when the player has no hidden-traits row. Callers must already have
+// established the player is at the caller's club (OPD-59).
+func playerHiddenAttributes(ctx context.Context, q dbtx, playerID uuid.UUID) (*HiddenAttributes, error) {
+	all, err := squadHiddenAttributes(ctx, q, []uuid.UUID{playerID})
+	if err != nil {
+		return nil, err
+	}
+	return all[playerID], nil
+}
+
+// squadHiddenAttributes is the batch form of playerHiddenAttributes (roster).
+func squadHiddenAttributes(ctx context.Context, q dbtx, ids []uuid.UUID) (map[uuid.UUID]*HiddenAttributes, error) {
+	rows, err := q.Query(ctx, `SELECT player_id, `+hiddenColumns+`
+		FROM player.player_hidden_traits WHERE player_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID]*HiddenAttributes, len(ids))
+	for rows.Next() {
+		var pid uuid.UUID
+		h := &HiddenAttributes{}
+		if err := rows.Scan(append([]any{&pid}, h.scanTargets()...)...); err != nil {
+			return nil, err
+		}
+		out[pid] = h
+	}
+	return out, rows.Err()
+}
+
 // squadAttributeMeans rolls the club's active-roster attribute EAV up into the
 // per-player six category means (integer mean, round-half-up — the same
 // arithmetic as internal/squad.attachAttributes) that back the roster's

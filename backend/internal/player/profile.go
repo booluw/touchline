@@ -46,6 +46,11 @@ type PlayerDetail struct {
 	// when the player is at the caller's own club: another club's wage is not the
 	// caller's business. Omitted (never zero) when it is not theirs.
 	WeeklyWage *int64 `json:"weekly_wage,omitempty"`
+	// Hidden follows the same rule as WeeklyWage: own club only (OPD-59).
+	Hidden *HiddenAttributes `json:"hidden_attributes,omitempty"`
+	// Dossier is public for any world player; its Private section is own
+	// club only (OPD-60).
+	Dossier *PlayerDossier `json:"dossier"`
 }
 
 // GetPlayerDetail returns one player's profile from the caller's world.
@@ -102,12 +107,19 @@ func (s *Service) GetPlayerDetail(ctx context.Context, worldID, managerID, playe
 	if err != nil && !errors.Is(err, ErrManagerHasNoClub) {
 		return nil, err
 	}
-	if ownClubID != uuid.Nil && prof.ClubID != nil && *prof.ClubID == ownClubID {
+	ownClub := ownClubID != uuid.Nil && prof.ClubID != nil && *prof.ClubID == ownClubID
+	if out.Dossier, err = playerDossier(ctx, s.pool, playerID, ownClub); err != nil {
+		return nil, err
+	}
+	if ownClub {
 		wage, err := playerWeeklyWage(ctx, s.pool, playerID)
 		if err != nil {
 			return nil, err
 		}
 		out.WeeklyWage = wage
+		if out.Hidden, err = playerHiddenAttributes(ctx, s.pool, playerID); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

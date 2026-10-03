@@ -1302,8 +1302,8 @@ paths:
         screen shows), and the career record (appearances, goals, assists,
         average match rating). Scoped to the caller's own world, NOT to the
         caller's club — a manager can open a cup opponent or a rival's star. The
-        player's `weekly_wage` is included **only** when the player is at the
-        caller's own club, and is omitted otherwise. A player in another world is
+        player's `weekly_wage` and `hidden_attributes` are included **only** when
+        the player is at the caller's own club, and are omitted otherwise. A player in another world is
         a 404, identical to a player that does not exist.
       parameters:
         - name: playerID
@@ -4631,6 +4631,8 @@ components:
         squad_number: { type: integer, nullable: true }
         attributes: { $ref: "#/components/schemas/PlayerAttributes" }
         overall: { type: integer, minimum: 1, maximum: 99 }
+        hidden_attributes: { $ref: "#/components/schemas/HiddenAttributes" }
+        dossier: { $ref: "#/components/schemas/PlayerDossier" }
     PlayerDetail:
       type: object
       description: >-
@@ -4658,6 +4660,8 @@ components:
             The player's active weekly contract wage, in whole units. Present
             **only** when the player is at the caller's own club; omitted for any
             other club (a free agent has no contract and no wage).
+        hidden_attributes: { $ref: "#/components/schemas/HiddenAttributes" }
+        dossier: { $ref: "#/components/schemas/PlayerDossier" }
     PlayerCareer:
       type: object
       description: >-
@@ -4692,6 +4696,8 @@ components:
           type: array
           description: Durable player-manager journal (history only).
           items: { $ref: "#/components/schemas/RelationshipEvent" }
+        hidden_attributes: { $ref: "#/components/schemas/HiddenAttributes" }
+        dossier: { $ref: "#/components/schemas/PlayerDossier" }
     MoraleExpectation:
       type: object
       description: The agreed role vs the whole-season share and the resulting satisfaction status.
@@ -4727,6 +4733,8 @@ components:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/Explanation" }]
           description: The stored development explanation from the latest DEVELOPMENT_WEEK event, or null when the club has never had a week evaluated.
+        hidden_attributes: { $ref: "#/components/schemas/HiddenAttributes" }
+        dossier: { $ref: "#/components/schemas/PlayerDossier" }
     AttributeDelta:
       type: object
       description: One weekly net movement of an attribute key (player.player_attribute_changes).
@@ -4928,6 +4936,190 @@ components:
         loyalty: { type: integer, minimum: 1, maximum: 100 }
         attributes: { $ref: "#/components/schemas/PlayerAttributes" }
         overall: { type: integer, minimum: 1, maximum: 99 }
+    HiddenAttributes:
+      type: object
+      description: >-
+        Exact values from player.player_hidden_traits ([1,100] each) except the
+        potential ceiling and its lock, which are never exposed (OPD-59, OPD-60).
+        Present **only** for a player at the caller's own club; omitted for any
+        other club's player and for a player with no hidden-traits row.
+      properties:
+        professionalism: { type: integer, minimum: 1, maximum: 100 }
+        temperament: { type: integer, minimum: 1, maximum: 100 }
+        adaptability: { type: integer, minimum: 1, maximum: 100 }
+        consistency: { type: integer, minimum: 1, maximum: 100 }
+        injury_susceptibility: { type: integer, minimum: 1, maximum: 100 }
+        ambition: { type: integer, minimum: 1, maximum: 100 }
+        loyalty: { type: integer, minimum: 1, maximum: 100 }
+        pressure_handling: { type: integer, minimum: 1, maximum: 100 }
+        learning_speed: { type: integer, minimum: 1, maximum: 100 }
+    PlayerDossier:
+      type: object
+      description: >-
+        Everything stored about the player except the potential ceiling
+        (OPD-60). Snapshot sections (bio, attribute_values, development,
+        condition, personality) are present for any player in the caller's
+        world; a section with no row is null. `history` is present on
+        single-player reads only (never the roster); each log is the 10 most
+        recent rows, newest first. `private` is present only for the caller's
+        own players and only on single-player reads.
+      properties:
+        bio:
+          type: object
+          properties:
+            secondary_positions: { type: array, items: { type: string } }
+            market_value: { type: number }
+            status: { type: string, enum: [active, injured, suspended, on_loan, retired, free_agent] }
+            is_academy_product: { type: boolean }
+            origin: { type: string, enum: [generated, club_academy, street] }
+            country_id: { type: string, format: uuid, nullable: true }
+            developed_by_manager_id: { type: string, format: uuid, nullable: true }
+            created_at: { type: string, format: date-time }
+        attribute_values:
+          type: object
+          description: "Every player_attributes row as category -> key -> value ([1,100]). A category the player has no keys for is absent."
+          additionalProperties:
+            type: object
+            additionalProperties: { type: integer, minimum: 1, maximum: 100 }
+          example: { technical: { finishing: 72, passing: 64 }, physical: { pace: 81 } }
+        development:
+          type: object
+          nullable: true
+          description: player.player_development without the potential columns.
+          properties:
+            last_eval_week: { type: integer, format: int64 }
+            cum_dev_weeks: { type: integer }
+            consecutive_stagnant_weeks: { type: integer }
+            updated_at: { type: string, format: date-time }
+        condition:
+          type: object
+          nullable: true
+          description: player.player_condition, each in [0,1].
+          properties:
+            fatigue: { type: number }
+            fitness: { type: number }
+            sharpness: { type: number }
+            injury_risk: { type: number }
+            tactical_familiarity: { type: number }
+            morale: { type: number }
+            playing_time_pct: { type: number }
+            updated_at: { type: string, format: date-time }
+        personality:
+          type: object
+          nullable: true
+          description: player.player_personality, each in [1,100].
+          properties:
+            professionalism: { type: integer }
+            ambition: { type: integer }
+            loyalty: { type: integer }
+            ego: { type: integer }
+            sociability: { type: integer }
+            adaptability: { type: integer }
+            patience: { type: integer }
+            leadership: { type: integer }
+            emotional_volatility: { type: integer }
+        history:
+          type: object
+          properties:
+            appearances:
+              type: array
+              items:
+                type: object
+                properties:
+                  match_id: { type: string, format: uuid }
+                  played_at: { type: string, format: date-time, nullable: true }
+                  started: { type: boolean }
+                  minutes: { type: integer }
+                  rating: { type: integer, nullable: true, minimum: 1, maximum: 10 }
+                  goals: { type: integer }
+                  assists: { type: integer }
+            attribute_changes:
+              type: array
+              items:
+                type: object
+                properties:
+                  applied_week: { type: integer, format: int64 }
+                  attribute_key: { type: string }
+                  delta: { type: integer }
+                  recorded_at: { type: string, format: date-time }
+            injuries:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  injury_type: { type: string, enum: [muscle, ligament, bone, concussion, illness, recurring] }
+                  severity: { type: integer, minimum: 1, maximum: 10 }
+                  expected_recovery_date: { type: string, format: date-time }
+                  actual_recovery_date: { type: string, format: date-time, nullable: true }
+                  recurrence_risk: { type: number }
+                  setback_days: { type: integer, description: Sum of player.injury_setbacks.days_added. }
+                  match_id: { type: string, format: uuid, nullable: true }
+                  occurred_at: { type: string, format: date-time }
+            events:
+              type: array
+              description: player.player_history.
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  season: { type: integer }
+                  club_id: { type: string, format: uuid, nullable: true }
+                  event_type: { type: string }
+                  description: { type: string }
+                  occurred_at: { type: string, format: date-time }
+        private:
+          type: object
+          properties:
+            transfer_request_cooldown_until: { type: string, format: date-time, nullable: true }
+            contracts:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  club_id: { type: string, format: uuid }
+                  weekly_wage: { type: number }
+                  signing_bonus: { type: number }
+                  start_date: { type: string, format: date-time }
+                  end_date: { type: string, format: date-time }
+                  release_clause: { type: number, nullable: true }
+                  playing_time_promise: { type: string, nullable: true }
+                  status: { type: string, enum: [active, expired, terminated, renewed] }
+                  squad_role: { type: string, nullable: true }
+                  contract_type: { type: string, enum: [senior, youth] }
+                  created_at: { type: string, format: date-time }
+            emotional_states:
+              type: array
+              items:
+                type: object
+                properties:
+                  emotional_state: { type: string }
+                  cause: { type: string }
+                  intensity: { type: integer }
+                  occurred_at: { type: string, format: date-time }
+                  expires_at: { type: string, format: date-time, nullable: true }
+            preferences:
+              type: array
+              description: All of the player's preferences (a bounded profile, not a log).
+              items:
+                type: object
+                properties:
+                  preference_type: { type: string }
+                  preference_value: { type: string }
+                  strength: { type: integer, nullable: true }
+            transfer_requests:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  club_id: { type: string, format: uuid }
+                  status: { type: string }
+                  reason: { type: string }
+                  created_at: { type: string, format: date-time }
+                  resolved_at: { type: string, format: date-time, nullable: true }
+                  reassured_until: { type: string, format: date-time, nullable: true }
     PlayerAttributes:
       type: object
       description: "Six persisted attribute-category means ([1,100] each, round-half-up roll-up of the player_attributes EAV)."

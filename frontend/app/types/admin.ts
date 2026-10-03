@@ -43,7 +43,7 @@ export interface Club {
   tier: number;
 }
 
-export interface Player {
+interface Player {
   id: string;
   name: string;
 }

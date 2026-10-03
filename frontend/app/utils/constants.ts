@@ -80,3 +80,36 @@ export const FORMATION_COORDS: Record<string, { x: number; y: number }[]> = {
     { x: 50, y: 18 },
   ],
 }
+
+export const TACTICS = [
+  {
+    title: "Balanced",
+    id: "balanced",
+    about: "Balanced",
+    formations: [`4-3-3`, `4-4-2`, `4-2-3-1`, `5-3-2`]
+  },
+  {
+    title: "Possession Control",
+    id: "possession",
+    about: "Attack slightly technical/mental-led (passing, vision, composure); defense mental-led (interceptions / positioning)",
+    formations: [`4-3-3`, `3-2-4-1`]
+  },
+  {
+    title: "Gegenpress / High-Press",
+    id: "gegenpress",
+    about: "Attack *physical-led* (stamina, work rate, pressing → physical/ tactical). GK/defensive recipes unchanged",
+    formations: [`4-3-3`, `4-2-3-1`]
+  },
+  {
+    title: "Low-Block / Counter",
+    id: "low_block",
+    about: "Defense *tactical/technical-led* (positioning, tackling) and attack *physical- led * (pace)",
+    formations: [`4-3-3`, `4-4-2`, `4-2-3-1`, `5-3-2`]
+  },
+  {
+    title: "Direct / Long-Ball",
+    id: "direct",
+    about: "Attack *physical/technical-led* (strength, heading, jumping + finishing)",
+    formations: [`4-4-2`, `3-5-2`]
+  }
+]
