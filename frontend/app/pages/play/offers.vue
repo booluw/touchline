@@ -8,8 +8,6 @@ const router = useRouter()
 const { getOffers } = useManagerOffer()
 const { notify } = useToast()
 
-const user = computed(() => store.user)
-
 const offers = ref<Offer[]>([])
 const offerToView = ref<Offer>()
 const loading = ref("loading")
