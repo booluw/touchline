@@ -1,4 +1,7 @@
 <template>
+  <section class="">Login</section>
+</template>
+<!-- <template>
   <div class="min-h-screen flex items-center justify-center">
     <div class="w-full max-w-sm space-y-4">
       <h1 class="text-2xl font-bold text-white">Sign in to Touchline</h1>
@@ -67,4 +70,4 @@ const errorMessage = ref('')
 async function submitLogin() {
   await login(auth.value)
 }
-</script>
+</script> -->

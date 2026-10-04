@@ -477,7 +477,7 @@ func (s *Store) GetOrCreateAbsenceBot(ctx context.Context, worldID uuid.UUID) (u
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO manager.managers (world_id, status, coaching_ability, risk_tolerance, is_policy_bot)
 		VALUES ($1, 'unemployed', 50, 50, TRUE)
-		ON CONFLICT (world_id) WHERE is_policy_bot = TRUE AND current_club_id IS NULL
+		ON CONFLICT (world_id) WHERE is_policy_bot = TRUE AND current_club_id IS NULL AND status = 'unemployed'
 		DO NOTHING
 		RETURNING id`, worldID).Scan(&id)
 	if err != nil {
@@ -485,7 +485,7 @@ func (s *Store) GetOrCreateAbsenceBot(ctx context.Context, worldID uuid.UUID) (u
 		if errors.Is(err, pgx.ErrNoRows) {
 			if err := s.pool.QueryRow(ctx, `
 				SELECT id FROM manager.managers
-				WHERE world_id = $1 AND is_policy_bot = TRUE AND current_club_id IS NULL
+				WHERE world_id = $1 AND is_policy_bot = TRUE AND current_club_id IS NULL AND status = 'unemployed'
 				LIMIT 1`, worldID).Scan(&id); err != nil {
 				return uuid.Nil, fmt.Errorf("absence bot lookup: %w", err)
 			}

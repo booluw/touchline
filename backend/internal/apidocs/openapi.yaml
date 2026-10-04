@@ -181,6 +181,11 @@ paths:
                         description: "The manager's current club, or null when the account is unemployed or an admin."
                         allOf: [{ $ref: "#/components/schemas/ClubRef" }]
                         nullable: true
+                      offer:
+                        description: "A fresh job offer when the manager is unemployed with no pending offer (never offered, declined, expired, resigned or sacked); null otherwise or when no club is free."
+                        anyOf:
+                          - $ref: "#/components/schemas/JobOffer"
+                          - type: "null"
                   - title: worldPicker
                     type: object
                     required: [status, worlds]
@@ -2483,8 +2488,9 @@ paths:
       summary: Resign from my club
       operationId: resign
       description: |
-        The manager vacates their club (back to AI control). Any open offers
-        remain; the manager is once again hirable.
+        The manager vacates their club (back to AI control) and is immediately
+        offered another random league club with no pending offer, never the
+        club just left (best-effort; otherwise at next login).
       responses:
         "200":
           description: Resignation recorded.
@@ -2675,7 +2681,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "409":
-          description: Offer already decided.
+          description: Offer already decided, manager already employed, or the club has since been taken by another human manager.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -2684,14 +2690,27 @@ paths:
       tags: [manager]
       summary: Decline a job offer
       operationId: declineOffer
+      description: |
+        Declines the offer and immediately pairs the manager with another
+        random league club that has no pending offer (never the club just
+        declined). `next_offer` is null when no such club exists.
       parameters:
         - $ref: "#/components/parameters/OfferID"
       responses:
         "200":
-          description: The declined offer.
+          description: The declined offer plus the replacement offer.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/JobOffer" }
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/JobOffer"
+                  - type: object
+                    required: [next_offer]
+                    properties:
+                      next_offer:
+                        anyOf:
+                          - $ref: "#/components/schemas/JobOffer"
+                          - type: "null"
         "404":
           description: Offer not found.
           content:
@@ -4066,7 +4085,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "409":
-          description: Club already has a human manager / not an AI club.
+          description: Club already has a human manager / not an AI club / already has a pending offer to another manager (one pending offer per club).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

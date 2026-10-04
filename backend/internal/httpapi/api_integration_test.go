@@ -651,12 +651,22 @@ func TestHTTPStartSeasonEndpoint(t *testing.T) {
 
 	// Kickoff-date start -> 201 with matchday 1 pinned to the date.
 	var today time.Time
-	if err := pool.QueryRow(ctx, `
-		SELECT date_trunc('day', COALESCE(launched_at, created_at)) + make_interval(days => current_day::int)
-		FROM world.worlds WHERE id = $1`, w).Scan(&today); err != nil {
+	// The server's own (UTC) calendar, not a session-timezone date_trunc.
+	if err := pool.QueryRow(ctx, `SELECT world.world_date($1)`, w).Scan(&today); err != nil {
 		t.Fatalf("world today: %v", err)
 	}
 	kickoff := today.AddDate(0, 0, 2)
+	// The league only kicks off on allowed weekdays (IM05); allow the kickoff's
+	// own ISO weekday so the test does not depend on which day it runs.
+	isoDay := (int(kickoff.Weekday())+6)%7 + 1
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO competition.competition_rules (competition_id, format, scheduling_rules)
+		VALUES ($1, 'round_robin', jsonb_build_object('allowed_weekdays', jsonb_build_array($2::int)))
+		ON CONFLICT (competition_id) DO UPDATE SET scheduling_rules =
+			jsonb_set(COALESCE(competition_rules.scheduling_rules, '{}'::jsonb),
+				'{allowed_weekdays}', jsonb_build_array($2::int))`, kickoffLeague.ID, isoDay); err != nil {
+		t.Fatalf("pin kickoff weekday: %v", err)
+	}
 	resp = post(t, ts, client, seasonURL(kickoffLeague.ID),
 		fmt.Sprintf(`{"kickoff_date": %q}`, kickoff.Format("2006-01-02")), cookies)
 	if resp.StatusCode != http.StatusCreated {

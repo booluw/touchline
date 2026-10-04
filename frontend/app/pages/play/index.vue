@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { useManagerOffer } from '~/composables/manager/offer';
-import type { NextFixture, Offer } from '~/types';
+import type { NextFixture, Offer, Player, Slot, SquadPlayer } from '~/types';
 import { formatMoneyCompact, formatFixtureDateTimeSmart } from '../../utils/helpers';
 import { useManagerDashboard } from '~/composables/manager/dashboard';
 
@@ -22,6 +22,9 @@ const club = {
 const competitions = computed(() => clubStore.competitions)
 const board = computed(() => clubStore.board)
 const lineup = ref()
+const squad = ref<Player[]>()
+const slots = ref<Slot[]>()
+const bench = ref<Player[]>()
 
 const finance = {
   summary: computed(() => financeStore.summary)
@@ -111,7 +114,32 @@ async function getClubTactics() {
 
     // tactics.value = resp.tactics
     lineup.value = resp.lineup
+    squad.value = resp.squad
     loading.tactics = "loaded"
+
+    const startingXI = resp.lineup.slots.map((sl: Slot) => (sl.player.id))
+
+    console.log(startingXI)
+
+    slots.value = resp.lineup.slots.map((s: Slot) => {
+      const player = resp.squad.players.find((p: SquadPlayer) => p?.player?.id === s.player.id)
+
+      return {
+        ...s,
+        player: {
+          ...s.player,
+          display_name: player?.player?.name,
+          squad_number: player?.squad_number
+        }
+      }
+    })
+
+
+
+    bench.value = resp.squad.players.map((player: Player) => {
+      if (!startingXI.includes(player.player.id)) return player
+      return null
+    }).filter((player: Player) => player !== null)
   } catch {
     loading.tactics = "error"
   }
@@ -168,7 +196,7 @@ onMounted(() => init())
                 </div>
                 <div v-if="club.game.fixture.status === 'scheduled'" class="flex flex-col items-center gap-2">
                   <span class="heading text-lg text-void-400">vs</span>
-                  <div class="pill hidden md:flex items-center gap-2">
+                  <div class="pill flex items-center gap-2">
                     <div class="">
                       {{ formatFixtureDateTimeSmart(club.game.fixture.scheduled_at) }}
                     </div>
@@ -412,20 +440,45 @@ onMounted(() => init())
 
         <UiLoader v-if="loading.tactics === 'loading'" />
         <template v-else-if="loading.tactics === 'loaded'">
-          <div class="md:flex gap-5 mt-5">
+          <div v-if="slots" class="md:flex gap-5 mt-5">
             <div class="w-full md:w-120 shrink-0">
-              <PitchView variant="half" :formation="lineup.formation" :slots="lineup.slots" />
+              <PitchView variant="half" :formation="lineup.formation" :slots />
             </div>
-            <div class="flex flex-col gap-3 capitalize">
-              <div class="">
-                <h3 class="heading heading--small">Style</h3>
-                {{ lineup.style }}
+            <div class="max-sm:mt-5">
+              <div class="flex gap-5 capitalize">
+                <div class="">
+                  <h3 class="heading heading--small">Style</h3>
+                  {{ lineup.style }}
+                </div>
+                <div class="">
+                  <h3 class="heading heading--small">formation</h3>
+                  {{ lineup.formation }}
+                </div>
               </div>
-              <div class="">
-                <h3 class="heading heading--small">formation</h3>
-                {{ lineup.formation }}
+
+              <div class="mt-5">
+                <h3 class="heading heading--small">Bench</h3>
+
+                <div class="mt-3 grid grid-cols-5 gap-3">
+                  <!-- {{ bench.length }} -->
+                  <div class="" v-for="(player, key) in bench" :key>
+                    <EmptyPlayer class="w-10" />
+                    <div class="">
+                      <h4 class="text-xs line-clamp-1">
+                        {{ player.first_name }} {{ player.last_name }}
+                      </h4>
+                      <div class="text-[10px]">
+                        {{ player.position }}
+
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
+          </div>
+          <div v-else class="">
+            Set your squad
           </div>
         </template>
         <div v-else class="uppercase text-xs p-10 flex flex-col items-start gap-2">

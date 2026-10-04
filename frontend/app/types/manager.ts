@@ -311,3 +311,11 @@ type PlayerPosition =
   | "RW"
   | "ST"
   | "CF";
+
+export type SlotPlayer = { id?: string, player_id?: string, display_name?: string, squad_number?: number }
+export type Slot = { slot: number, position?: string, player: SlotPlayer }
+export type SquadPlayer = {
+  position?: string, squad_number?: number, first_name?: string, last_name?: string, overall?: number,
+  attributes: Record<'goalkeeping' | 'physical' | 'mental' | 'tactical' | 'technical', number>,
+  player: { id: string, name: string }
+}

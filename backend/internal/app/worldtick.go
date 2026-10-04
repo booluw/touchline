@@ -99,6 +99,11 @@ func (a *App) runDaily(ctx context.Context, ev eventbus.Event) error {
 	if err := a.Transfers.DailyTick(ctx, ev.WorldID, ev.WorldTick); err != nil {
 		return fmt.Errorf("world %s daily transfer market: %w", ev.WorldID, err)
 	}
+	if n, err := a.Manager.ExpireStaleOffers(ctx, ev.WorldID); err != nil {
+		return fmt.Errorf("world %s daily offer expiry: %w", ev.WorldID, err)
+	} else if n > 0 {
+		log.Printf("world %s: expired %d unanswered job offers", ev.WorldID, n)
+	}
 	return nil
 }
 

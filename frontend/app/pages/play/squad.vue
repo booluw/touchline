@@ -7,19 +7,13 @@ import IllustrationsGengenpressTactics from '~/components/illustrations/gengenpr
 import IllustrationsLowblockTactics from '~/components/illustrations/lowblock-tactics.vue';
 import IllustrationsPosessionTactics from '~/components/illustrations/posession-tactics.vue';
 
+import type { SquadPlayer, Slot } from '~/types';
+
 const { getTactics, saveTactics, saveLineup } = useClub()
 const { notify } = useToast()
 
 const loading = ref<"loading" | "loaded" | "error">("loading")
 const saving = ref(false)
-
-type SlotPlayer = { id?: string, player_id?: string, display_name?: string, squad_number?: number }
-type Slot = { slot: number, position?: string, player: SlotPlayer }
-type SquadPlayer = {
-  position?: string, squad_number?: number, first_name?: string, last_name?: string, overall?: number,
-  attributes: Record<'goalkeeping' | 'physical' | 'mental' | 'tactical' | 'technical', number>,
-  player: { id: string, name: string }
-}
 
 const tactics = ref<{ style: string, formation: string, allowed_formations: string[] }>()
 const squad = ref<SquadPlayer[]>([])
@@ -54,7 +48,7 @@ async function init() {
     state.value.style = res.tactics.style
     state.value.formation = res.lineup.formation
     slots.value = res.lineup.slots.map((s: Slot) => {
-      const player = res.squad.players.find((p: SquadPlayer) => p?.player?.id === s.player.id)
+      const player = res.squad.players.find((p: SquadPlayer) => p?.player?.id === s.player?.id)
 
       return {
         ...s,
@@ -180,7 +174,12 @@ const Illustrations = {
       <h2 class="heading heading--small">formation</h2>
       <div class="max-sm:flex-col flex gap-5 md:items-center justify-between">
         <div class="mt-3 flex items-center gap-5">
-          <button v-for="(formation, key) in formations" :key class="pill" :class="{'bg-cyan-500 text-void-700': formation === state.formation }">
+          <button
+            v-for="(formation, key) in formations"
+            :key class="pill cursor-pointer"
+            :class="{'bg-cyan-500 text-void-700': formation === state.formation }"
+            @click="state.formation = formation"
+          >
             {{ formation }}
           </button>
         </div>

@@ -3,6 +3,7 @@
 package httpapi_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -15,7 +16,13 @@ func TestHTTPBoardRoundTrip(t *testing.T) {
 	client := ts.Client()
 	const email = "board-http-owner@example.com"
 	tw := transfertest.Provision(t, pool, "board-http", email)
-	_ = tw
+	// The persona is rolled at club generation; pin one whose tolerance (3)
+	// admits the +2 in-window softening below, or strict boards 409 at random.
+	tag, err := pool.Exec(context.Background(),
+		`UPDATE club.boards SET personality_type = 'patient_owner' WHERE club_id = $1`, tw.HumanClub)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("pin board persona: rows=%d err=%v", tag.RowsAffected(), err)
+	}
 	cookies := loginManager(t, ts, pool, email)
 
 	// Anonymous access is rejected.

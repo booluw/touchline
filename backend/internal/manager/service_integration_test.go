@@ -400,3 +400,168 @@ func TestAcceptJobOfferEventFailureRollsBackState(t *testing.T) {
 		t.Fatalf("JOB_OFFER_ACCEPTED events = %d, want 0 after rollback", events)
 	}
 }
+
+// One pending offer per club: onboarding never proposes the same club to two
+// managers, a decline frees the club and pairs the manager elsewhere, and an
+// accept never displaces a human who took the club first.
+func TestOnboardingOffers_OnePendingPerClub(t *testing.T) {
+	svc, pool := newTestService(t)
+	ctx := context.Background()
+
+	w := testdb.CreateWorld(t, pool, "Onboarding")
+	testdb.CreateClubWithAIManager(t, pool, w)
+	testdb.CreateClubWithAIManager(t, pool, w)
+	testdb.CreateClub(t, pool, w) // no league: must never propose
+	mgr := func(email string) uuid.UUID {
+		return managerIDOf(t, pool, testdb.CreateUser(t, pool, email, "s3cret", []testdb.Join{{WorldID: w}}), w)
+	}
+	m1, m2, m3 := mgr("m1@example.com"), mgr("m2@example.com"), mgr("m3@example.com")
+
+	o1, err := svc.OfferOnboardingJob(ctx, w, m1, uuid.Nil)
+	if err != nil {
+		t.Fatalf("onboard m1: %v", err)
+	}
+	o2, err := svc.OfferOnboardingJob(ctx, w, m2, uuid.Nil)
+	if err != nil {
+		t.Fatalf("onboard m2: %v", err)
+	}
+	if o1.ClubID == o2.ClubID {
+		t.Fatalf("both managers offered club %s", o1.ClubID)
+	}
+	if _, err := svc.OfferOnboardingJob(ctx, w, m3, uuid.Nil); !errors.Is(err, ErrNoOnboardingClub) {
+		t.Fatalf("onboard m3 err = %v, want ErrNoOnboardingClub (league clubs all proposing)", err)
+	}
+	if _, err := svc.CreateJobOffer(ctx, o1.ClubID, m3); !errors.Is(err, ErrClubHasOffer) {
+		t.Fatalf("second offer from club err = %v, want ErrClubHasOffer", err)
+	}
+
+	// m1 declines: the only other league club is busy and the declined club is
+	// excluded, so no replacement; the declined club is free for m3.
+	if _, err := svc.DeclineJobOffer(ctx, o1.ID, m1); err != nil {
+		t.Fatalf("decline: %v", err)
+	}
+	if _, err := svc.OfferOnboardingJob(ctx, w, m1, o1.ClubID); !errors.Is(err, ErrNoOnboardingClub) {
+		t.Fatalf("re-offer excluding declined club err = %v, want ErrNoOnboardingClub", err)
+	}
+	o3, err := svc.OfferOnboardingJob(ctx, w, m3, uuid.Nil)
+	if err != nil || o3.ClubID != o1.ClubID {
+		t.Fatalf("onboard m3 = %+v, %v; want the club m1 declined", o3, err)
+	}
+
+	// m3 also holds an offer from a new club D; accepting o3 must expire it.
+	clubD, _ := testdb.CreateClubWithAIManager(t, pool, w)
+	if _, err := svc.CreateJobOffer(ctx, clubD, m3); err != nil {
+		t.Fatalf("offer D: %v", err)
+	}
+	if _, err := svc.AcceptJobOffer(ctx, o3.ID, m3); err != nil {
+		t.Fatalf("accept o3: %v", err)
+	}
+	if o, err := svc.OfferOnboardingJob(ctx, w, m1, uuid.Nil); err != nil || o.ClubID != clubD {
+		t.Fatalf("onboard m1 after accept = %+v, %v; want club D (m3's stale offer expired)", o, err)
+	}
+
+	// A stale offer for m3's club must not displace m3.
+	stale := bypassOffer(t, pool, w, o3.ClubID, m2)
+	if _, err := svc.AcceptJobOffer(ctx, stale, m2); !errors.Is(err, ErrClubOccupied) {
+		t.Fatalf("accept taken club err = %v, want ErrClubOccupied", err)
+	}
+	var holder uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT current_manager_id FROM club.clubs WHERE id = $1`, o3.ClubID).Scan(&holder); err != nil || holder != m3 {
+		t.Fatalf("club holder = %s, %v; want m3", holder, err)
+	}
+}
+
+// Offers expire after offerTTLDays in-game days; login (EnsureOffer) re-offers
+// any unemployed manager without a pending offer; resigning re-offers at once,
+// never from the club just left.
+func TestOfferExpiryLoginAndResignReoffer(t *testing.T) {
+	svc, pool := newTestService(t)
+	ctx := context.Background()
+
+	w := testdb.CreateWorld(t, pool, "Lifecycle")
+	testdb.CreateClubWithAIManager(t, pool, w)
+	testdb.CreateClubWithAIManager(t, pool, w)
+	m := managerIDOf(t, pool, testdb.CreateUser(t, pool, "life@example.com", "s3cret", []testdb.Join{{WorldID: w}}), w)
+
+	if o, err := svc.EnsureOffer(ctx, uuid.New()); o != nil || err != nil {
+		t.Fatalf("unknown manager = %+v, %v; want nil, nil", o, err)
+	}
+	first, err := svc.EnsureOffer(ctx, m)
+	if err != nil || first == nil {
+		t.Fatalf("login offer = %+v, %v", first, err)
+	}
+	if o, err := svc.EnsureOffer(ctx, m); o != nil || err != nil {
+		t.Fatalf("second login with pending offer = %+v, %v; want nil, nil", o, err)
+	}
+
+	advance := func(days int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE world.worlds SET current_day = current_day + $2 WHERE id = $1`, w, days); err != nil {
+			t.Fatalf("advance world: %v", err)
+		}
+	}
+	advance(offerTTLDays - 1)
+	if n, err := svc.ExpireStaleOffers(ctx, w); err != nil || n != 0 {
+		t.Fatalf("expire before TTL = %d, %v; want 0", n, err)
+	}
+	advance(1)
+	if n, err := svc.ExpireStaleOffers(ctx, w); err != nil || n != 1 {
+		t.Fatalf("expire at TTL = %d, %v; want 1", n, err)
+	}
+	if offers, _ := svc.ListOffers(ctx, m, w); len(offers) != 0 {
+		t.Fatalf("pending after expiry = %d, want 0 (no re-offer until login)", len(offers))
+	}
+
+	again, err := svc.EnsureOffer(ctx, m)
+	if err != nil || again == nil {
+		t.Fatalf("login after expiry = %+v, %v", again, err)
+	}
+	if _, err := svc.AcceptJobOffer(ctx, again.ID, m); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if err := svc.Resign(ctx, m); err != nil {
+		t.Fatalf("resign: %v", err)
+	}
+	offers, err := svc.ListOffers(ctx, m, w)
+	if err != nil || len(offers) != 1 || offers[0].ClubID == again.ClubID {
+		t.Fatalf("after resign offers = %+v, %v; want one from a different club", offers, err)
+	}
+}
+
+// Regression: accepting used to leave the club's policy bot club-less and
+// unemployed, colliding with the world's absence bot on
+// uq_managers_world_policy_bot ("free incumbent manager"). The displaced bot
+// is now retired, so any number of takeovers coexist with the absence bot.
+func TestAcceptJobOffer_RetiresClubBotBesideAbsenceBot(t *testing.T) {
+	svc, pool := newTestService(t)
+	ctx := context.Background()
+
+	w := testdb.CreateWorld(t, pool, "Takeovers")
+	var absence uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO manager.managers (world_id, status, is_policy_bot)
+		VALUES ($1, 'unemployed', TRUE) RETURNING id`, w).Scan(&absence); err != nil {
+		t.Fatalf("absence bot: %v", err)
+	}
+	for i, email := range []string{"t1@example.com", "t2@example.com"} {
+		clubID, botID := testdb.CreateClubWithAIManager(t, pool, w)
+		m := managerIDOf(t, pool, testdb.CreateUser(t, pool, email, "s3cret", []testdb.Join{{WorldID: w}}), w)
+		o, err := svc.CreateJobOffer(ctx, clubID, m)
+		if err != nil {
+			t.Fatalf("offer %d: %v", i, err)
+		}
+		if _, err := svc.AcceptJobOffer(ctx, o.ID, m); err != nil {
+			t.Fatalf("accept %d: %v", i, err)
+		}
+		var status string
+		var club *uuid.UUID
+		if err := pool.QueryRow(ctx, `SELECT status, current_club_id FROM manager.managers WHERE id = $1`, botID).
+			Scan(&status, &club); err != nil || status != "retired" || club != nil {
+			t.Fatalf("displaced bot %d = %s club=%v err=%v, want retired, no club", i, status, club, err)
+		}
+	}
+	var stillAbsence string
+	if err := pool.QueryRow(ctx, `SELECT status FROM manager.managers WHERE id = $1`, absence).Scan(&stillAbsence); err != nil || stillAbsence != "unemployed" {
+		t.Fatalf("absence bot status = %q, %v; want unemployed", stillAbsence, err)
+	}
+}

@@ -12,8 +12,6 @@ export function useToast() {
       ...notification,
       id,
     })
-
-    console.log("Hello Booluw")
     return id
   }
 

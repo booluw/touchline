@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -136,6 +137,7 @@ func (s *server) handleCreateOffer(c *gin.Context) {
 		errors.Is(err, internalmanager.ErrClubOccupied),
 		errors.Is(err, internalmanager.ErrClubWorldMismatch),
 		errors.Is(err, internalmanager.ErrOfferResolved),
+		errors.Is(err, internalmanager.ErrClubHasOffer),
 		errors.Is(err, internalmanager.ErrClubNotPlayable),
 		errors.Is(err, internalmanager.ErrClubNotInLeague):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -195,6 +197,7 @@ func (s *server) handleAcceptOffer(c *gin.Context) {
 	case errors.Is(err, internalmanager.ErrOfferResolved),
 		errors.Is(err, internalmanager.ErrNotOfferCandidate),
 		errors.Is(err, internalmanager.ErrManagerEmployed),
+		errors.Is(err, internalmanager.ErrClubOccupied),
 		errors.Is(err, internalmanager.ErrClubNotPlayable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
@@ -205,7 +208,15 @@ func (s *server) handleAcceptOffer(c *gin.Context) {
 	c.JSON(http.StatusOK, o)
 }
 
-// handleDeclineOffer declines a pending offer.
+// declineResponse is the declined offer plus the replacement offer the
+// manager is immediately paired with (null when no club is available).
+type declineResponse struct {
+	*internalmanager.JobOffer
+	NextOffer *internalmanager.JobOffer `json:"next_offer"`
+}
+
+// handleDeclineOffer declines a pending offer and immediately pairs the
+// manager with another random league club (never the one just declined).
 func (s *server) handleDeclineOffer(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -227,7 +238,13 @@ func (s *server) handleDeclineOffer(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, o)
+	// Best-effort like registration: the decline itself is committed, so a
+	// re-offer failure is logged rather than failing the request.
+	next, err := s.mgrSvc.OfferOnboardingJob(c.Request.Context(), o.WorldID, ident.ManagerID, o.ClubID)
+	if err != nil {
+		log.Printf("decline %s: no replacement offer for manager %s: %v", id, ident.ManagerID, err)
+	}
+	c.JSON(http.StatusOK, declineResponse{JobOffer: o, NextOffer: next})
 }
 
 // handleResign ends the signed-in manager's current assignment (self-service).

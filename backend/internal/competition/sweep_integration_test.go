@@ -272,7 +272,7 @@ func TestRegionalCupIntegrationSweepChoiceFlips(t *testing.T) {
 		t.Fatalf("manager id: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`UPDATE manager.managers SET current_club_id = NULL, status = 'unemployed' WHERE current_club_id = $1`, x); err != nil {
+		`UPDATE manager.managers SET current_club_id = NULL, status = 'retired' WHERE current_club_id = $1`, x); err != nil {
 		t.Fatalf("stand down incumbent: %v", err)
 	}
 	if _, err := pool.Exec(ctx,

@@ -43,29 +43,34 @@ export function useAuth() {
   const worlds = ref<WorldOption[]>([])
   const needsWorldSelection = ref(false)
   const pendingWorldId = ref<string | null>(null)
-  let pendingCredentials: { email: string, password: string } | null = null
+  // let pendingCredentials: { email: string, password: string } | null = null
 
   async function login(payload: { email: string, password: string }) {
     worlds.value = []
     needsWorldSelection.value = false
 
     try {
-      const res = await $api.post<LoginResponse | LoginWorldPicker>(
+      const res = await $api.post<LoginResponse>(
         `${apiBase}/api/auth/login`,
         { ...payload, world_id: pendingWorldId.value ?? undefined },
         { auth: false },
       )
-      if ('status' in res && res.status === 'worlds') {
-        pendingCredentials = payload
-        worlds.value = res.worlds
-        needsWorldSelection.value = true
-        return
-      }
-      pendingWorldId.value = null
-      pendingCredentials = null
+      // if ('status' in res && res.status === 'worlds') {
+      //   pendingCredentials = payload
+      //   worlds.value = res.worlds
+      //   needsWorldSelection.value = true
+      //   return
+      // }
+      // pendingWorldId.value = null
+      // pendingCredentials = null
       const { club, ...resp } = res as LoginResponse
 
       store.setUser(resp)
+      if (club === null) {
+        console.log("Came Here")
+        navigateTo("/play/offers")
+        return
+      }
       clubStore.setClub(club)
 
       notify({
@@ -73,13 +78,20 @@ export function useAuth() {
         description: 'Your team awaits',
         type: 'success'
       })
+
       if (resp.is_admin) {
         navigateTo("/admin")
         return
+      } else {
+        navigateTo("/play")
       }
-      navigateTo("/play")
     } catch (error) {
-      console.error(error)
+      const { data } = error as { data: Record<string, string>}
+      notify({
+        title: "Error",
+        description: data.error,
+        type: "danger"
+      })
     }
   }
 
@@ -94,7 +106,7 @@ export function useAuth() {
       })
       
       store.setUser(rest)
-      navigateTo("/play")
+      navigateTo("/play/offers")
     } catch (error) {
       console.error(error)
       
@@ -107,9 +119,9 @@ export function useAuth() {
   }
 
   // Re-posts the credentials from the world-picker round-trip with the chosen world.
-  async function confirmWorld() {
-    if (pendingCredentials && pendingWorldId.value) await login(pendingCredentials)
-  }
+  // async function confirmWorld() {
+  //   if (pendingCredentials && pendingWorldId.value) await login(pendingCredentials)
+  // }
 
   // Rotates the session. Returns false when the refresh cookie is gone/revoked.
   async function refresh(): Promise<boolean> {
@@ -134,5 +146,5 @@ export function useAuth() {
     return res
   }
 
-  return { user, worlds, needsWorldSelection, login, selectWorld, confirmWorld, refresh, authedFetch, register }
+  return { user, worlds, needsWorldSelection, login, selectWorld, refresh, authedFetch, register }
 }

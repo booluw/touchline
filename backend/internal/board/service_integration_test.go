@@ -253,9 +253,10 @@ func TestNegotiateMandateLifecycle(t *testing.T) {
 		t.Errorf("negotiation events = %d, want 1", evCount)
 	}
 
-	// Another manager's mandate is not negotiable by this caller.
-	if _, _, err := svc.Review(ctx, w.WorldID, 8); err != nil {
-		t.Fatalf("review: %v", err)
+	// Another manager's mandate is not negotiable by this caller. Mandates
+	// are seeded lazily on first board view (OPD-47), so open AI One's board.
+	if _, err := svc.BoardView(ctx, w.WorldID, w.AIOneMgr); err != nil {
+		t.Fatalf("ai board view: %v", err)
 	}
 	var otherMandate uuid.UUID
 	var otherMgr uuid.UUID
@@ -279,6 +280,11 @@ func TestReviewSacksUnderperformingHumanManager(t *testing.T) {
 	svc := newTestService(t, pool)
 
 	forceLowConfidence(t, pool, w)
+	// Mandates are seeded on first board view (OPD-47); the review then
+	// grades them, and broken mandates are what drive confidence to a sack.
+	if _, err := svc.BoardView(ctx, w.WorldID, w.HumanMgr); err != nil {
+		t.Fatalf("board view: %v", err)
+	}
 
 	reviewed, sacked, err := svc.Review(ctx, w.WorldID, 9)
 	if err != nil {
@@ -315,8 +321,9 @@ func TestReviewSacksUnderperformingHumanManager(t *testing.T) {
 	var evCount int
 	var explanationJSON []byte
 	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*), COALESCE((SELECT explanation FROM world.events WHERE actor_id = $1 LIMIT 1), '{}')
-		FROM world.events WHERE event_type = 'MANAGER_SACKED'`).Scan(&evCount, &explanationJSON); err != nil {
+		SELECT COUNT(*), COALESCE((SELECT explanation FROM world.events
+		                           WHERE event_type = 'MANAGER_SACKED' AND actor_id = $1 LIMIT 1), '{}')
+		FROM world.events WHERE event_type = 'MANAGER_SACKED'`, w.HumanMgr).Scan(&evCount, &explanationJSON); err != nil {
 		t.Fatalf("sack events: %v", err)
 	}
 	if evCount != 1 {

@@ -192,7 +192,7 @@ class ApiClient {
               _retriedAfterRefresh: true,
             })
           } catch (refreshError) {
-            return refreshError as any
+            throw refreshError as any
             // return this.handleError(refreshError)
           }
         }

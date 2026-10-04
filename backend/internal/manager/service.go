@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +39,7 @@ var (
 	ErrClubWorldMismatch  = errors.New("club is not in the candidate's world")
 	ErrNoOnboardingClub   = errors.New("no AI club is available for onboarding")
 	ErrNotEmployed        = errors.New("manager has no club")
+	ErrClubHasOffer       = errors.New("club already has a pending offer")
 )
 
 // JobOffer is the offer an AI club makes to an unemployed human manager. The
@@ -113,6 +115,10 @@ const (
 	careerDeltaAcceptedJob = 5
 	careerDeltaSacked      = -10
 )
+
+// offerTTLDays is how many in-game days an offer stays open before the daily
+// world tick expires it, freeing the club to propose to someone else.
+const offerTTLDays = 7
 
 // Service coordinates offer lifecycles, assignment, and the reputation log.
 type Service struct {
@@ -196,6 +202,15 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 	} else if !ok {
 		return nil, ErrClubNotPlayable
 	}
+	// One pending offer per club (0058). The club row lock above serialises
+	// concurrent offers, so this check is race-free; the index is the backstop.
+	var pending bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM manager.job_offers
+		WHERE club_id = $1 AND status = 'proposed')`, clubID).Scan(&pending); err != nil {
+		return nil, fmt.Errorf("check pending offers: %w", err)
+	} else if pending {
+		return nil, ErrClubHasOffer
+	}
 	if in, err := clubInLeague(ctx, tx, clubID); err != nil {
 		return nil, fmt.Errorf("check league: %w", err)
 	} else if !in {
@@ -204,8 +219,8 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 
 	o := &JobOffer{}
 	err = tx.QueryRow(ctx, `
-		INSERT INTO manager.job_offers (world_id, club_id, manager_id, offered_by_manager_id)
-		VALUES ($1, $2, $3, $4) RETURNING id, status, created_at`,
+		INSERT INTO manager.job_offers (world_id, club_id, manager_id, offered_by_manager_id, offered_on)
+		VALUES ($1, $2, $3, $4, world.world_date($1)) RETURNING id, status, created_at`,
 		clubWorld, clubID, candidateID, clubCurrent,
 	).Scan(&o.ID, &o.Status, &o.CreatedAt)
 	if err != nil {
@@ -231,12 +246,11 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 	return o, nil
 }
 
-// OnboardingAIClubID deterministically picks (ORDER BY id LIMIT 1) the first
-// AI club in a world that can still issue job offers: AI-controlled, whose
-// current manager (if any) is its own policy bot. Registration (A13) uses this
-// to auto-offer a new join their first job. Returns ErrNoOnboardingClub when
-// the world has no such club (world seeded without clubs, or all go human-run).
-func (s *Service) OnboardingAIClubID(ctx context.Context, worldID uuid.UUID) (uuid.UUID, error) {
+// OnboardingAIClubID picks a random league club in a world that can still
+// issue a job offer: AI-controlled, run by its policy bot (or nobody), and not
+// already proposing to another manager. exclude (uuid.Nil for none) skips the
+// club a manager just declined. Returns ErrNoOnboardingClub when no club fits.
+func (s *Service) OnboardingAIClubID(ctx context.Context, worldID, exclude uuid.UUID) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := s.pool.QueryRow(ctx, `
 		SELECT c.id
@@ -247,8 +261,11 @@ func (s *Service) OnboardingAIClubID(ctx context.Context, worldID uuid.UUID) (uu
 		  AND (c.current_manager_id IS NULL OR m.is_policy_bot = TRUE)
 		  AND EXISTS (SELECT 1 FROM competition.club_competitions cc
 		               WHERE cc.club_id = c.id AND cc.role = 'league')
-		ORDER BY c.id
-		LIMIT 1`, worldID).Scan(&id)
+		  AND NOT EXISTS (SELECT 1 FROM manager.job_offers o
+		                   WHERE o.club_id = c.id AND o.status = 'proposed')
+		  AND c.id <> $2
+		ORDER BY random()
+		LIMIT 1`, worldID, exclude).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, ErrNoOnboardingClub
 	}
@@ -256,6 +273,61 @@ func (s *Service) OnboardingAIClubID(ctx context.Context, worldID uuid.UUID) (uu
 		return uuid.Nil, fmt.Errorf("pick onboarding club: %w", err)
 	}
 	return id, nil
+}
+
+// OfferOnboardingJob pairs an unemployed manager with a random eligible club
+// (see OnboardingAIClubID), used at registration and right after a decline.
+// A concurrent onboarding can claim the same club first; that is retried.
+func (s *Service) OfferOnboardingJob(ctx context.Context, worldID, managerID, exclude uuid.UUID) (*JobOffer, error) {
+	for attempt := 0; ; attempt++ {
+		clubID, err := s.OnboardingAIClubID(ctx, worldID, exclude)
+		if err != nil {
+			return nil, err
+		}
+		o, err := s.CreateJobOffer(ctx, clubID, managerID)
+		if errors.Is(err, ErrClubHasOffer) && attempt < 3 {
+			continue
+		}
+		return o, err
+	}
+}
+
+// EnsureOffer gives an unemployed human manager with no pending offer a fresh
+// one (called at login): covers never-offered, declined with no club free at
+// the time, expired, resigned and sacked. Returns nil, nil when nothing is due.
+// ponytail: two simultaneous logins can both offer; accepting one expires the other.
+func (s *Service) EnsureOffer(ctx context.Context, managerID uuid.UUID) (*JobOffer, error) {
+	var (
+		worldID uuid.UUID
+		due     bool
+	)
+	err := s.pool.QueryRow(ctx, `
+		SELECT m.world_id,
+		       m.user_id IS NOT NULL AND NOT m.is_policy_bot AND m.status = 'unemployed'
+		       AND NOT EXISTS (SELECT 1 FROM manager.job_offers o
+		                        WHERE o.manager_id = m.id AND o.status = 'proposed')
+		FROM manager.managers m WHERE m.id = $1`, managerID).Scan(&worldID, &due)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !due) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("check offer due: %w", err)
+	}
+	return s.OfferOnboardingJob(ctx, worldID, managerID, uuid.Nil)
+}
+
+// ExpireStaleOffers expires a world's offers left unanswered for offerTTLDays
+// in-game days. The manager is not re-offered here: they get a fresh offer at
+// their next login (EnsureOffer), so inactive managers don't hold clubs.
+func (s *Service) ExpireStaleOffers(ctx context.Context, worldID uuid.UUID) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE manager.job_offers SET status = 'expired', responded_at = now()
+		WHERE world_id = $1 AND status = 'proposed'
+		  AND world.world_date($1) - offered_on >= $2`, worldID, offerTTLDays)
+	if err != nil {
+		return 0, fmt.Errorf("expire stale offers: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // ListOffers returns the candidate's pending offers for a given world.
@@ -274,7 +346,7 @@ func (s *Service) ListOffers(ctx context.Context, managerID, worldID uuid.UUID) 
 	var out []*JobOffer
 	for rows.Next() {
 		o := &JobOffer{}
-		if err := rows.Scan(&o.ID, &o.WorldID, &o.ClubID, &o.ClubName, &o.ClubReputation, &o.ClubTier, &o.ManagerID, &o.Status, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.WorldID, &o.ClubID, &o.ClubName, &o.ClubTier, &o.ClubReputation, &o.ManagerID, &o.Status, &o.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan offer: %w", err)
 		}
 		o.Club = &apiref.ClubRef{ID: o.ClubID, Name: o.ClubName, Reputation: o.ClubReputation, Tier: o.ClubTier}
@@ -404,19 +476,29 @@ func (s *Service) AcceptJobOffer(ctx context.Context, offerID, managerID uuid.UU
 		return nil, ErrManagerEmployed
 	}
 
-	err = tx.QueryRow(ctx, `SELECT name FROM club.clubs WHERE id = $1 FOR UPDATE`, clubID).Scan(&clubName)
+	var humanRun bool
+	err = tx.QueryRow(ctx, `
+		SELECT c.name, NOT c.is_ai_controlled OR COALESCE(NOT m.is_policy_bot, FALSE)
+		FROM club.clubs c LEFT JOIN manager.managers m ON m.id = c.current_manager_id
+		WHERE c.id = $1 FOR UPDATE OF c`, clubID).Scan(&clubName, &humanRun)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrClubNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load club: %w", err)
 	}
+	// Never displace a human: the club may have been taken since the offer.
+	if humanRun {
+		return nil, ErrClubOccupied
+	}
 
-	// The club row is locked above. Hand over: the previous AI manager stands
-	// down so the one-active-per-club index has room, then the human takes the
-	// seat (PRD §45 — an AI club hands over when a real manager accepts).
+	// The club row is locked above. Hand over: the club's policy bot (the only
+	// possible incumbent — humanRun is rejected above) retires so the
+	// one-active-per-club index has room, then the human takes the seat (PRD
+	// §45). Retired, not unemployed: a club-less unemployed bot is the world's
+	// absence bot, unique per world (uq_managers_world_policy_bot, 0060).
 	if _, err := tx.Exec(ctx, `
-		UPDATE manager.managers SET current_club_id = NULL, status = 'unemployed'
+		UPDATE manager.managers SET current_club_id = NULL, status = 'retired'
 		WHERE current_club_id = $1 AND id <> $2`, clubID, managerID); err != nil {
 		return nil, fmt.Errorf("free incumbent manager: %w", err)
 	}
@@ -435,6 +517,13 @@ func (s *Service) AcceptJobOffer(ctx context.Context, offerID, managerID uuid.UU
 	if _, err := tx.Exec(ctx,
 		`UPDATE manager.job_offers SET status = 'accepted', responded_at = now() WHERE id = $1`, offerID); err != nil {
 		return nil, fmt.Errorf("accept offer: %w", err)
+	}
+	// Any other pending offer for this club or this manager is now moot; left
+	// pending it would block the club from proposing to anyone else (0058).
+	if _, err := tx.Exec(ctx, `
+		UPDATE manager.job_offers SET status = 'expired', responded_at = now()
+		WHERE status = 'proposed' AND (club_id = $1 OR manager_id = $2)`, clubID, managerID); err != nil {
+		return nil, fmt.Errorf("expire other offers: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO manager.manager_history (manager_id, world_id, club_id, role, start_date)
@@ -479,12 +568,14 @@ func (s *Service) DeclineJobOffer(ctx context.Context, offerID, managerID uuid.U
 
 	var (
 		offerManager uuid.UUID
+		worldID      uuid.UUID
+		clubID       uuid.UUID
 		status       string
 		createdAt    time.Time
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT manager_id, status, created_at FROM manager.job_offers WHERE id = $1 FOR UPDATE`, offerID,
-	).Scan(&offerManager, &status, &createdAt)
+		`SELECT manager_id, world_id, club_id, status, created_at FROM manager.job_offers WHERE id = $1 FOR UPDATE`, offerID,
+	).Scan(&offerManager, &worldID, &clubID, &status, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrOfferNotFound
 	}
@@ -509,8 +600,8 @@ func (s *Service) DeclineJobOffer(ctx context.Context, offerID, managerID uuid.U
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit decline: %w", err)
 	}
-	return &JobOffer{ID: offerID, ManagerID: managerID, Manager: managerRef,
-		Status: "declined", CreatedAt: createdAt}, nil
+	return &JobOffer{ID: offerID, WorldID: worldID, ClubID: clubID, ManagerID: managerID,
+		Manager: managerRef, Status: "declined", CreatedAt: createdAt}, nil
 }
 
 // Resign has the manager quit their current club (self-service, actor=manager).
@@ -592,6 +683,12 @@ func (s *Service) endAssignment(ctx context.Context, managerID uuid.UUID, reason
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit end-assignment: %w", err)
+	}
+	// Pair the now-unemployed manager with another club straight away, never
+	// the one they just left. Best-effort: the exit itself is committed, and
+	// a manager left without an offer gets one at their next login.
+	if _, err := s.OfferOnboardingJob(ctx, worldID, managerID, clubID); err != nil {
+		log.Printf("%s %s: no replacement offer in world %s: %v", reason, managerID, worldID, err)
 	}
 	return nil
 }

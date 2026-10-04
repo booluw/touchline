@@ -90,6 +90,17 @@ func (s *server) handleLogin(c *gin.Context) {
 		return
 	}
 
+	// An unemployed manager with no pending offer gets one on every login
+	// (best-effort, like registration: a failure never blocks the login).
+	var offer *internalmanager.JobOffer
+	if res.Identity != nil && res.Identity.ManagerID != uuid.Nil {
+		o, oErr := s.mgrSvc.EnsureOffer(c.Request.Context(), res.Identity.ManagerID)
+		if oErr != nil {
+			log.Printf("login %s: no offer for manager %s: %v", res.ID, res.Identity.ManagerID, oErr)
+		}
+		offer = o
+	}
+
 	s.setAuthCookies(c, res.TokenPair)
 	c.JSON(http.StatusOK, gin.H{
 		"display_name": res.DisplayName,
@@ -97,6 +108,7 @@ func (s *server) handleLogin(c *gin.Context) {
 		"is_admin":     res.IsAdmin,
 		"id":           res.ID,
 		"club":         res.Club,
+		"offer":        offer,
 	})
 }
 
@@ -176,16 +188,14 @@ func (s *server) handleRegister(c *gin.Context) {
 		return
 	}
 
-	// Auto-offer (best-effort, A13): the deterministic first available AI club.
-	// A failure never fails the registration, but it is logged so an admin
-	// can see why a new manager has no offer (IM28).
+	// Auto-offer (best-effort, A13): a random league club not already proposing
+	// to someone else. A failure never fails the registration, but it is logged
+	// so an admin can see why a new manager has no offer (IM28).
 	var offer *internalmanager.JobOffer
 	if res.JoinedWorld != nil {
-		clubID, oErr := s.mgrSvc.OnboardingAIClubID(c.Request.Context(), res.JoinedWorld.ID)
+		o, oErr := s.mgrSvc.OfferOnboardingJob(c.Request.Context(), res.JoinedWorld.ID, *res.ManagerID, uuid.Nil)
 		if oErr != nil {
 			log.Printf("register %s: no onboarding offer in world %s: %v", res.UserID, res.JoinedWorld.ID, oErr)
-		} else if o, oErr := s.mgrSvc.CreateJobOffer(c.Request.Context(), clubID, *res.ManagerID); oErr != nil {
-			log.Printf("register %s: onboarding offer from club %s failed: %v", res.UserID, clubID, oErr)
 		} else {
 			offer = o
 		}

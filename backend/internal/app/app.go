@@ -76,6 +76,7 @@ type App struct {
 	Training  *training.Service
 	Finance   *finance.Service
 	Transfers *internaltransfer.Service
+	Manager   *internalmanager.Service
 	Players   *internalplayer.Service
 	Board     *internalboard.Service
 	Social    *internalsocial.Service
@@ -218,6 +219,7 @@ func Build(ctx context.Context, cfg Config) (*App, error) {
 		Training:   trainingSvc,
 		Finance:    financeSvc,
 		Transfers:  transfersSvc,
+		Manager:    managerSvc,
 		Players:    playerSvc,
 		Board:      boardSvc,
 		Social:     socialSvc,

@@ -25,7 +25,10 @@ Offers are issued to an **unemployed** manager by an **AI club**, two ways:
 
 | Source | Endpoint / seam | Notes |
 | --- | --- | --- |
-| Registration auto-offer | `POST /api/auth/register` | When a new manager joins a playable world, the first AI club that can still offer (`OnboardingAIClubID`: AI-controlled, manager is nil or its own policy bot, and **a league member**) is picked deterministically and offered. `offer: null` if no such club exists. |
+| Registration auto-offer | `POST /api/auth/register` | When a new manager joins a playable world, a **random** AI club that can still offer (`OnboardingAIClubID`: AI-controlled, manager is nil or its own policy bot, **a league member**, and **not already proposing to another manager**) is offered via `OfferOnboardingJob`. `offer: null` if no such club exists. |
+| Login | `POST /api/auth/login` | `EnsureOffer`: an unemployed human manager with **no pending offer** (never offered, declined with no club free, expired, resigned/sacked) gets the same random pick; returned as `offer` (else `null`). |
+| Resign / sack re-offer | `POST /api/managers/me/resign`, board sack | Same random pick right after the exit, excluding the club just left. Best-effort; otherwise at next login. |
+| Decline re-offer | `POST /api/offers/:id/decline` | Same random pick as registration, excluding the club just declined (see §4). |
 | Admin | `POST /api/admin/offers` `{"club_id", "manager_id"}` | On behalf of an AI club at game start (or re-offer after a decline). |
 
 **The league gate:** both paths refuse to issue an offer unless the club holds a
@@ -41,9 +44,11 @@ only recruits into leagues that meaningfully matter.
   club never issues offers).
 - The club's world must be playable (`ErrClubNotPlayable`).
 - The club must be in a league (`ErrClubNotInLeague`).
-- Only one **pending** offer per (club, manager) — enforced by the partial
-  unique index on `manager.job_offers(club_id, manager_id) WHERE status =
-  'proposed'`; a duplicate insert surfaces as `ErrOfferResolved`.
+- Only one **pending** offer per **club** (`ErrClubHasOffer`): a club proposes
+  to one manager at a time. Checked under the club row lock and backed by the
+  partial unique index `uq_job_offer_pending_club` (migration 0058). The older
+  per-(club, manager) index still exists; a duplicate there surfaces as
+  `ErrOfferResolved`.
 
 ## 2. What an offer contains
 
@@ -85,15 +90,21 @@ data doesn't exist yet are omitted):
 
 In one transaction: row-locks the offer, verifies it belongs to you
 (`ErrNotOfferCandidate` → 409) and is still `proposed`
-(`ErrOfferResolved` → 409), verifies the world is playable and that you are
-still unemployed (`ErrManagerEmployed` → 409), then:
+(`ErrOfferResolved` → 409), verifies the world is playable, that you are
+still unemployed (`ErrManagerEmployed` → 409), and that the club is still
+AI-run (`ErrClubOccupied` → 409 — a human who took the club first is never
+displaced), then:
 
-1. **The incumbent AI manager stands down** (PRD §45 — an AI club hands over
-   when a real manager accepts).
+1. **The club's policy bot retires** (PRD §45 — an AI club hands over when a
+   real manager accepts): `status = 'retired'`, no club. Not `unemployed` — a
+   club-less unemployed bot is the world's single absence bot
+   (`uq_managers_world_policy_bot`, narrowed in migration 0060).
 2. You are assigned: `manager.managers` → `status='active'`,
    `current_club_id = club`; club → `current_manager_id = you`,
    `is_ai_controlled = FALSE`.
-3. The offer is marked `accepted` (`responded_at` stamped).
+3. The offer is marked `accepted` (`responded_at` stamped); every other
+   pending offer **from this club or to you** is marked `expired`, so the
+   club's one pending slot is never held by a moot offer.
 4. A **career span** is opened (`manager.manager_history`, role `manager`,
    `start_date = today`).
 5. `JOB_OFFER_ACCEPTED` is emitted.
@@ -110,27 +121,34 @@ The current behavior, exactly:
 1. Row-locks the offer; owner ≠ you → `409 ErrNotOfferCandidate`; status ≠
    `proposed` → `409 ErrOfferResolved`.
 2. `UPDATE … SET status = 'declined', responded_at = now()`.
-3. Returns the offer object (`status: "declined"`). **That is all.**
+3. **Immediately re-offers** (`OfferOnboardingJob`): a random league club
+   with no pending offer, never the club just declined (it may be offered
+   again later). Best-effort — a failure is logged, the decline still stands.
+4. Returns the declined offer plus `next_offer` (the replacement `JobOffer`,
+   or `null` when no club is free).
 
-Nothing else happens: no career history row, **no reputation delta** (accept
-`+5`, sack `−10`, decline `0`), no world event, no explanation, no automatic
-re-offer. The manager stays unemployed.
+No career history row, **no reputation delta** (accept `+5`, sack `−10`,
+decline `0`), no world event, no explanation.
 
 Consequences that *are* real:
 
 - The offer is **terminal** — re-declining or accepting it returns
   `409 ErrOfferResolved`.
 - The partial unique index on `(club_id, manager_id) WHERE status='proposed'`
-  frees that slot, so the club **can** issue a fresh offer later — but only
-  via a new `POST /api/admin/offers` (nothing in the engine re-offers on its
-  own).
-- `expired` is a reserved status in the enum (`proposed → accepted | declined |
-  expired`) with **no producer today**: nothing currently expires an offer.
+  and the one-per-club index free the club, so it can propose to the next
+  manager who registers or declines elsewhere.
+- `expired` is produced by an accept (above) and by the **daily world tick**:
+  an offer unanswered for **7 in-game days** (`offerTTLDays`, measured from
+  `offered_on`, the world date at offer time — migration 0059) expires,
+  freeing its club. The manager is not re-offered then; they get a fresh offer
+  at their next login.
 
 ## 5. Ending a job you hold
 
 - **Resign** (`POST /api/managers/me/resign`): career span closed, club back
   to AI control, `MANAGER_RESIGNED`-style event, reputation **unchanged** (0).
+- Both resign and sack then immediately offer the manager another club (never
+  the one they left; see §1).
 - **Sack**: same mechanics, but actor is the board and the event is
   `MANAGER_SACKED` carrying a `board_confidence` explanation, and reputation
   is **−10**.

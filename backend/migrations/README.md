@@ -132,6 +132,9 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0055 | `auth` | One live session per account + server-side logout (IM13): collapse duplicate live `auth.sessions` rows (newest wins) and enforce the invariant with `uq_sessions_one_live_per_user` (partial unique on `user_id` where `revoked_at IS NULL`) |
 | 0056 | `world` | In-game calendar date helpers (IM25): `world.world_date(world_id)` = `COALESCE(launched_at, created_at)` + `current_day` days (OPD-24) and `world.club_world_date(club_id)`, used instead of `CURRENT_DATE` for contract, wage-commitment, age and manager-history dates |
 | 0057 | `manager` / `world` | Per-match ratings (IM33): `manager.match_ratings` (one row per fixture and club: board rating 0-100, supporter sentiment before/after), read by the monthly board review as its Performance factor; adds the `fan_reaction` news category |
+| 0058 | `manager` | One pending job offer per club: unique partial index `uq_job_offer_pending_club` on `manager.job_offers(club_id) WHERE status = 'proposed'` — onboarding/re-offers pick a random league club with no pending offer |
+| 0059 | `manager` | `manager.job_offers.offered_on` (world calendar date at offer time, backfilled to today's world date): the daily world tick expires offers unanswered for 7 in-game days |
+| 0060 | `manager` | `uq_managers_world_policy_bot` narrowed to `status = 'unemployed'`: a club bot displaced by a human is `retired` (keeps its row), so only the world's absence bot is guarded |
 
 ### River migrations (0016–0022)
 
