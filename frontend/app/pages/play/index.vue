@@ -168,14 +168,14 @@ onMounted(() => init())
     <div class="grid gap-5 md:grid-cols-4 grid-rows-2">
       <div class="md:col-span-2 bg-void-900 border-brutal border-cyan-300 p-5 overflow-x-auto">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
-          <h3 class="heading heading--small">Overview</h3>
+          <h3 class="heading">{{ club.club?.name }}</h3>
         </div>
-        <div class="mt-5 space-y-10">
+        <div class="mt-5 space-y-5">
           <UiLoader v-if="loading.fixtures === 'loading'" />
           <div v-else-if="loading.fixtures === 'loaded'">
             <template v-if="club.game">
               <div class="flex items-center text-xs heading heading--small">
-                <nuxt-link :to="`/competitions/${club.game.fixture.competition.id}`" class="text-cyan-600 underline">{{ club.game.fixture.competition.name }}</nuxt-link>
+                <nuxt-link :to="`/competitions/${club.game.fixture.competition.id}`" class="text-cyan-500 underline">{{ club.game.fixture.competition.name }}</nuxt-link>
                 <svg class="fill-void-500 w-4" viewBox="0 0 256 256">
                   <path d="M128,96a32,32,0,1,0,32,32A32,32,0,0,0,128,96Zm0,48a16,16,0,1,1,16-16A16,16,0,0,1,128,144Z">
                   </path>
@@ -220,7 +220,7 @@ onMounted(() => init())
                 </div>
               </div>
 
-              <div class="mt-6">
+              <div class="mt-3">
                 <div class="flex items-center justify-between pb-3">
                   <h3 class="heading heading--small">scot report</h3>
                 </div>
@@ -248,7 +248,7 @@ onMounted(() => init())
         <div v-if="loading.competitions !== 'loaded'"
           class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Competitions</h3>
-          <nuxt-link to="/play/competitions" class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
+          <nuxt-link to="/play/competitions" class="font-mono text-cyan-500 underline hover:text-cyan-500 text-xs uppercase">
             all
           </nuxt-link>
         </div>
@@ -263,7 +263,7 @@ onMounted(() => init())
                 </h3>
 
                 <nuxt-link to="/play/competitions"
-                  class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
+                  class="font-mono text-cyan-500 underline hover:text-cyan-500 text-xs uppercase">
                   {{ competition.competition_type.split("_").join(" ") }}
                 </nuxt-link>
               </div>
@@ -346,7 +346,7 @@ onMounted(() => init())
       <div class="border-brutal p-5 space-y-5"
         :class="[(finance.summary.value?.cash ?? 0) <= 0 ? 'border-loss-500' : 'border-void-500']">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
-          <h3 class="heading heading--small">Finance</h3>
+          <h3 class="heading heading--small">Finance and board</h3>
         </div>
 
         <UiLoader v-if="loading.finance === 'loading'" />
@@ -433,7 +433,7 @@ onMounted(() => init())
       <div class="md:col-span-2 row-span-2 border-brutal border-void-700 p-5">
         <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
           <h3 class="heading heading--small">Squad</h3>
-          <nuxt-link to="/play/squad" class="font-mono text-cyan-500/50 hover:text-cyan-500 text-xs uppercase">
+          <nuxt-link to="/play/squad" class="font-mono text-cyan-500 underline hover:text-cyan-500 text-xs uppercase">
             Manage
           </nuxt-link>
         </div>
@@ -441,7 +441,7 @@ onMounted(() => init())
         <UiLoader v-if="loading.tactics === 'loading'" />
         <template v-else-if="loading.tactics === 'loaded'">
           <div v-if="slots" class="md:flex gap-5 mt-5">
-            <div class="w-full md:w-120 shrink-0">
+            <div class="w-full md:w-100 shrink-0">
               <PitchView variant="half" :formation="lineup.formation" :slots />
             </div>
             <div class="max-sm:mt-5">

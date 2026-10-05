@@ -20,10 +20,11 @@
     <img src="assets/svgs/pitch-half.svg" class="pitch-bg" alt="" aria-hidden="true" />
 
     <button v-for="slot in positionedSlots" :key="slot.slot" class="token"
-      :class="{ empty: !slot.player, selected: slot.slot === props.selectedSlot, 'cursor-pointer': clickable }"
+      :class="{ empty: !slot.player, 'cursor-pointer': clickable }"
       :style="{ left: slot.x + '%', top: slot.y + '%' }" @click="clickable ? $emit('select', props.selectedSlot !== slot.slot ? slot.slot : null) : undefined">
-      <span class="token-number">{{ slot.player?.squad_number ?? '' }}</span>
-      <span class="token-name">{{ slot.player?.display_name ?? 'Empty' }}</span>
+      <EmptyPlayer class="w-12" />
+      <!-- <span class="token-number">{{ slot.player?.squad_number ?? '' }}</span> -->
+      <span class="token-name font-bold" :class="{'text-cyan-500' : slot.slot === props.selectedSlot }">{{ slot.player?.display_name ?? 'Empty' }}</span>
     </button>
   </div>
 </template>
@@ -77,9 +78,9 @@ const positionedSlots = computed(() =>
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 10px 0;
+  /* padding: 10px 0; */
   background: var(--color-void-850, #0e1218);
-  border: 2px solid var(--color-void-600, #2c3542);
+  /* border: 2px solid var(--color-void-600, #2c3542); */
   color: var(--color-void-100, #e4e7eb);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
@@ -89,6 +90,7 @@ const positionedSlots = computed(() =>
 .token.selected {
   border-color: var(--color-cyan-500, #00e8ff);
   color: var(--color-void-50, #f5f6f8);
+  transform: scaleX(1);
 }
 
 .token.empty {
