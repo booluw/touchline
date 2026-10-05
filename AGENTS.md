@@ -9,6 +9,7 @@ Repo-specific guidance for AI coding agents. Keep high-signal only; this file is
 - DB migrations: `backend/migrations/` as numbered `NNNN_name.{up,down}.sql`; add a row to the `migrations/README.md` matrix with each change. Never renumber existing files.
 - API schema: `backend/internal/apidocs/openapi.yaml`. Two Go tests in `backend/internal/httpapi` (`TestDocsCoverRouter`, `TestDocsOpenAPIValid`) gate it: any new/renamed route must be mirrored in openapi.yaml or `go test ./...` fails.
 - Engine invariants are documented in `docs/how-to/` (cups, seasons, cadences) and `docs/product_manager.md` (recorded decisions).
+- **The Touchline Book** (`docs/touchline-book/the-touchline-book.md`) is the consolidated, chapter-per-concept reference for every system; start there and keep its chapters in sync when behaviour changes.
 
 ## Verification (run in this order from `backend/`)
 - `gofmt -w` on every touched Go file
