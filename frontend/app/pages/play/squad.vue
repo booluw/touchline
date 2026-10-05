@@ -214,11 +214,11 @@ const Illustrations = {
             @select="(e: number | null) => selectedSlot = e" :selected-slot />
         </div>
         <div class="border-brutal p-5 border-void-700 bg-void-900 md:block"
-          :class="selectedSlot !== null ? 'block max-smfixed max-sm:bottom-1 max-sm:right-5 max-sm:left-5' : 'hidden'">
+          :class="selectedSlot !== null ? 'block max-sm:fixed max-sm:bottom-0 max-sm:right-5 max-sm:left-5' : 'hidden'">
           <div class="flex items-center justify-between border-b-brutal pb-5 border-void-800">
             <h3 class="heading heading--small">Squad</h3>
 
-            <div v-if="selectedSlot !== null" class="text-sm md:hidden">Select player for <b>{{ slot?.position }}</b>
+            <div v-if="selectedSlot !== null" class="text-sm">Select player for <b>{{ slot?.position }}</b>
             </div>
           </div>
           <div class="grid grid-cols-8 gap-2 mt-5">
