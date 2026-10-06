@@ -46,7 +46,7 @@ export default defineNuxtConfig({
   },
 
   routeRules: {
-    "/play/**/*": { ssr: false },
+    "/play/**/*": { ssr: false, appLayout: 'game' },
     "/admin/**/*": { ssr: false },
   },
 

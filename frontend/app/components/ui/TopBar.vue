@@ -11,6 +11,7 @@ defineProps<{
   date: string
   fixture?: ShellFixture
   inboxCount?: number
+  loading?: boolean
 }>()
 const density = defineModel<DisplayDensity>('density', { default: 'standard' })
 const emit = defineEmits<{ openInbox: [] }>()
@@ -30,10 +31,14 @@ const densityOptions = [
           <span class="text-label text-t3">{{ season }}</span>
           <span class="font-semibold tabular-nums">{{ date }}</span>
         </div>
-        <template v-if="fixture">
-          <div class="h-7 w-px bg-line" aria-hidden="true" />
+        <div class="h-7 w-px bg-line" aria-hidden="true" />
+        <div class="flex flex-col gap-2" v-if="loading">
+          <UiLoader class="h-1 w-20 p-1" />
+          <UiLoader class="h-3 w-30 p-2" />
+        </div>
+        <template v-else-if="fixture">
           <div class="flex flex-col">
-            <span class="text-label text-t3">{{ fixture.context }}</span>
+            <span class="text-label text-t3 capitalize">{{ fixture.context }}</span>
             <span class="font-medium">vs {{ fixture.opponent }} <span class="num ml-1.5 text-important">{{ fixture.countdown }}</span></span>
           </div>
         </template>

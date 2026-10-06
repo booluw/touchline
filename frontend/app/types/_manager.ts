@@ -1,4 +1,4 @@
-import type { World, Club } from "./admin"
+import type { World, Club } from "./_admin"
 
 export interface FinanceFactor { label: string; amount: number }
 export interface BudgetLine { season: number; allocated: number; committed: number; available: number }

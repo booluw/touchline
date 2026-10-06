@@ -1,10 +1,10 @@
 export * from "./user"
 export * from "./api"
-export * from "./auth"
-export * from "./admin"
-export * from "./manager"
+export * from "./_auth"
+export * from "./_admin"
+export * from "./_manager"
 // admin and manager both declare these; pick the side each consumer of "~/types" uses.
-export type { League } from "./admin"
-export type { Cup, Fixture, NextFixture } from "./manager"
+export type { League } from "./_admin"
+export type { Cup, Fixture, NextFixture } from "./_manager"
 
-export * from "./player"
+export * from "./_player"

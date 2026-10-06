@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { Player } from '~/types/player';
+import type { Player } from '~/types/_player';
 
 const props = defineProps<{
   playerId: string
@@ -8,7 +8,7 @@ const props = defineProps<{
 const { getPlayer } = usePlayer()
 
 const player = ref<Player>()
-const loading = ref<'loading'|'loaded'|'error'>("loading")
+const loading = ref<'loading' | 'loaded' | 'error'>("loading")
 
 async function fetchPlayerData() {
   loading.value = "loading"
@@ -16,7 +16,7 @@ async function fetchPlayerData() {
     player.value = await getPlayer(props.playerId)
     loading.value = "loaded"
   } catch {
-   loading.value = "error" 
+    loading.value = "error"
   }
 }
 
@@ -42,7 +42,8 @@ onMounted(async () => {
               <!-- <img :src="`https://flagsapi.com/${player?.nationality.toUpperCase()}/flag/24.png`" class="bg-transparent" /> -->
             </div>
             <div class="flex items-center">
-              <nuxt-link :to="`/clubs/${player?.club.id}`" class="underline text-cyan-500">{{ player?.club.name }}</nuxt-link>
+              <nuxt-link :to="`/clubs/${player?.club.id}`" class="underline text-cyan-500">{{ player?.club.name
+                }}</nuxt-link>
 
               <svg class="w-10 fill-void-500" viewBox="0 0 256 256">
                 <path d="M128,96a32,32,0,1,0,32,32A32,32,0,0,0,128,96Zm0,48a16,16,0,1,1,16-16A16,16,0,0,1,128,144Z">
@@ -82,12 +83,14 @@ onMounted(async () => {
 
         <div class="" v-if="player.dossier.private.contracts.length !== 0">
           <h3 class="heading heading--small">wsalary</h3>
-          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.weekly_wage as number) }}</h2>
+          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.weekly_wage as number)
+            }}</h2>
         </div>
 
         <div class="" v-if="player.dossier.private.contracts.length !== 0">
           <h3 class="heading heading--small">release fee</h3>
-          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.release_clause as number) }}</h2>
+          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.release_clause as
+            number) }}</h2>
         </div>
 
         <div class="text-center" v-if="player.dossier.private.contracts.length !== 0">
@@ -97,12 +100,7 @@ onMounted(async () => {
       </div>
 
       <div class="mt-5">
-        <AccordionRoot
-          class="border border-void-500"
-          default-value="stats"
-          type="single"
-          :collapsible="true"
-        >
+        <AccordionRoot class="border border-void-500" default-value="stats" type="single" :collapsible="true">
           <AccordionItem value="stats">
             <AccordionHeader class="border-b p-3 heading heading--small bg-void-800">
               <AccordionTrigger class="heading heading--small text-cyan-600 cursor-pointer">
@@ -119,7 +117,7 @@ onMounted(async () => {
                     <Bar :value="100 - (player.dossier.condition.injury_risk * 100)" label="injury risk" inverse />
                   </div>
                 </div>
-                
+
                 <div v-for="(attr, key) in Object.keys(player.dossier.attribute_values).reverse()" :key>
                   <h3 class="capitalize">{{ attr }}</h3>
 

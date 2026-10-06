@@ -12,6 +12,7 @@ defineProps<{
   date: string
   fixture?: ShellFixture
   inboxCount?: number
+  loading?: boolean
 }>()
 const density = defineModel<DisplayDensity>('density', { default: 'standard' })
 const emit = defineEmits<{ openInbox: [] }>()
@@ -23,7 +24,8 @@ const emit = defineEmits<{ openInbox: [] }>()
     <div class="flex min-w-0 flex-1 flex-col">
       <UiTopBar
         v-model:density="density"
-        :club="club" :season="season" :date="date" :fixture="fixture" :inbox-count="inboxCount"
+        :club :season :date :fixture :inbox-count="inboxCount"
+        :loading
         @open-inbox="emit('openInbox')"
       />
       <main class="min-h-0 flex-1 overflow-y-auto p-3.5 md:p-5"><slot /></main>
