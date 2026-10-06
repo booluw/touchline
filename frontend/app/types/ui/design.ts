@@ -1,7 +1,7 @@
 /** Shared prop types for the Touchline design-system components (app/components/ui). */
 
 /** Attention tiers used by the Home inbox and decision cards. */
-export type AttentionTier = 'urgent' | 'important' | 'info'
+export type AttentionTier = 'urgent' | 'important' | "interesting"
 
 /** Semantic tone. Colour is only for meaning: "should I act?". */
 export type SemanticTone = AttentionTier | 'pos' | 'neg' | 'neutral'
