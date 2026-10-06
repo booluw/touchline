@@ -23,7 +23,7 @@ async function registerUser(valid: boolean) {
 </script>
 
 <template>
-  <UiModal size="w-full md:w-1/2 md:h-[400px]" @close="router.push('/')" hide-title>
+  <OldUiModal size="w-full md:w-1/2 md:h-[400px]" @close="router.push('/')" hide-title>
     <div class="h-full grid gap-2 md:grid-cols-2 items-center">
       <div class="flex flex-col gap-10">
         <img src="~/assets/svgs/logomark.svg" class="w-2/5" alt="Touchline logomark" />
@@ -32,18 +32,18 @@ async function registerUser(valid: boolean) {
         </h1>
       </div>
       <div class="">
-        <UiForm @submit="registerUser" :state :schema>
-          <UiFormItem label="Name" prop="display_name">
-            <UiInput v-model="state.display_name" placeholder="Jose Mourinho" />
-          </UiFormItem>
-          <UiFormItem label="Email" prop="email">
-            <UiInput v-model="state.email" placeholder="jose.mourinho@example.com" />
-          </UiFormItem>
-          <UiFormItem label="Password" prop="password">
-            <UiInput v-model="state.password" type="password" placeholder="jose-mourinho-4321" />
-          </UiFormItem>
-          <UiButton width="full" :loading>Register</UiButton>
-        </UiForm>
+        <OldUiForm @submit="registerUser" :state :schema>
+          <OldUiFormItem label="Name" prop="display_name">
+            <OldUiInput v-model="state.display_name" placeholder="Jose Mourinho" />
+          </OldUiFormItem>
+          <OldUiFormItem label="Email" prop="email">
+            <OldUiInput v-model="state.email" placeholder="jose.mourinho@example.com" />
+          </OldUiFormItem>
+          <OldUiFormItem label="Password" prop="password">
+            <OldUiInput v-model="state.password" type="password" placeholder="jose-mourinho-4321" />
+          </OldUiFormItem>
+          <OldUiButton width="full" :loading>Register</OldUiButton>
+        </OldUiForm>
 
         <div class="mt-5 heading heading--small">
           already had an account?
@@ -51,5 +51,5 @@ async function registerUser(valid: boolean) {
         </div>
       </div>
     </div>
-  </UiModal>
+  </OldUiModal>
 </template>

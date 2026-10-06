@@ -15,6 +15,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@ark-ui/vue": "^5.39.2",
+    "@phosphor-icons/vue": "^2.2.1",
     "@tailwindcss/vite": "^4.3.3",
     "clsx": "^2.1.1",
     "nuxt": "^4.5.2",

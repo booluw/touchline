@@ -3,6 +3,7 @@
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
-    <LazyUiToast />
+    <LazyOldUiToast />
+    <UiToaster />
   </section>
 </template>

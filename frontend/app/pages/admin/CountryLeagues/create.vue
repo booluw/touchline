@@ -48,43 +48,43 @@ async function createNewLeague(valid: boolean, errors: Record<string, string>) {
 </script>
 
 <template>
-  <UiSlide @close="() => router.go(-1)" title="Create League" :description="`Create a new league for ${country?.name ?? ''}`">
-    <UiForm @submit="createNewLeague" class="h-full flex flex-col gap-10" :state :schema>
+  <OldUiSlide @close="() => router.go(-1)" title="Create League" :description="`Create a new league for ${country?.name ?? ''}`">
+    <OldUiForm @submit="createNewLeague" class="h-full flex flex-col gap-10" :state :schema>
       <div class="">
         <div class="grid gap-3 md:grid-cols-5">
-          <UiFormItem class="col-span-3" label="Name" prop="name">
-            <UiInput v-model="state.name" :placeholder="`The ${country?.name ?? ''} Premier League`" />
-          </UiFormItem>
-          <UiFormItem label="Tier" prop="tier">
-            <UiInput v-model="state.tier" type="number" placeholder="League Tier" />
-          </UiFormItem>
-          <UiFormItem label="Teams" prop="team_count">
-            <UiInput v-model="state.team_count" type="number" placeholder="Number of teams" />
-          </UiFormItem>
+          <OldUiFormItem class="col-span-3" label="Name" prop="name">
+            <OldUiInput v-model="state.name" :placeholder="`The ${country?.name ?? ''} Premier League`" />
+          </OldUiFormItem>
+          <OldUiFormItem label="Tier" prop="tier">
+            <OldUiInput v-model="state.tier" type="number" placeholder="League Tier" />
+          </OldUiFormItem>
+          <OldUiFormItem label="Teams" prop="team_count">
+            <OldUiInput v-model="state.team_count" type="number" placeholder="Number of teams" />
+          </OldUiFormItem>
         </div>
 
         <div class="">
           <h3 class="mb-2 font-mono uppercase text-sm font-semibold">Promotions</h3>
           <div class="grid md:grid-cols-2 gap-3">
-            <UiFormItem label="Promotion league" prop="promotes_to">
-              <UiSelect v-model="state.promotes_to" :options="leagues" item-id="id" item-val="name" placeholder="Select League For Promotion" />
-            </UiFormItem>
-            <UiFormItem label="Teams To Promote" prop="promotions">
-              <UiInput v-model="state.promotions" type="number" placeholder="Number of teams to promote" />
-            </UiFormItem>
+            <OldUiFormItem label="Promotion league" prop="promotes_to">
+              <OldUiSelect v-model="state.promotes_to" :options="leagues" item-id="id" item-val="name" placeholder="Select League For Promotion" />
+            </OldUiFormItem>
+            <OldUiFormItem label="Teams To Promote" prop="promotions">
+              <OldUiInput v-model="state.promotions" type="number" placeholder="Number of teams to promote" />
+            </OldUiFormItem>
           </div>
         </div>
 
         <div class="">
           <h3 class="mb-2 font-mono uppercase text-sm font-semibold">Relegations</h3>
           <div class="grid md:grid-cols-2 gap-3">
-            <UiFormItem label="Relegation league" prop="relegates_to">
-              <UiSelect v-model="state.relegates_to" :options="leagues" item-id="id" item-val="name"
+            <OldUiFormItem label="Relegation league" prop="relegates_to">
+              <OldUiSelect v-model="state.relegates_to" :options="leagues" item-id="id" item-val="name"
                 placeholder="Select League For Relegation" />
-            </UiFormItem>
-            <UiFormItem label="Teams To Relegate" prop="relegations">
-              <UiInput v-model="state.relegations" type="number" placeholder="Number of teams to relegate" />
-            </UiFormItem>
+            </OldUiFormItem>
+            <OldUiFormItem label="Teams To Relegate" prop="relegations">
+              <OldUiInput v-model="state.relegations" type="number" placeholder="Number of teams to relegate" />
+            </OldUiFormItem>
           </div>
         </div>
       </div>
@@ -92,6 +92,6 @@ async function createNewLeague(valid: boolean, errors: Record<string, string>) {
       <button type="submit" class="button button--primary">
         Create {{ country?.name }} League
       </button>
-    </UiForm>
-  </UiSlide>
+    </OldUiForm>
+  </OldUiSlide>
 </template>

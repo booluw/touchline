@@ -51,7 +51,7 @@ onMounted(init)
       <h2 class="page__header">Player</h2>
     </div>
 
-    <UiLoader v-if="loading === 'loading'" />
+    <OldUiLoader v-if="loading === 'loading'" />
 
     <p v-else-if="loading === 'error'" class="text-red-400">That player could not be loaded. They may not play in your world.</p>
 

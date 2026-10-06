@@ -2,7 +2,7 @@
 import type { Offer } from '~/types';
 import { formatMoneyCompact } from '../../utils/helpers';
 import { useManagerOffer } from '~/composables/manager/offer';
-import { useToast } from '../ui/Toast';
+import { useToast } from '../old-ui/Toast';
 
 const props = defineProps<{ offer: Offer }>()
 const emit = defineEmits(["close", "done"])
@@ -47,7 +47,7 @@ async function rejectJobOffer() {
 </script>
 
 <template>
-  <UiModal size="w-2/4 h-[500px]" :title="`${offer.club.name} want you to be their next manager`" @close="emit('close')">
+  <OldUiModal size="w-2/4 h-[500px]" :title="`${offer.club.name} want you to be their next manager`" @close="emit('close')">
     <div class="h-80 overflow-auto space-y-10">
       <div class="space-y-1">
         <h3 class="heading heading--small">finance</h3>
@@ -159,5 +159,5 @@ async function rejectJobOffer() {
       <button class="button button--danger" @click.once="rejectJobOffer()">Decline</button>
       <button class="button button--primary" @click.once="acceptJobOffer()">Accept</button>
     </div>
-  </UiModal>
+  </OldUiModal>
 </template>

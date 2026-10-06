@@ -23,13 +23,13 @@ async function createNewWorld(valid: boolean) {
 </script>
 
 <template>
-  <UiModal title="Create World" description="Shoot for the galaxies!!!" @close="() => router.push({ name: 'admin-world' })">
-    <UiForm @submit="createNewWorld" :state :schema>
-      <UiFormItem label="World Name" prop="name">
-        <UiInput v-model="state.name" placeholder="The next galaxy." />
-      </UiFormItem>
+  <OldUiModal title="Create World" description="Shoot for the galaxies!!!" @close="() => router.push({ name: 'admin-world' })">
+    <OldUiForm @submit="createNewWorld" :state :schema>
+      <OldUiFormItem label="World Name" prop="name">
+        <OldUiInput v-model="state.name" placeholder="The next galaxy." />
+      </OldUiFormItem>
 
       <button class="button button--primary">Create New World</button>
-    </UiForm>
-  </UiModal>
+    </OldUiForm>
+  </OldUiModal>
 </template>

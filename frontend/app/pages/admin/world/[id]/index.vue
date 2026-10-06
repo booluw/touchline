@@ -13,7 +13,7 @@ onMounted(() => fetchCountry(String(route.params.id)))
 </script>
 
 <template>
-  <UiSlide
+  <OldUiSlide
     v-if="world"
     :title="world.name"
     :description="`All countries under World: ${world.name}`"
@@ -43,6 +43,6 @@ onMounted(() => fetchCountry(String(route.params.id)))
         <h3 class="card__heading">{{ country.name }}</h3>
       </nuxt-link>
     </div>
-  </UiSlide>
+  </OldUiSlide>
   <NuxtPage />
 </template>

@@ -1,0 +1,98 @@
+/* Touchline design-system tokens (Claude Design project "Touchline").
+   Imported after main.css. Dark is default; add class="light" or data-theme="light" on <html> for light.
+   Fonts are exposed as font-geist / font-geist-mono so the legacy theme's --font-sans stays untouched. */
+
+
+@custom-variant light (&:where(.light, .light *, [data-theme=light], [data-theme=light] *));
+
+@theme {
+  --font-geist: "Geist", system-ui, sans-serif;
+  --font-geist-mono: "Geist Mono", ui-monospace, monospace;
+
+  --text-page: 28px;    --text-page--line-height: 1.15;    --text-page--font-weight: 600;    --text-page--letter-spacing: -0.02em;
+  --text-section: 20px; --text-section--line-height: 1.25; --text-section--font-weight: 600; --text-section--letter-spacing: -0.01em;
+  --text-card: 15px;    --text-card--line-height: 1.35;    --text-card--font-weight: 600;
+  --text-body: 13px;    --text-body--line-height: 1.45;
+  --text-meta: 12px;    --text-meta--line-height: 1.4;
+  --text-label: 11px;   --text-label--line-height: 1.3;    --text-label--font-weight: 500;   --text-label--letter-spacing: 0.06em;
+  --text-pill: 10.5px;  --text-pill--line-height: 1.3;
+
+  --radius-pill: 4px;
+  --radius-control: 6px;
+  --radius-nested: 8px;
+  --radius-card: 10px;
+  --radius-panel: 12px;
+  --radius-sheet: 16px;
+
+  --shadow-float: 0 8px 24px rgb(0 0 0 / 0.25);
+
+  --color-bg: var(--tl-bg);
+  --color-s1: var(--tl-s1);
+  --color-s2: var(--tl-s2);
+  --color-s3: var(--tl-s3);
+  --color-line: var(--tl-line);
+  --color-line2: var(--tl-line2);
+  --color-t1: var(--tl-t1);
+  --color-t2: var(--tl-t2);
+  --color-t3: var(--tl-t3);
+  --color-btn: var(--tl-btn);
+  --color-btn-t: var(--tl-btn-t);
+
+  --color-urgent: var(--tl-urgent);
+  --color-important: var(--tl-important);
+  --color-pos: var(--tl-pos);
+  --color-neg: var(--tl-neg);
+  --color-info: var(--tl-info);
+  --color-neutral: var(--tl-neutral);
+  --color-restriction: var(--tl-restriction);
+
+  --color-urgent-bg: var(--tl-urgent-bg);
+  --color-important-bg: var(--tl-important-bg);
+  --color-pos-bg: var(--tl-pos-bg);
+  --color-info-bg: var(--tl-info-bg);
+
+  /* Identity: crest/team colour only, never for meaning */
+  --color-club: oklch(0.52 0.15 20);
+  --color-opp: oklch(0.5 0.1 240);
+}
+
+@layer base {
+  :root {
+    --tl-bg: #0b0c0e; --tl-s1: #121417; --tl-s2: #181b1f; --tl-s3: #20242a;
+    --tl-line: #262a31; --tl-line2: #333841;
+    --tl-t1: #eceef1; --tl-t2: #a3a9b3; --tl-t3: #6b717c;
+    --tl-btn: #eceef1; --tl-btn-t: #0b0c0e;
+    --tl-urgent: oklch(0.68 0.19 25);
+    --tl-important: oklch(0.80 0.14 75);
+    --tl-pos: oklch(0.76 0.15 155);
+    --tl-neg: oklch(0.68 0.17 22);
+    --tl-info: oklch(0.74 0.12 250);
+    --tl-neutral: #8a909a;
+    --tl-restriction: oklch(0.74 0.17 50);
+    --tl-urgent-bg: oklch(0.68 0.19 25 / 0.12);
+    --tl-important-bg: oklch(0.80 0.14 75 / 0.12);
+    --tl-pos-bg: oklch(0.76 0.15 155 / 0.12);
+    --tl-info-bg: oklch(0.74 0.12 250 / 0.12);
+  }
+  :root.light, [data-theme=light] {
+    --tl-bg: #f6f6f4; --tl-s1: #ffffff; --tl-s2: #f1f1ee; --tl-s3: #e8e8e4;
+    --tl-line: #e2e2de; --tl-line2: #d0d0cb;
+    --tl-t1: #16181b; --tl-t2: #565b63; --tl-t3: #8a8f97;
+    --tl-btn: #16181b; --tl-btn-t: #ffffff;
+    --tl-urgent: oklch(0.55 0.2 25);
+    --tl-important: oklch(0.62 0.14 65);
+    --tl-pos: oklch(0.55 0.14 155);
+    --tl-neg: oklch(0.55 0.18 22);
+    --tl-info: oklch(0.55 0.14 250);
+    --tl-neutral: #6b7079;
+    --tl-restriction: oklch(0.6 0.17 50);
+    --tl-urgent-bg: oklch(0.55 0.2 25 / 0.09);
+    --tl-important-bg: oklch(0.7 0.14 70 / 0.14);
+    --tl-pos-bg: oklch(0.55 0.14 155 / 0.1);
+    --tl-info-bg: oklch(0.55 0.14 250 / 0.1);
+    color-scheme: light;
+  }
+}
+
+@utility num { font-family: var(--font-geist-mono); font-variant-numeric: tabular-nums; }
+@utility label-caps { font-size: var(--text-label); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-t3); }

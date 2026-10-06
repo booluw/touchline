@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useToast } from "~/components/ui/Toast"
+import { useToast } from "~/components/old-ui/Toast"
 
 export function useAdminOverview({ worldId, countryId }: { worldId: string, countryId: string }) {
   const { public: { apiBase } } = useRuntimeConfig()

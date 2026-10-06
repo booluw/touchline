@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { useToast } from '~/components/ui/Toast';
+import { useToast } from '~/components/old-ui/Toast';
 import { useAdminOverview } from '~/composables/admin/overview';
 import { useAuth } from '~/composables/useAuth';
 import type { ClubRow, Country, CountryClubs, CountryStats, World, CountryMarketData } from '~/types';
@@ -238,7 +238,7 @@ onMounted(() => initCountryDashboard())
     <section class="grid gap-5 grid-cols-4 grid-rows-3">
       <div class="col-span-2 bg-void-900 border-brutal border-cyan-300 p-5">
         <h3 class="heading heading--small">economics</h3>
-        <UiLoader v-if="status.overview === 'loading'" />
+        <OldUiLoader v-if="status.overview === 'loading'" />
         <div v-else-if="status.overview === 'loaded'" class="grid grid-cols-4 gap-5 mt-5">
           <div class="row-span-2 flex flex-col justify-center">
             <h3 class="heading heading--big">{{ formatMoneyCompact(overview!.economy.cash) }}</h3>
@@ -291,7 +291,7 @@ onMounted(() => initCountryDashboard())
             Create League
           </nuxt-link>
         </div>
-        <UiLoader v-if="status.pyramid === 'loading'" />
+        <OldUiLoader v-if="status.pyramid === 'loading'" />
         <template v-else-if="status.pyramid === 'loaded'">
           <div v-if="leaguePyramids.leagues.length === 0" class="p-10 uppercase text-xs text-void-400">
             No league created in this country, yet.
@@ -325,7 +325,7 @@ onMounted(() => initCountryDashboard())
           <h3 class="heading heading--small">players</h3>
         </div>
 
-        <UiLoader v-if="status.players === 'loading'" />
+        <OldUiLoader v-if="status.players === 'loading'" />
         <template v-else-if="status.players === 'loaded'">
           <div v-if="countryPlayers.total === 0" class="p-10 uppercase text-xs text-void-400">
             No player seeded for this country, yet.
@@ -379,7 +379,7 @@ onMounted(() => initCountryDashboard())
           </button>
         </div>
 
-        <UiLoader v-if="status.news === 'loading'" />
+        <OldUiLoader v-if="status.news === 'loading'" />
         <template v-else-if="status.news === 'loaded'">
           {{ newsStories }}
         </template>
@@ -396,13 +396,13 @@ onMounted(() => initCountryDashboard())
           <h3 class="heading heading--small">clubs</h3>
         </div>
 
-        <UiLoader v-if="status.clubs === 'loading'" />
+        <OldUiLoader v-if="status.clubs === 'loading'" />
         <template v-else-if="status.clubs === 'loaded'">
           <div class="h-105 mt-5 overflow-auto font-mono">
             <div v-for="(club, key) in leagueClubs!.clubs" :key
               class="grid gap-3 items-center justify-between grid-cols-5 text-void-400 border-b border-void-700 py-2">
               <div class="col-span-2 flex gap-2 items-center">
-                <UiAvatar :alt="club!.short_name!" />
+                <OldUiAvatar :alt="club!.short_name!" />
                 <div class="flex gap-1 flex-col">
                   <div class="flex items-center gap-2">
                     <h3 class="font-mono uppercase font-semibold text-xs text-void-300">{{ club!.name }}</h3>
@@ -451,7 +451,7 @@ onMounted(() => initCountryDashboard())
           </button>
         </div>
 
-        <UiLoader v-if="status.market === 'loading'" />
+        <OldUiLoader v-if="status.market === 'loading'" />
         <template v-else-if="status.market === 'loaded'">
           <div class="grid grid-cols-4 grid-rows-2 gap-y-3 mt-5">
             <div class="row-span-2 flex flex-col justify-center">

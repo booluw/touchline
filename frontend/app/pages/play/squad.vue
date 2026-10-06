@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useToast } from '~/components/ui/Toast'
+import { useToast } from '~/components/old-ui/Toast'
 
 import IllustrationsDirectTactics from '~/components/illustrations/direct-tactics.vue';
 import IllustrationsBalancedTactics from '~/components/illustrations/balanced-tactics.vue';
@@ -155,7 +155,7 @@ const Illustrations = {
 </script>
 
 <template>
-  <UiModal v-if="tacticsModal" @close="tacticsModal = false" size="w-full md:w-2/3" title="Playing Tactics">
+  <OldUiModal v-if="tacticsModal" @close="tacticsModal = false" size="w-full md:w-2/3" title="Playing Tactics">
     <div>
       <h2 class="heading heading--small">Tactics</h2>
       <div class="grid md:grid-cols-5 gap-1 my-5">
@@ -184,16 +184,16 @@ const Illustrations = {
           </button>
         </div>
 
-        <UiButton @click="saveClubTactics()" width="[170px]" :loading="saving">
+        <OldUiButton @click="saveClubTactics()" width="[170px]" :loading="saving">
           Save
-        </UiButton>
+        </OldUiButton>
       </div>
     </div>
-  </UiModal>
+  </OldUiModal>
 
   <main class="h-full text-slate-200 font-mono space-y-5">
     <h2 class="page__header">Squad</h2>
-    <UiLoader v-if="loading === 'loading'" />
+    <OldUiLoader v-if="loading === 'loading'" />
     <template v-else-if="loading === 'loaded'">
       <section class="grid gap-5 md:grid-cols-3 md:row-span-2">
         <div class="p-5">
@@ -201,12 +201,12 @@ const Illustrations = {
             <h3 class="heading heading--small">Lineup</h3>
 
             <div class="flex gap-5 items-center justify-end">
-              <UiButton @click="emptyLineup()" type="outline">
+              <OldUiButton @click="emptyLineup()" type="outline">
                 Empty
-              </UiButton>
-              <UiButton @click="saveClubLineup()" :loading="saving">
+              </OldUiButton>
+              <OldUiButton @click="saveClubLineup()" :loading="saving">
                 Save Lineup
-              </UiButton>
+              </OldUiButton>
             </div>
           </div>
 

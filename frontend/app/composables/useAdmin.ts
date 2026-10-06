@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useToast } from "~/components/ui/Toast"
+import { useToast } from "~/components/old-ui/Toast"
 import type { World } from "~/types"
 
 export function useAdmin() {

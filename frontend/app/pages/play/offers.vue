@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { useToast } from '~/components/ui/Toast';
+import { useToast } from '~/components/old-ui/Toast';
 import { useManagerOffer } from '~/composables/manager/offer';
 import type { Offer } from '~/types';
 
@@ -41,7 +41,7 @@ onMounted(() => getManagerOffers())
   <section class="space-y-5">
     <h1 class="page__header">Offers</h1>
 
-    <UiLoader v-if="loading === 'loading'" />
+    <OldUiLoader v-if="loading === 'loading'" />
     <template v-else-if="loading === 'loaded'">
       <div v-if="offers.length === 0" class="p-10 uppercase text-xs text-void-400 text-center">
         No offers for you at this time.

@@ -3,7 +3,7 @@
 // league to see its season fixture calendar (IM03, grouped by game-week with
 // kickoff times) and its live standings table.
 import { computed, onMounted, ref } from 'vue'
-import { useToast } from '~/components/ui/Toast'
+import { useToast } from '~/components/old-ui/Toast'
 
 import type { Cup, CupCampaign, League, SeasonCalendar, Standings } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
@@ -105,7 +105,7 @@ onMounted(load)
             </div>
           </div>
         </div>
-        <UiLoader v-if="loading.leagues === 'loading'" />
+        <OldUiLoader v-if="loading.leagues === 'loading'" />
       </div>
       
       <div class="row-span-2 col-span-2 border-brutal border-cyan-500 p-5">
@@ -158,7 +158,7 @@ onMounted(load)
         <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
           <h3 class="heading heading--small">fixtures</h3>
         </div>
-        <UiLoader v-if="loading.league === 'loading'" />
+        <OldUiLoader v-if="loading.league === 'loading'" />
         <div v-else-if="loading.league === 'loaded'" class="mt-5 h-70 overflow-auto">
           <div class="" v-for="(wk, key) in calendar?.weeks" :key>
             <div v-for="(md, index) in wk.matchdays" :key="index" class="mb-8">

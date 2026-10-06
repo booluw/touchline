@@ -1,4 +1,4 @@
-import { useToast } from "~/components/ui/Toast"
+import { useToast } from "~/components/old-ui/Toast"
 
 export function useManagerDashboard() {
   const { public: { apiBase } } = useRuntimeConfig()

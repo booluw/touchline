@@ -44,7 +44,7 @@ async function setStartDay() {
 </script>
 
 <template>
-  <UiModal size="w-1/4 h-[500px]" @close="emits('close')">
+  <OldUiModal size="w-1/4 h-[500px]" @close="emits('close')">
     <div class="h-80 overflow-auto space-y-10">
       <div class="flex flex-col gap-3 pb-5 border-b-brutal">
         <h2 class="heading heading--small">Matchdays</h2>
@@ -65,11 +65,11 @@ async function setStartDay() {
       <div class="flex flex-col gap-3 pb-5 border-b-brutal">
         <h2 class="heading heading--small">Matchdays</h2>
         <div class="flex gap-2 flex-wrap mt-3">
-          <UiInput type="date" placeholder="Start Date" v-model="startDate" />
+          <OldUiInput type="date" placeholder="Start Date" v-model="startDate" />
         </div>
         {{ startDate }}
         <button class="button button--outline" @click="setStartDay()">Save League Start Date</button>
       </div>
     </div>
-  </UiModal>
+  </OldUiModal>
 </template>

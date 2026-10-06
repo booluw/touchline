@@ -171,7 +171,7 @@ onMounted(() => init())
           <h3 class="heading">{{ club.club?.name }}</h3>
         </div>
         <div class="mt-5 space-y-5">
-          <UiLoader v-if="loading.fixtures === 'loading'" />
+          <OldUiLoader v-if="loading.fixtures === 'loading'" />
           <div v-else-if="loading.fixtures === 'loaded'">
             <template v-if="club.game">
               <div class="flex items-center text-xs heading heading--small">
@@ -253,7 +253,7 @@ onMounted(() => init())
           </nuxt-link>
         </div>
 
-        <UiLoader v-if="loading.competitions === 'loading'" />
+        <OldUiLoader v-if="loading.competitions === 'loading'" />
         <template v-else-if="loading.competitions === 'loaded'">
           <div class="carousel h-70 p-0 m-0 overflow-hidden">
             <div v-for="(competition, key) in competitions" :key="key" class="carousel__item w-full h-full font-mono">
@@ -329,7 +329,7 @@ onMounted(() => init())
           <h3 class="heading heading--small">News</h3>
         </div>
 
-        <UiLoader v-if="loading.dashboard === 'loading'" />
+        <OldUiLoader v-if="loading.dashboard === 'loading'" />
         <div class="mt-5 hidden" v-else-if="loading.dashboard === 'loaded'">
           <!-- {{ dashboard }} -->
           <div class="">
@@ -349,7 +349,7 @@ onMounted(() => init())
           <h3 class="heading heading--small">Finance and board</h3>
         </div>
 
-        <UiLoader v-if="loading.finance === 'loading'" />
+        <OldUiLoader v-if="loading.finance === 'loading'" />
         <template v-else-if="loading.finance === 'loaded'">
           <div class="grid gap-y-2 grid-cols-2 grid-rows-2">
             <div class="flex flex-col justify-center">
@@ -438,7 +438,7 @@ onMounted(() => init())
           </nuxt-link>
         </div>
 
-        <UiLoader v-if="loading.tactics === 'loading'" />
+        <OldUiLoader v-if="loading.tactics === 'loading'" />
         <template v-else-if="loading.tactics === 'loaded'">
           <div v-if="slots" class="md:flex gap-5 mt-5">
             <div class="w-full md:w-100 shrink-0">
@@ -502,7 +502,7 @@ onMounted(() => init())
           <h3 class="heading heading--small">offers</h3>
         </div>
 
-        <UiLoader v-if="loading.offers === 'loading'" />
+        <OldUiLoader v-if="loading.offers === 'loading'" />
         <template v-else-if="loading.offers === 'loaded'">
           <div v-if="offers.length === 0" class="p-10 uppercase text-xs text-void-400 text-center">
             No offers for you at this time.

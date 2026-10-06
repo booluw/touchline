@@ -29,7 +29,7 @@ onMounted(() => loadLeague())
 </script>
 <template>
   <!-- {{ competition }} -->
-  <UiLoader v-if="status === 'loading'" />
+  <OldUiLoader v-if="status === 'loading'" />
   <section v-else-if="status === 'loaded' && competition" class="space-y-10">
     <div class="flex items-center justify-between">
       <div class="">

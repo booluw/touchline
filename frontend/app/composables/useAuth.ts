@@ -6,7 +6,7 @@
 // { status: 'worlds', worlds: [...] } without cookies, the user picks a world,
 
 import type { User, Offer, Club } from "~/types"
-import { useToast } from '../components/ui/Toast';
+import { useToast } from '../components/old-ui/Toast';
 
 // and login is re-posted with world_id.
 export interface WorldOption {

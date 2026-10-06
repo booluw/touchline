@@ -27,15 +27,15 @@ async function createACountry(valid: boolean) {
 }
 </script>
 <template>
-  <UiModal @close="router.go(-1)" hide-title>
-    <UiForm @submit="createACountry" :state :schema>
-      <UiFormItem label="Country Name" prop="name">
-        <UiInput v-model="state.name" placeholder="Try not to be fictious" />
-      </UiFormItem>
-      <UiFormItem label="Country Code" prop="code">
-        <UiInput v-model="state.code" placeholder="3 Charcter long" />
-      </UiFormItem>
+  <OldUiModal @close="router.go(-1)" hide-title>
+    <OldUiForm @submit="createACountry" :state :schema>
+      <OldUiFormItem label="Country Name" prop="name">
+        <OldUiInput v-model="state.name" placeholder="Try not to be fictious" />
+      </OldUiFormItem>
+      <OldUiFormItem label="Country Code" prop="code">
+        <OldUiInput v-model="state.code" placeholder="3 Charcter long" />
+      </OldUiFormItem>
       <button class="button button--primary w-full">Create Country</button>
-    </UiForm>
-  </UiModal>
+    </OldUiForm>
+  </OldUiModal>
 </template>

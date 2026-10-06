@@ -29,7 +29,7 @@ onMounted(async () => {
 
 <template>
   <section class="">
-    <UiLoader v-if="loading === 'loading'" />
+    <OldUiLoader v-if="loading === 'loading'" />
     <template v-else-if="loading === 'loaded' && player">
       <div class="flex gap-5 justify-between">
         <div class="flex gap-5">

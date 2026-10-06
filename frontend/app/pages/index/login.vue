@@ -22,7 +22,7 @@ async function logUserIn(valid: boolean) {
 </script>
 
 <template>
-  <UiModal size="w-full md:w-1/3 h-auto" @close="router.push('/')" hide-title>
+  <OldUiModal size="w-full md:w-1/3 h-auto" @close="router.push('/')" hide-title>
     <div class="grid gap-2 md:grid-cols-2 items-center">
       <div class="flex flex-col gap-10">
         <img src="~/assets/svgs/logomark.svg" class="w-2/5" alt="Touchline logomark" />
@@ -31,15 +31,15 @@ async function logUserIn(valid: boolean) {
         </h1>
       </div>
       <div class="">
-        <UiForm @submit="logUserIn" :state :schema>
-          <UiFormItem label="Email" prop="email">
-            <UiInput v-model="state.email" placeholder="jose.mourinho@example.com" />
-          </UiFormItem>
-          <UiFormItem label="Password" prop="password">
-            <UiInput v-model="state.password" type="password" placeholder="jose-mourinho-4321" />
-          </UiFormItem>
-          <UiButton width="full" :loading>Log In</UiButton>
-        </UiForm>
+        <OldUiForm @submit="logUserIn" :state :schema>
+          <OldUiFormItem label="Email" prop="email">
+            <OldUiInput v-model="state.email" placeholder="jose.mourinho@example.com" />
+          </OldUiFormItem>
+          <OldUiFormItem label="Password" prop="password">
+            <OldUiInput v-model="state.password" type="password" placeholder="jose-mourinho-4321" />
+          </OldUiFormItem>
+          <OldUiButton width="full" :loading>Log In</OldUiButton>
+        </OldUiForm>
 
         <div class="mt-5 heading heading--small">
           Don't have an account?
@@ -47,5 +47,5 @@ async function logUserIn(valid: boolean) {
         </div>
       </div>
     </div>
-  </UiModal>
+  </OldUiModal>
 </template>
