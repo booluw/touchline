@@ -3,13 +3,18 @@
 // league to see its season fixture calendar (IM03, grouped by game-week with
 // kickoff times) and its live standings table.
 import { computed, onMounted, ref } from 'vue'
+import { useToast } from '~/components/ui/Toast'
 
 import type { Cup, CupCampaign, Fixture, League, SeasonCalendar, Standings } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
 
+const store = useClubStore()
 const comp = useCompetition()
+const { notify } = useToast()
 
 const leagues = ref<League[]>([])
+const league = ref<League>()
+
 const cups = ref<Cup[]>([])
 const cupCampaigns = ref<Record<string, CupCampaign | null>>({})
 const selected = ref<string | null>(null)
@@ -17,27 +22,56 @@ const calendar = ref<SeasonCalendar | null>(null)
 const standings = ref<Standings | null>(null)
 const error = ref('')
 
-const totalMatchdays = computed(() => {
-  const teams = standings.value?.rows.length || 0
-  return teams > 0 ? 2 * (teams - 1) : 0
-})
+const loading = reactive({ leagues: "loading", league: "loading" })
+
+const club = computed(() => store.club)
 
 async function load() {
-  leagues.value = await comp.listMyCompetitions()
-  cups.value = await comp.listMyCups()
-  for (const cup of cups.value) {
-    cupCampaigns.value[cup.id] = await comp.getCup(cup.id)
+  loading.leagues = "loading"
+
+  try {
+    leagues.value = await comp.listMyCompetitions()
+    cups.value = await comp.listMyCups()
+    for (const cup of cups.value) {
+      cupCampaigns.value[cup.id] = await comp.getCup(cup.id)
+    }
+    const best = leagues.value[0]
+    if (best) await selectLeague(best.id)
+
+    loading.leagues = "loaded"
+  } catch (error) {
+    console.error(error)
+    loading.leagues = "error"
+    notify({
+      title: "Error",
+      description: "",
+      type: "danger"
+    })
   }
-  const best = leagues.value[0]
-  if (best) await selectLeague(best.id)
 }
 
 async function selectLeague(id: string) {
+  league.value = leagues.value.find((l) => l.id === id)
+
   selected.value = id
   calendar.value = null
   standings.value = null
-  standings.value = await comp.getStandings(id)
-  calendar.value = await comp.getSeasonCalendar(id)
+
+  try {
+    loading.league = "loading"
+    standings.value = await comp.getStandings(id)
+    calendar.value = await comp.getSeasonCalendar(id)
+    loading.league = "loaded" 
+  } catch (error) {
+    console.error(error)
+    notify({
+      title: "Error",
+      description: "",
+      type: "danger"
+    })
+
+    loading.league = "error"
+  }
 }
 
 async function refresh() {
@@ -45,134 +79,135 @@ async function refresh() {
   else await load()
 }
 
-function score(f: Fixture): string {
-  return f.status === 'completed' && f.home_score != null && f.away_score != null
-    ? `${f.home_score}–${f.away_score}`
-    : '-'
-}
-
-function kickoffTime(scheduledAt: string): string {
-  return new Date(scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function weekLabel(w: { week: number; first_day: string }): string {
-  const start = new Date(w.first_day).toLocaleDateString([], { day: 'numeric', month: 'short' })
-  const end = new Date(new Date(w.first_day).getTime() + 6 * 24 * 3600 * 1000)
-    .toLocaleDateString([], { day: 'numeric', month: 'short' })
-  return start === end ? start : `${start} – ${end}`
-}
-
-onMounted(() => { load().catch(() => { error.value = 'Could not load your competitions.' }) })
+onMounted(load)
 </script>
 
 <template>
-  <main class="min-h-screen bg-slate-900 text-slate-200 px-6 py-10">
-    <div class="max-w-5xl mx-auto space-y-6">
-      <header class="flex items-center justify-between">
-        <div>
-          <h1 class="text-3xl font-bold text-white">Competitions</h1>
-          <p class="text-slate-400 mt-1">Your world's leagues and where you sit in them.</p>
+  <main class="space-y-5 font-mono">
+    <h1 class="page__header">Competitons</h1>
+    <div class="max-sm:space-y-5 md:grid gap-5 md:grid-cols-4 grid-rows-2">
+      <div class="border-brutal border-void-600 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
+          <h3 class="heading heading--small">All Competitions</h3>
+          <button @click="refresh()" class="heading heading--small text-cyan-500 cursor-pointer"
+            :disabled="loading.leagues === 'loading'">
+            Refresh
+          </button>
         </div>
-        <button @click="refresh" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded px-4 py-2">Refresh</button>
-      </header>
 
-      <p v-if="error" class="text-red-400 text-sm">{{ error }}</p>
-      <p v-if="!leagues.length && !error" class="text-slate-500">No competitions in this world yet.</p>
-
-      <div v-else class="flex flex-wrap gap-2">
-        <button v-for="l in leagues" :key="l.id" @click="selectLeague(l.id)"
-                class="rounded px-4 py-2"
-                :class="selected === l.id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'">
-          {{ l.name }}
-        </button>
+        <div v-if="loading.leagues === 'error'" class=""></div>
+        <div v-else class="">
+          <div v-if="leagues.length === 0" class=""></div>
+          <div v-else class="mt-5 flex flex-col gap-3">
+            <div class="p-3 border-hairline cursor-pointer"
+              :class="[{ 'border-cyan-500 bg-cyan-500 text-void-800 font-semibold': league.id === selected }]"
+              @click="selectLeague(league.id)" v-for="(league, key) in leagues" :key>
+              {{ league.name }}
+            </div>
+          </div>
+        </div>
+        <UiLoader v-if="loading.leagues === 'loading'" />
       </div>
-
-      <section v-if="cups.length" class="bg-slate-800 border border-slate-700 rounded-lg p-4">
-        <h2 class="text-lg font-semibold text-white mb-3">Cups</h2>
-        <div class="space-y-4">
-          <div v-for="cup in cups" :key="cup.id" class="bg-slate-900 border border-slate-700 rounded-lg p-3">
-            <h3 class="font-medium text-white mb-1">
-              {{ cup.name }}
-              <span class="text-slate-500 text-sm">{{ cup.country.name ?? '' }}</span>
+      
+      <div class="row-span-2 col-span-2 border-brutal border-cyan-500 p-5">
+        <template v-if="selected &&league">
+          <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
+            <h3 class="heading heading--small">
+              <span class="text-cyan-500">{{ league.name }}</span> / {{ standings?.season.label }}
             </h3>
-            <p class="text-sm text-slate-400 mb-2">
-              {{ cup.format }} · top {{ cup.first_tier_bye }} join at {{ cup.survivor_threshold }} survivors
-            </p>
-            <CupBracketView v-if="cupCampaigns[cup.id]" :campaign="cupCampaigns[cup.id]!" />
-            <p v-else class="text-slate-500 text-sm">No campaign started yet.</p>
           </div>
-        </div>
-      </section>
-
-      <template v-if="selected">
-        <section v-if="standings" class="bg-slate-800 border border-slate-700 rounded-lg p-4">
-          <h2 class="text-lg font-semibold text-white mb-3">Table — {{ standings.season?.label }}</h2>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead class="text-slate-500 text-left">
-                <tr>
-                  <th class="py-1 pr-3">#</th><th class="py-1 pr-3">Club</th>
-                  <th class="py-1 pr-3 text-center">P</th><th class="py-1 pr-3 text-center">W</th>
-                  <th class="py-1 pr-3 text-center">D</th><th class="py-1 pr-3 text-center">L</th>
-                  <th class="py-1 pr-3 text-center">GF</th><th class="py-1 pr-3 text-center">GA</th>
-                  <th class="py-1 text-center">Pts</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(r, i) in standings.rows" :key="r.club.id" class="border-t border-slate-700">
-                  <td class="py-2 pr-3">{{ i + 1 }}</td>
-                  <td class="py-2 pr-3 font-medium text-white">{{ r.club.name }}</td>
-                  <td class="py-2 pr-3 text-center">{{ r.played }}</td>
-                  <td class="py-2 pr-3 text-center">{{ r.won }}</td>
-                  <td class="py-2 pr-3 text-center">{{ r.drawn }}</td>
-                  <td class="py-2 pr-3 text-center">{{ r.lost }}</td>
-                  <td class="py-2 pr-3 text-center">{{ r.goals_for }}</td>
-                  <td class="py-2 pr-3 text-center">{{ r.goals_against }}</td>
-                  <td class="py-2 text-center font-bold">{{ r.points }}</td>
-                </tr>
-                <tr v-if="!standings.rows.length">
-                  <td colspan="9" class="py-3 text-slate-500 text-center">No results yet — the first matchday will fill this table.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="bg-slate-800 border border-slate-700 rounded-lg p-4">
-          <h2 class="text-lg font-semibold text-white mb-1">Fixtures — {{ calendar?.season?.label }}</h2>
-          <p class="text-slate-500 text-sm mb-3">
-            {{ totalMatchdays }} matchdays paced across the game-week, {{ calendar?.weeks.length ?? 0 }} week(s).
-          </p>
-
-          <div v-if="calendar?.weeks.length" class="space-y-5">
-            <div v-for="w in calendar.weeks" :key="w.week" class="space-y-3">
-              <h3 class="text-sm font-medium text-indigo-300 border-b border-slate-700 pb-1">
-                Week {{ w.week + 1 }} — {{ weekLabel(w) }}
-              </h3>
-              <div v-for="md in w.matchdays" :key="md.matchday" class="space-y-1">
-                <p class="text-xs text-slate-400">
-                  Matchday {{ md.matchday }} · kick-off
-                  {{ new Date(md.scheduled_at).toLocaleDateString([], { day: 'numeric', month: 'short' }) }}
-                  {{ kickoffTime(md.scheduled_at) }}
-                </p>
-                <ul class="divide-y divide-slate-700/60">
-                  <li v-for="f in md.fixtures" :key="f.id" class="py-2 flex items-center gap-3 text-sm">
-                    <NuxtLink :to="`/matches/${f.id}`" class="flex-1 flex items-center gap-3 group">
-                      <span class="text-right flex-1">{{ f.home_club.name ?? f.home_club.id.slice(0, 8) }}</span>
-                      <span class="bg-slate-900 border border-slate-600 rounded px-3 py-1 font-bold text-center w-20 group-hover:border-indigo-500">{{ score(f) }}</span>
-                      <span class="flex-1">{{ f.away_club.name ?? f.away_club.id.slice(0, 8) }}</span>
-                    </NuxtLink>
-                    <span class="w-24 text-right" :class="f.status === 'completed' ? 'text-emerald-400' : 'text-slate-500'">
-                      {{ f.status }}
-                    </span>
-                  </li>
-                </ul>
+          <div class="mt-5">
+            <div class="grid grid-cols-12">
+              <h4 class="col-span-4 heading heading--small">club</h4>
+              <h4 class="heading heading--small text-center">mp</h4>
+              <h4 class="heading heading--small text-center">w</h4>
+              <h4 class="heading heading--small text-center">d</h4>
+              <h4 class="heading heading--small text-center">l</h4>
+              <h4 class="heading heading--small text-center">gf</h4>
+              <h4 class="heading heading--small text-center">ga</h4>
+              <h4 class="heading heading--small text-center">gd</h4>
+              <h4 class="heading heading--small text-center">pts</h4>
+            </div>
+            <div class="overflow-auto">
+              <div class="grid grid-cols-12 py-1 border-b border-void-500" :class="{
+                'bg-void-600 font-bold text-cyan-500!': row.club.short === club!.short,
+                'bg-loss-500/10 text-loss-500 border-loss-500!': [17, 18, 19].includes(index),
+                'bg-win-500/10 text-win-500 border-win-500!': [0, 1, 2].includes(index)
+              }" v-for="(row, index) in standings?.rows" :key="index">
+                <div class="col-span-4 grid grid-cols-7">
+                  {{ index + 1 }}
+                  <nuxt-link :to="`/play/clubs/${row.club.id}`" class="col-span-6 line-clamp-1 hover:underline max-sm:text-sm" :title="row.club.name" target="_blank">
+                    <span class="heading heading--small border px-1">{{ row.club.short }}</span>
+                    {{ row.club.name }}
+                  </nuxt-link>
+                </div>
+                <div class="text-center">{{ row.played }}</div>
+                <div class="text-center">{{ row.won }}</div>
+                <div class="text-center">{{ row.drawn }}</div>
+                <div class="text-center">{{ row.lost }}</div>
+                <div class="text-center">{{ row.goals_for }}</div>
+                <div class="text-center">{{ row.goals_against }}</div>
+                <div class="text-center">{{ row.goals_for - row.goals_against }}</div>
+                <div class="text-center font-bold">{{ row.points }}</div>
               </div>
             </div>
           </div>
-          <p v-else class="text-slate-500 text-sm">No fixtures scheduled yet.</p>
-        </section>
-      </template>
+        </template>
+      </div>
+
+      <div class="border-brutal border-void-600 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
+          <h3 class="heading heading--small">fixtures</h3>
+        </div>
+        <UiLoader v-if="loading.league === 'loading'" />
+        <div v-else-if="loading.league === 'loaded'" class="mt-5 h-70 overflow-auto">
+          <div class="" v-for="(wk, key) in calendar?.weeks" :key>
+            <div v-for="(md, index) in wk.matchdays" :key="index" class="mb-8">
+              <div class="text-center">
+                <h3 class="heading text-lg">Matchweek {{ md.gameweek }}</h3>
+                <div class=""></div>
+              </div>
+
+              <template v-for="fx in md.fixtures" :key="fx.id">
+                <nuxt-link
+                  v-if="fx.status === 'completed'"
+                  :to="`/play/matches/${fx.id}`"
+                  class="grid grid-cols-5 items-center justify-between py-3 border-b border-void-500 hover:bg-void-800"
+                  :class="[{'text-cyan-500' : fx.home_club.id === club!.id }]"
+                  target="_blank"
+                >
+                  <span class="text-sm col-span-2">{{ fx.home_club.name }}</span>
+                  <div class="font-bold text-center">
+                    {{ fx.home_score }} - {{ fx.away_score }}
+                  </div>
+                  <span class="text-sm col-span-2 text-right">{{ fx.away_club.name }}</span>
+                </nuxt-link>
+                <div
+                  v-else
+                  class="grid grid-cols-5 items-center justify-between py-1 border-b border-void-500 hover:bg-void-800"
+                  :class="[{ 'text-cyan-500': fx.home_club.id === club!.id }]" target="_blank">
+                  <span class="text-sm col-span-2">{{ fx.home_club.name }}</span>
+                  <div class="font-bold text-sm text-center">
+                    {{ formatFixtureDateTimeCompact(fx.scheduled_at) }}
+                  </div>
+                  <span class="text-sm col-span-2 text-right">{{ fx.away_club.name }}</span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+        <div v-else class="">Error</div>
+      </div>
+
+      <div class="" />
+      <div class="border-brutal border-void-600 p-5">
+        <div class="flex items-center justify-between border-b-brutal pb-3 border-void-800">
+          <h3 class="heading heading--small">league stats</h3>
+        </div>
+        <div class="mt-5">
+          To Goal Scorers and assiss goes here
+        </div>
+      </div>
     </div>
   </main>
 </template>

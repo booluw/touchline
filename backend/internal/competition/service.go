@@ -176,6 +176,8 @@ type Fixture struct {
 	Status      string                `json:"status"`
 	HomeScore   *int                  `json:"home_score,omitempty"`
 	AwayScore   *int                  `json:"away_score,omitempty"`
+	// MatchID is set once the fixture's match has completed, so it can be replayed.
+	MatchID *uuid.UUID `json:"match_id,omitempty"`
 }
 
 // StandingRow is one club's league-table line (nested club identity).

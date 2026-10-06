@@ -6050,6 +6050,7 @@ components:
         status: { type: string, enum: [scheduled, running, finished] }
         home_score: { type: integer, nullable: true }
         away_score: { type: integer, nullable: true }
+        match_id: { type: string, format: uuid, description: "Present only once the fixture's match has completed; use with GET /api/matches/{id}/events to watch it back." }
     Standings:
       type: object
       properties:

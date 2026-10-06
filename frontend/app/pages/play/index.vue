@@ -286,7 +286,7 @@ onMounted(() => init())
                     </div>
                     <div class="h-55 overflow-auto">
                       <div class="grid grid-cols-10 text-sm py-1 border-b border-void-500" :class="{
-                        'bg-void-600': row.club.short === club!.club!.short,
+                        'bg-void-600 font-bold text-cyan-500!': row.club.short === club!.club!.short,
                         'bg-loss-500/10 text-loss-500 border-loss-500!': [17, 18, 19].includes(index),
                         'bg-win-500/10 text-win-500 border-win-500!': [0, 1, 2].includes(index)
                       }" v-for="(row, index) in competition.league?.standings?.rows" :key="index">

@@ -18,7 +18,8 @@ func (s *Service) GetFixtures(ctx context.Context, leagueID uuid.UUID, worldID u
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.world_id, f.competition_id, f.home_club_id, f.away_club_id, f.matchday,
 		       f.scheduled_at, f.status, f.ht_score, f.at_score,
-		       h.name, COALESCE(h.short_name, ''), a.name, COALESCE(a.short_name, ''), c.name
+		       h.name, COALESCE(h.short_name, ''), a.name, COALESCE(a.short_name, ''), c.name,
+		       (SELECT m.id FROM match.matches m WHERE m.fixture_id = f.id AND m.status = 'completed')
 		FROM match.fixtures f
 		JOIN club.clubs h ON h.id = f.home_club_id
 		JOIN club.clubs a ON a.id = f.away_club_id
@@ -42,7 +43,7 @@ func scanFixtures(rows pgx.Rows) ([]Fixture, error) {
 		var hName, hShort, aName, aShort, compName string
 		if err := rows.Scan(&f.ID, &f.WorldID, &f.Competition.ID, &f.HomeClub.ID, &f.AwayClub.ID,
 			&f.Matchday, &f.ScheduledAt, &f.Status, &f.HomeScore, &f.AwayScore,
-			&hName, &hShort, &aName, &aShort, &compName); err != nil {
+			&hName, &hShort, &aName, &aShort, &compName, &f.MatchID); err != nil {
 			return nil, fmt.Errorf("scan fixture: %w", err)
 		}
 		f.Gameweek = f.Matchday

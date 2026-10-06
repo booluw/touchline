@@ -76,6 +76,8 @@ export interface Fixture {
   status: string
   home_score: number | null
   away_score: number | null
+  /** Set once the match has completed — pass to /api/matches/{id}/events to watch it. */
+  match_id?: string
 }
 
 export interface StandingRow {

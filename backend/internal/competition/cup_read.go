@@ -178,7 +178,8 @@ func (s *Service) GetCup(ctx context.Context, worldID uuid.UUID, cupID uuid.UUID
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.world_id, f.competition_id, f.home_club_id, f.away_club_id, f.matchday,
 		       f.scheduled_at, f.status, f.ht_score, f.at_score,
-		       h.name, COALESCE(h.short_name, ''), a.name, COALESCE(a.short_name, ''), c.name
+		       h.name, COALESCE(h.short_name, ''), a.name, COALESCE(a.short_name, ''), c.name,
+		       (SELECT m.id FROM match.matches m WHERE m.fixture_id = f.id AND m.status = 'completed')
 		FROM match.fixtures f
 		JOIN club.clubs h ON h.id = f.home_club_id
 		JOIN club.clubs a ON a.id = f.away_club_id
