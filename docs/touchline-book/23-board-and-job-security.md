@@ -176,6 +176,10 @@ alternatives 75:
 - Alternatives ignore a real candidate pool (OPD-09).
 - PRD sack triggers beyond confidence (cultural, behaviour) are not modelled.
 
+## 23.9 Board view additions and negotiation preview (IM43, OPD-61)
+
+The board view adds `persona` (as evaluated; patient_owner when no board row exists), `members` (`club.board_members`, most influential first; nothing seeds them yet, so this is usually empty) and `confidence_history` (latest 52 snapshots at the club, oldest first, each with its explanation). `POST /api/managers/me/board/mandates/:id/negotiate/preview` runs the same checks as negotiate without writing: invalid proposals fail the same way, and a proposal beyond tolerance returns `accepted: false` with `delta` and `tolerance` instead of 409.
+
 ## Connections
 
 - Inputs: [9](09-clubs-dna-supporters.md) (DNA, sentiment), [20](20-finance.md) (finance), [6](06-leagues-and-scheduling.md) (standings), [22](22-managers-and-job-offers.md) (reputation, sack mechanics).

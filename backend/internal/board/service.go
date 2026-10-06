@@ -202,7 +202,88 @@ func (s *Service) BoardView(ctx context.Context, worldID, managerID uuid.UUID) (
 	for i := range mandates {
 		mandates[i].Club = &apiref.ClubRef{ID: mandates[i].ClubID, Name: clubName}
 	}
+
+	// The persona the engine evaluates with (fetchPersona's fallback included).
+	if v.Persona, _, _, err = s.fetchPersona(ctx, s.pool, snap.ClubID); err != nil {
+		return nil, err
+	}
+	if v.Members, err = s.store.boardMembers(ctx, s.pool, snap.ClubID); err != nil {
+		return nil, err
+	}
+	if v.ConfidenceHistory, err = s.store.confidenceHistory(ctx, s.pool, managerID, snap.ClubID); err != nil {
+		return nil, err
+	}
 	return v, nil
+}
+
+// checkNegotiation runs every NegotiateMandate rule without writing (IM43):
+// ownership, status, target type, the bounded window and the persona's
+// tolerance. Invalid proposals return the same sentinel errors negotiate does;
+// a proposal beyond tolerance comes back with Accepted=false.
+func (s *Service) checkNegotiation(ctx context.Context, tx pgx.Tx, managerID uuid.UUID, in NegotiateInput) (*NegotiationPreview, error) {
+	mandate, err := s.store.loadMandateByID(ctx, tx, in.MandateID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrMandateNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load mandate: %w", err)
+	}
+	if mandate.ManagerID != managerID {
+		return nil, ErrNotMandateManager
+	}
+
+	var currentClub uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT current_club_id FROM manager.managers WHERE id = $1`, managerID).
+		Scan(&currentClub); err != nil {
+		return nil, ErrNotEmployed
+	}
+	if currentClub != mandate.ClubID {
+		return nil, ErrWorldMismatch
+	}
+	if mandate.Status != MandatePending && mandate.Status != MandateAgreed {
+		return nil, ErrMandateResolved
+	}
+
+	persona, _, _, err := s.fetchPersona(ctx, tx, mandate.ClubID)
+	if err != nil {
+		return nil, err
+	}
+	cur, ok := parseInt(mandate.TargetValue)
+	if !ok {
+		return nil, ErrMandateValueInvalid
+	}
+	proposal, ok := parseInt(in.TargetValue)
+	if !ok {
+		return nil, ErrMandateValueInvalid
+	}
+	switch mandate.TargetType {
+	case TargetLeagueFinish, TargetPointsTarget:
+	default:
+		return nil, ErrMandateTypeNotNegotiable
+	}
+	if !withinNegotiationWindow(mandate.TargetType, cur, proposal) {
+		return nil, ErrMandateValueInvalid
+	}
+	delta := negotiationDelta(mandate.TargetType, cur, proposal)
+	tolerance := negotiationTolerance(persona)
+	return &NegotiationPreview{
+		Accepted:  delta <= 0 || delta <= tolerance,
+		Delta:     delta,
+		Tolerance: tolerance,
+		Persona:   persona,
+		mandate:   mandate,
+	}, nil
+}
+
+// PreviewNegotiation reports whether NegotiateMandate would accept a proposal,
+// without changing anything (IM43).
+func (s *Service) PreviewNegotiation(ctx context.Context, managerID uuid.UUID, in NegotiateInput) (*NegotiationPreview, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin negotiate preview tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	return s.checkNegotiation(ctx, tx, managerID, in)
 }
 
 // NegotiateMandate proposes a bounded new target for one sporting mandate.
@@ -214,53 +295,14 @@ func (s *Service) NegotiateMandate(ctx context.Context, worldID, managerID uuid.
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	mandate, err := s.store.loadMandateByID(ctx, tx, in.MandateID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, ErrMandateNotFound
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("load mandate: %w", err)
-	}
-	if mandate.ManagerID != managerID {
-		return nil, nil, ErrNotMandateManager
-	}
-
-	var currentClub uuid.UUID
-	if err := tx.QueryRow(ctx, `SELECT current_club_id FROM manager.managers WHERE id = $1`, managerID).
-		Scan(&currentClub); err != nil {
-		return nil, nil, ErrNotEmployed
-	}
-	if currentClub != mandate.ClubID {
-		return nil, nil, ErrWorldMismatch
-	}
-	if mandate.Status != MandatePending && mandate.Status != MandateAgreed {
-		return nil, nil, ErrMandateResolved
-	}
-
-	persona, _, _, err := s.fetchPersona(ctx, tx, mandate.ClubID)
+	check, err := s.checkNegotiation(ctx, tx, managerID, in)
 	if err != nil {
 		return nil, nil, err
 	}
-	cur, ok := parseInt(mandate.TargetValue)
-	if !ok {
-		return nil, nil, ErrMandateValueInvalid
-	}
-	proposal, ok := parseInt(in.TargetValue)
-	if !ok {
-		return nil, nil, ErrMandateValueInvalid
-	}
-	switch mandate.TargetType {
-	case TargetLeagueFinish, TargetPointsTarget:
-	default:
-		return nil, nil, ErrMandateTypeNotNegotiable
-	}
-	if !withinNegotiationWindow(mandate.TargetType, cur, proposal) {
-		return nil, nil, ErrMandateValueInvalid
-	}
-	delta := negotiationDelta(mandate.TargetType, cur, proposal)
-	if delta > 0 && delta > negotiationTolerance(persona) {
+	if !check.Accepted {
 		return nil, nil, ErrNegotiationRejected
 	}
+	mandate := check.mandate
 	if err := s.store.setMandateTarget(ctx, tx, mandate.ID, in.TargetValue); err != nil {
 		return nil, nil, err
 	}

@@ -70,6 +70,10 @@ deterministic templates — no LLM. A fuller news generator is S09-03.
 Email notifications (S07-02, provider OPD-07) and PWA offline shell / Web Push
 (S07-03) are in the MVP plan; check `docs/tasks/` for their delivery status.
 
+### Counts, summary and board factors (IM38, OPD-61)
+
+`GET /api/dashboard` adds `counts` (returned items per section and by category; sections stay capped at 12), `summary` per managed club (board confidence and change, active-roster morale average and unhappy count at ≤ 0.35, cash, weekly wage bill, season wage budget, league position) and `explanation` on board items. `next-fixture` also returns the caller's own dossier as `club` (IM39). The unhappy-player feed now works: it previously read a non-existent `player_condition.club_id` and silently dropped every morale item.
+
 ## Connections
 
 - Every item's source system is linked above.

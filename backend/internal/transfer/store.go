@@ -2,6 +2,7 @@ package transfer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -220,7 +221,54 @@ func (s *Store) BidsByClub(ctx context.Context, worldID, clubID uuid.UUID) (inco
 	if outgoing == nil {
 		outgoing = []Bid{}
 	}
+	if err := s.attachRounds(ctx, incoming); err != nil {
+		return nil, nil, err
+	}
+	if err := s.attachRounds(ctx, outgoing); err != nil {
+		return nil, nil, err
+	}
 	return incoming, outgoing, nil
+}
+
+// attachRounds fills each bid's negotiation thread in one query (IM44).
+func (s *Store) attachRounds(ctx context.Context, bids []Bid) error {
+	if len(bids) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(bids))
+	for i := range bids {
+		ids[i] = bids[i].ID
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT bid_id, round, proposed_by, terms, created_at
+		FROM transfer.negotiations WHERE bid_id = ANY($1)
+		ORDER BY bid_id, round, created_at`, ids)
+	if err != nil {
+		return fmt.Errorf("negotiation rounds: %w", err)
+	}
+	defer rows.Close()
+	byBid := make(map[uuid.UUID][]NegotiationRound, len(bids))
+	for rows.Next() {
+		var (
+			bidID uuid.UUID
+			r     NegotiationRound
+			raw   []byte
+		)
+		if err := rows.Scan(&bidID, &r.Round, &r.ProposedBy, &raw, &r.CreatedAt); err != nil {
+			return fmt.Errorf("negotiation round scan: %w", err)
+		}
+		if err := json.Unmarshal(raw, &r.Terms); err != nil {
+			return fmt.Errorf("negotiation round terms: %w", err)
+		}
+		byBid[bidID] = append(byBid[bidID], r)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("negotiation rounds rows: %w", err)
+	}
+	for i := range bids {
+		bids[i].Rounds = byBid[bids[i].ID]
+	}
+	return nil
 }
 
 // AttrsForPlayer loads the valuation inputs for a single player.

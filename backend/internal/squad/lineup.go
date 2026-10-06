@@ -459,6 +459,10 @@ func sentimentNudge(sent int) float64 {
 	return 1 + float64(clampSentiment(sent))/100*0.2
 }
 
+// PositionFit exposes positionFit so read models show the same fit the
+// selection logic uses (IM46).
+func PositionFit(candidate, slot string) float64 { return positionFit(candidate, slot) }
+
 // positionFit scores a candidate vs a slot: exact 1.0, same positional family
 // 0.75, cross-family 0.3, and a keeper never plays outfield (nor an outfielder
 // in goal beyond a 0.05 desperation floor).

@@ -98,6 +98,7 @@ func (s *server) router() *gin.Engine {
 			manager.GET("/:id/profile", s.handleGetManagerProfile)
 			manager.GET("/me/board", s.handleBoardView)
 			manager.POST("/me/board/mandates/:id/negotiate", s.handleNegotiateMandate)
+			manager.POST("/me/board/mandates/:id/negotiate/preview", s.handlePreviewMandateNegotiation)
 			manager.GET("/me/policies/:type", s.handleGetPolicy)
 			manager.PUT("/me/policies/:type", s.handleUpsertPolicy)
 			manager.DELETE("/me/policies/:type", s.handleDeletePolicy)

@@ -141,6 +141,10 @@ Two mechanisms coexist:
 
 Both are explained in [Chapter 24](24-social-and-rivalries.md).
 
+## 9.9 Club profile read (IM41, OPD-61)
+
+`GET /api/clubs/:id` returns the club row's profile alongside the squad: `founded_year`, `city`, `tier`, `reputation`, `primary_color`/`secondary_color`, `stadium` {name, capacity}, `facilities` (type, level 1–10, upgraded_at) and `history` (latest 10 `club_history` rows). Nullable columns stay null when unseeded. Nickname and prose backstory are not stored.
+
 ## Connections
 
 - Board judging the club's manager: [Chapter 23](23-board-and-job-security.md).

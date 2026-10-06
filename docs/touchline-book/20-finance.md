@@ -102,6 +102,10 @@ Revenue (gate, TV, sponsorship, prizes), debt/lending, instalments, financial
 statements, advanced sponsorship (S13-03). Prize pools are specified but not
 implemented ([Ch. 30](30-roadmap-and-open-decisions.md)).
 
+## 20.7 Health, breakdown, cash history, ledger filter (IM42, OPD-61)
+
+The summary adds `health` (the open `financial_crisis_states` stage and start, null when healthy), `season_breakdown` (season-to-date credits = revenue and debits = expenses by category, the genesis credit excluded like `operating_profit`) and `cash_history` (month-end balance per UTC month with activity, oldest first). The ledger accepts `?category=` and each entry adds `balance_after`, the running balance over all entries. A health score, runway and projected cash are not computed.
+
 ## Connections
 
 - Code: `internal/finance/{finance,model,wage,academy,seed,service,store}.go`.

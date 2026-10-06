@@ -48,7 +48,8 @@ func (s *server) handleBoardView(c *gin.Context) {
 		return
 	}
 	if v == nil {
-		c.JSON(http.StatusOK, gin.H{"confidence": 0, "snapshot": nil, "explanation": nil, "mandates": []any{}})
+		c.JSON(http.StatusOK, gin.H{"confidence": 0, "snapshot": nil, "explanation": nil, "mandates": []any{},
+			"persona": nil, "members": []any{}, "confidence_history": []any{}})
 		return
 	}
 	c.JSON(http.StatusOK, v)
@@ -81,4 +82,33 @@ func (s *server) handleNegotiateMandate(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"mandate": mandate, "explanation": exp})
+}
+
+// handlePreviewMandateNegotiation dry-runs a mandate negotiation (IM43): same
+// validation and errors as negotiate, but nothing is written and a proposal
+// beyond the board's tolerance returns accepted=false instead of 409.
+func (s *server) handlePreviewMandateNegotiation(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid_mandate_id", "invalid mandate id")
+		return
+	}
+	var req internalboard.NegotiateInput
+	if c.ShouldBindJSON(&req) != nil {
+		respondError(c, http.StatusBadRequest, "invalid_negotiation_payload", "invalid negotiation payload")
+		return
+	}
+	req.MandateID = id
+
+	if _, err := s.callerWorld(c); err != nil {
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
+		return
+	}
+	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
+	preview, err := s.boardSvc.PreviewNegotiation(c.Request.Context(), ident.ManagerID, req)
+	if err != nil {
+		boardStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, preview)
 }

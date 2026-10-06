@@ -162,3 +162,86 @@ func hasCategory(items []Item, category string) bool {
 	}
 	return false
 }
+
+// TestDashboardSummaryCountsAndBoardFactors covers the IM38 additions: board
+// items carry the stored explanation, the summary rail reports confidence
+// change, morale, money and league, counts match the sections, and an unhappy
+// player now surfaces (the morale query used a non-existent column before).
+func TestDashboardSummaryCountsAndBoardFactors(t *testing.T) {
+	pool, svc, worldID, clubID, managerID := dashboardWorld(t)
+	ctx := context.Background()
+
+	for _, s := range []struct {
+		tick, total int
+		exp         string
+	}{
+		{1, 40, `{}`},
+		{2, 12, `{"subject":"board_confidence","score":12,"factors":[{"label":"league performance","delta":12}]}`},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO manager.job_security_snapshots
+				(manager_id, club_id, world_tick, performance_score, expectations_score,
+				 financial_score, board_relationship_score, club_dna_alignment_score,
+				 supporter_sentiment_score, alternatives_score, total_score, explanation)
+			VALUES ($1, $2, $3, 10, 10, 10, 10, 10, 10, 10, $4, $5::jsonb)`,
+			managerID, clubID, s.tick, s.total, s.exp); err != nil {
+			t.Fatalf("insert board snapshot tick %d: %v", s.tick, err)
+		}
+	}
+	var unhappyID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT id FROM player.players WHERE club_id = $1 AND status = 'active' ORDER BY id LIMIT 1`,
+		clubID).Scan(&unhappyID); err != nil {
+		t.Fatalf("pick player: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO player.player_condition (player_id, morale) VALUES ($1, 0.1)
+		ON CONFLICT (player_id) DO UPDATE SET morale = 0.1`, unhappyID); err != nil {
+		t.Fatalf("set morale: %v", err)
+	}
+
+	snap, err := svc.GetDashboard(ctx, worldID, managerID)
+	if err != nil {
+		t.Fatalf("get dashboard: %v", err)
+	}
+
+	var board *Item
+	for i := range snap.Urgent {
+		if snap.Urgent[i].Category == CatBoard {
+			board = &snap.Urgent[i]
+		}
+	}
+	if board == nil || board.Explanation["subject"] != "board_confidence" {
+		t.Fatalf("urgent board item explanation = %+v", board)
+	}
+	if !hasCategory(snap.Important, CatMorale) {
+		t.Fatalf("expected an unhappy-player item, got %+v", snap.Important)
+	}
+
+	if snap.Counts.Urgent != len(snap.Urgent) || snap.Counts.Important != len(snap.Important) ||
+		snap.Counts.Interesting != len(snap.Interesting) {
+		t.Fatalf("counts %+v do not match sections", snap.Counts)
+	}
+	total := 0
+	for _, n := range snap.Counts.ByCategory {
+		total += n
+	}
+	if total != len(snap.Urgent)+len(snap.Important)+len(snap.Interesting) || snap.Counts.ByCategory[CatMorale] < 1 {
+		t.Fatalf("by_category = %+v", snap.Counts.ByCategory)
+	}
+
+	if len(snap.Summary) != 1 || snap.Summary[0].ClubID != clubID {
+		t.Fatalf("summary = %+v, want one entry for the club", snap.Summary)
+	}
+	sum := snap.Summary[0]
+	if sum.Board == nil || sum.Board.Confidence != 12 || sum.Board.Change == nil || *sum.Board.Change != -28 {
+		t.Fatalf("board summary = %+v, want 12 with change -28", sum.Board)
+	}
+	if sum.Morale == nil || sum.Morale.Unhappy < 1 || sum.Morale.Players == 0 ||
+		sum.Morale.Average <= 0 || sum.Morale.Average >= 1 {
+		t.Fatalf("morale summary = %+v", sum.Morale)
+	}
+	if sum.Finance == nil || sum.Finance.Cash <= 0 || sum.Finance.WeeklyWageBill <= 0 || sum.Finance.SeasonWageBudget == nil {
+		t.Fatalf("finance summary = %+v", sum.Finance)
+	}
+}

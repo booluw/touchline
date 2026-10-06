@@ -106,6 +106,18 @@ func TestHTTPClubReads(t *testing.T) {
 	if mgr, ok := detail["manager"].(map[string]any); !ok || mgr["is_policy_bot"] != true {
 		t.Fatalf("club detail manager = %v", detail["manager"])
 	}
+	// IM41 profile fields: always present, arrays never null.
+	if tier, ok := detail["tier"].(float64); !ok || tier < 1 {
+		t.Fatalf("club detail tier = %v", detail["tier"])
+	}
+	if stadium, ok := detail["stadium"].(map[string]any); !ok || stadium == nil {
+		t.Fatalf("club detail stadium = %v", detail["stadium"])
+	}
+	for _, k := range []string{"facilities", "history"} {
+		if list, ok := detail[k].([]any); !ok || list == nil {
+			t.Fatalf("club detail %s = %v, want array", k, detail[k])
+		}
+	}
 	if squad, ok := detail["squad"].([]any); !ok || len(squad) != 24 {
 		t.Fatalf("club detail squad = %v entries, want 24", detail["squad"])
 	}

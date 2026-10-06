@@ -104,6 +104,42 @@ type View struct {
 	Snapshot    *Snapshot      `json:"snapshot"`
 	Explanation map[string]any `json:"explanation"`
 	Mandates    []Mandate      `json:"mandates"`
+
+	// IM43 additions.
+	Persona           Persona           `json:"persona"`
+	Members           []BoardMember     `json:"members"`
+	ConfidenceHistory []ConfidencePoint `json:"confidence_history"`
+}
+
+// BoardMember is one club.board_members row (IM43).
+type BoardMember struct {
+	Name      string `json:"name"`
+	Agenda    string `json:"agenda"`
+	Influence int    `json:"influence"`
+}
+
+// ConfidencePoint is one job-security snapshot on the confidence timeline
+// (IM43), oldest first.
+type ConfidencePoint struct {
+	WorldTick   int64          `json:"world_tick"`
+	Total       int            `json:"total_score"`
+	CreatedAt   time.Time      `json:"created_at"`
+	Explanation map[string]any `json:"explanation"`
+}
+
+// ConfidenceHistoryLimit caps the confidence timeline (IM43).
+const ConfidenceHistoryLimit = 52
+
+// NegotiationPreview is the dry-run outcome of a mandate negotiation (IM43):
+// Delta is how much easier the proposal is (positive = easier), Tolerance the
+// persona's limit. Accepted mirrors what NegotiateMandate would do.
+type NegotiationPreview struct {
+	Accepted  bool    `json:"accepted"`
+	Delta     int     `json:"delta"`
+	Tolerance int     `json:"tolerance"`
+	Persona   Persona `json:"persona"`
+
+	mandate Mandate
 }
 
 // NegotiateInput is the bounded sporting-target proposal.

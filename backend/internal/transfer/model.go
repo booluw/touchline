@@ -152,6 +152,17 @@ type Bid struct {
 	Status               string            `json:"status"`
 	CreatedAt            time.Time         `json:"created_at"`
 	RespondedAt          *time.Time        `json:"responded_at,omitempty"`
+	// Rounds is the full negotiation thread, oldest first. Only the bid list
+	// (GET /api/transfers/bids) fills it (IM44).
+	Rounds []NegotiationRound `json:"rounds,omitempty"`
+}
+
+// NegotiationRound is one transfer.negotiations row (IM44).
+type NegotiationRound struct {
+	Round      int       `json:"round"`
+	ProposedBy string    `json:"proposed_by"` // buying_club | selling_club
+	Terms      Terms     `json:"terms"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Bid status values (transfer.bids.status CHECK).

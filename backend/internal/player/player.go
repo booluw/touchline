@@ -157,6 +157,18 @@ type PlayerMoraleRow struct {
 	Overall         int               `json:"overall"`
 	Hidden          *HiddenAttributes `json:"hidden_attributes,omitempty"`
 	Dossier         *PlayerDossier    `json:"dossier"`
+	// IM40: squad-table columns. Age is in the world's calendar (IM25).
+	Nationality *apiref.CountryRef `json:"nationality"`
+	DateOfBirth string             `json:"date_of_birth"`
+	Age         int                `json:"age"`
+	Contract    *RosterContract    `json:"contract"`
+}
+
+// RosterContract is the active contract summary on a roster row (IM40). The
+// roster is own-club only, so this is never a rival's private data.
+type RosterContract struct {
+	WeeklyWage int64  `json:"weekly_wage"`
+	EndDate    string `json:"end_date"`
 }
 
 // TransferRequest is the read model of one player transfer request. Internal

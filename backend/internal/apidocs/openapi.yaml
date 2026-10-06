@@ -1158,9 +1158,14 @@ paths:
       tags: [finance]
       summary: Club ledger entries
       operationId: getLedger
-      description: Append-only financial entries (genesis, weekly wages, transfers). Most-recent first.
+      description: Append-only financial entries (genesis, weekly wages, transfers). Most-recent first, up to 200.
       parameters:
         - $ref: "#/components/parameters/ClubID"
+        - name: category
+          in: query
+          required: false
+          description: "IM42. Only entries in this ledger category (e.g. wages, ticket_sales). An unknown category returns an empty list."
+          schema: { type: string }
       responses:
         "200":
           description: Ledger entry list.
@@ -1172,19 +1177,21 @@ paths:
               examples:
                 sample:
                   value:
-                    - id: 00000000-0000-4000-8000-000000000010
-                      entry_type: GENESIS
-                      category: startup_capital
-                      amount: 35000000
-                      description: Starting cash at club creation
-                      occurred_at: "2026-06-01T19:00:00Z"
                     - id: 00000000-0000-4000-8000-000000000011
-                      entry_type: WAGE
-                      category: wage
-                      amount: -1264000
+                      entry_type: debit
+                      category: wages
+                      amount: 1264000
                       description: Weekly wages for 24 players
                       related_event_id: 00000000-0000-4000-8000-000000000012
                       occurred_at: "2026-06-14T19:00:00Z"
+                      balance_after: 33736000
+                    - id: 00000000-0000-4000-8000-000000000010
+                      entry_type: credit
+                      category: other
+                      amount: 35000000
+                      description: Opening capital (world genesis)
+                      occurred_at: "2026-06-01T19:00:00Z"
+                      balance_after: 35000000
         "403":
           description: Not the owning manager.
           content:
@@ -1964,6 +1971,48 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "409":
           description: Mandate already resolved or the board rejected the proposal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/managers/me/board/mandates/{id}/negotiate/preview:
+    post:
+      tags: [board]
+      summary: Preview a mandate negotiation
+      operationId: previewMandateNegotiation
+      description: "IM43. Runs the negotiate checks without writing. Invalid proposals fail exactly as negotiate does; a proposal beyond the board's tolerance returns 200 with accepted=false instead of 409."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-000000000021" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NegotiationInput" }
+      responses:
+        "200":
+          description: Whether the board would accept.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NegotiationPreview" }
+        "400":
+          description: Off-window proposal or non-negotiable mandate type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not the manager's mandate, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Mandate not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Mandate already resolved, or the manager has no active club.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -4402,6 +4451,12 @@ paths:
                   events:
                     type: array
                     items: { $ref: "#/components/schemas/MatchEvent" }
+                  stats:
+                    type: object
+                    description: "IM45. Per-side tallies. Goals follow the score line (stamped when completed); the rest count persisted events, so a live match only counts played minutes. Zeros before kickoff."
+                    properties:
+                      home: { $ref: "#/components/schemas/MatchSideStats" }
+                      away: { $ref: "#/components/schemas/MatchSideStats" }
               examples:
                 sample:
                   value:
@@ -4552,6 +4607,9 @@ components:
         created_at: { type: string, format: date-time }
         action:
           $ref: "#/components/schemas/DashboardAction"
+        explanation:
+          allOf: [{ $ref: "#/components/schemas/Explanation" }]
+          description: "IM38. The stored \"Why?\" factors behind the item, when the engine has them (board items carry the latest job-security explanation). Omitted otherwise."
     DashboardAction:
       type: object
       description: |
@@ -4583,6 +4641,52 @@ components:
           type: array
           description: Ambient context — table position, rival results, market news.
           items: { $ref: "#/components/schemas/DashboardItem" }
+        counts:
+          type: object
+          description: "IM38. Tallies of the returned items (each section is capped at 12) by section and category, for inbox/nav badges."
+          properties:
+            urgent: { type: integer }
+            important: { type: integer }
+            interesting: { type: integer }
+            by_category:
+              type: object
+              additionalProperties: { type: integer }
+              example: { bids: 1, morale: 2 }
+        summary:
+          type: array
+          description: "IM38. Right-rail numbers per managed club. A block is null when its source has no data yet."
+          items:
+            type: object
+            properties:
+              club_id: { type: string, format: uuid }
+              board:
+                type: object
+                nullable: true
+                properties:
+                  confidence: { type: integer }
+                  change: { type: integer, nullable: true, description: "Latest minus previous snapshot; null with a single snapshot." }
+              morale:
+                type: object
+                nullable: true
+                properties:
+                  average: { type: number, format: double, description: "Active-roster mean morale, 0..1." }
+                  unhappy: { type: integer, description: "Players at or below 0.35 morale." }
+                  players: { type: integer }
+              finance:
+                type: object
+                nullable: true
+                properties:
+                  cash: { type: integer, format: int64 }
+                  weekly_wage_bill: { type: integer, format: int64, description: "Sum of active contracts' weekly wages." }
+                  season_wage_budget: { type: integer, format: int64, nullable: true, description: "Latest season's wage budget allocation (per season, not per week)." }
+              league:
+                type: object
+                nullable: true
+                properties:
+                  position: { type: integer }
+                  points: { type: integer }
+                  played: { type: integer }
+                  season_label: { type: string }
     Status:
       type: object
       properties:
@@ -4630,6 +4734,38 @@ components:
         mandates:
           type: array
           items: { $ref: "#/components/schemas/Mandate" }
+        persona:
+          type: string
+          nullable: true
+          enum: [patient_owner, demanding_owner, financial_conservative, academy_owner, prestige_owner, political_board]
+          description: "IM43. The board persona the engine evaluates with (patient_owner when the club has no board row)."
+        members:
+          type: array
+          description: "IM43. club.board_members rows, most influential first. Empty when none are seeded."
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              agenda: { type: string }
+              influence: { type: integer, minimum: 0, maximum: 100 }
+        confidence_history:
+          type: array
+          description: "IM43. Up to the latest 52 job-security snapshots at this club, oldest first."
+          items:
+            type: object
+            properties:
+              world_tick: { type: integer, format: int64 }
+              total_score: { type: integer }
+              created_at: { type: string, format: date-time }
+              explanation: { $ref: "#/components/schemas/Explanation" }
+    NegotiationPreview:
+      type: object
+      description: "IM43. Dry-run of a mandate negotiation."
+      properties:
+        accepted: { type: boolean, description: "What negotiate would do with this proposal." }
+        delta: { type: integer, description: "How much easier the proposal is than the current target (positive = easier)." }
+        tolerance: { type: integer, description: "The persona's maximum accepted easing." }
+        persona: { type: string }
     NegotiationInput:
       type: object
       required: [target_value]
@@ -4657,6 +4793,16 @@ components:
         overall: { type: integer, minimum: 1, maximum: 99 }
         hidden_attributes: { $ref: "#/components/schemas/HiddenAttributes" }
         dossier: { $ref: "#/components/schemas/PlayerDossier" }
+        nationality: { $ref: "#/components/schemas/NestedCountry", description: "IM40. code + name from ref.nationalities." }
+        date_of_birth: { type: string, format: date }
+        age: { type: integer, description: "Completed years on the world calendar (IM25)." }
+        contract:
+          type: object
+          nullable: true
+          description: "IM40. Active contract summary; null when the player has no active contract."
+          properties:
+            weekly_wage: { type: integer, format: int64 }
+            end_date: { type: string, format: date }
     PlayerDetail:
       type: object
       description: >-
@@ -4833,6 +4979,35 @@ components:
         squad:
           type: array
           items: { $ref: "#/components/schemas/SquadPlayer" }
+        founded_year: { type: integer, nullable: true, description: "IM41" }
+        city: { type: string, nullable: true }
+        tier: { type: integer }
+        reputation: { type: integer }
+        primary_color: { type: string, nullable: true }
+        secondary_color: { type: string, nullable: true }
+        stadium:
+          type: object
+          properties:
+            name: { type: string, nullable: true }
+            capacity: { type: integer, nullable: true }
+        facilities:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [training_ground, medical, youth_facility, stadium, scouting_network] }
+              level: { type: integer, minimum: 1, maximum: 10 }
+              upgraded_at: { type: string, format: date-time }
+        history:
+          type: array
+          description: "Latest 10 club_history rows, newest first (IM41)."
+          items:
+            type: object
+            properties:
+              season: { type: integer }
+              event_type: { type: string }
+              description: { type: string }
+              occurred_at: { type: string, format: date-time }
     SquadPlayer:
       type: object
       properties:
@@ -4861,6 +5036,11 @@ components:
                 allOf: [{ $ref: "#/components/schemas/NestedPlayer" }]
                 nullable: true
                 description: Null when the slot is empty.
+              player_position: { type: string, description: "IM46. The slotted player's primary position; absent for an empty slot." }
+              fit:
+                type: number
+                format: double
+                description: "IM46. The selection engine's position fit for this slot: 1.0 natural, 0.75 same unit (defence incl. GK / midfield / attack), 0.3 cross-unit, 0.05 keeper mismatch. Absent for an empty slot."
     Tactics:
       type: object
       properties:
@@ -5208,6 +5388,33 @@ components:
             properties:
               label: { type: string }
               amount: { type: integer, format: int64 }
+        health:
+          type: object
+          nullable: true
+          description: "IM42. The open financial_crisis_states row; null when no crisis is open."
+          properties:
+            stage: { type: string, enum: [warning, restriction, emergency, administration_risk, ownership_intervention, bankruptcy] }
+            started_at: { type: string, format: date-time }
+        season_breakdown:
+          type: object
+          description: "IM42. Season-to-date ledger totals by category (credits = revenue, debits = expenses), opening-capital genesis entry excluded. Largest first."
+          properties:
+            season: { type: integer }
+            revenue: { type: array, items: { $ref: "#/components/schemas/LedgerCategoryTotal" } }
+            expenses: { type: array, items: { $ref: "#/components/schemas/LedgerCategoryTotal" } }
+        cash_history:
+          type: array
+          description: "IM42. Month-end cash balance (UTC months) for every month with ledger activity, oldest first."
+          items:
+            type: object
+            properties:
+              month: { type: string, example: "2026-08" }
+              balance: { type: integer, format: int64 }
+    LedgerCategoryTotal:
+      type: object
+      properties:
+        label: { type: string, description: "Ledger category." }
+        amount: { type: integer, format: int64 }
     BudgetLine:
       type: object
       properties:
@@ -5225,12 +5432,13 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        entry_type: { type: string, enum: [GENESIS, WAGE, TRANSFER_IN, TRANSFER_OUT, PRIZE, SPONSOR] }
+        entry_type: { type: string, enum: [credit, debit] }
         category: { type: string }
-        amount: { type: integer, format: int64 }
+        amount: { type: integer, format: int64, description: "Always positive; the sign is carried by entry_type." }
         description: { type: string }
         related_event_id: { type: string, format: uuid, nullable: true }
         occurred_at: { type: string, format: date-time }
+        balance_after: { type: integer, format: int64, description: "IM42. Running cash balance once this entry posted (counts every entry, even when filtered)." }
     Contract:
       type: object
       properties:
@@ -5343,6 +5551,16 @@ components:
         release_clause: { type: integer, format: int64, nullable: true }
         sell_on_percentage: { type: integer, minimum: 0, maximum: 100, nullable: true }
         buy_back_amount: { type: integer, format: int64, nullable: true }
+    MatchSideStats:
+      type: object
+      properties:
+        goals: { type: integer }
+        chances_created: { type: integer }
+        yellow_cards: { type: integer }
+        red_cards: { type: integer }
+        substitutions: { type: integer }
+        penalties_awarded: { type: integer }
+        injuries: { type: integer }
     Bid:
       type: object
       properties:
@@ -5362,6 +5580,16 @@ components:
         status: { type: string, enum: [pending, accepted, rejected, countered, withdrawn, expired] }
         created_at: { type: string, format: date-time }
         responded_at: { type: string, format: date-time, nullable: true }
+        rounds:
+          type: array
+          description: "IM44. The full negotiation thread, oldest first. Present on GET /api/transfers/bids only."
+          items:
+            type: object
+            properties:
+              round: { type: integer }
+              proposed_by: { type: string, enum: [buying_club, selling_club] }
+              terms: { $ref: "#/components/schemas/TransferTerms" }
+              created_at: { type: string, format: date-time }
     BidList:
       type: object
       properties:
@@ -6118,6 +6346,9 @@ components:
         derby_intensity: { type: integer }
         golden_goal: { type: boolean, description: "True for knockout ties (golden-goal wins), false for league fixtures." }
         opponent: { $ref: "#/components/schemas/ScoutReport" }
+        club:
+          allOf: [{ $ref: "#/components/schemas/ScoutReport" }]
+          description: "IM39. The same dossier for the requesting club (position, form, tier, top players)."
     ScoutReport:
       type: object
       description: "An opponent dossier served to the manager facing them: identity, form, standing, and headline players, all drawn from persisted state."

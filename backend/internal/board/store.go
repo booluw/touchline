@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -416,4 +417,53 @@ func (s *Store) latestSnapshot(ctx context.Context, q querier, managerID uuid.UU
 	}
 	snap.Explanation = rawJSON
 	return &snap, nil
+}
+
+// boardMembers lists the club's board members, most influential first (IM43).
+func (s *Store) boardMembers(ctx context.Context, q querier, clubID uuid.UUID) ([]BoardMember, error) {
+	rows, err := q.Query(ctx, `
+		SELECT m.name, m.agenda, m.influence
+		FROM club.board_members m
+		JOIN club.boards b ON b.id = m.board_id
+		WHERE b.club_id = $1
+		ORDER BY m.influence DESC, m.name`, clubID)
+	if err != nil {
+		return nil, fmt.Errorf("board members: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (BoardMember, error) {
+		var m BoardMember
+		err := r.Scan(&m.Name, &m.Agenda, &m.Influence)
+		return m, err
+	})
+}
+
+// confidenceHistory returns the manager's latest snapshots at a club, oldest
+// first, capped at ConfidenceHistoryLimit (IM43).
+func (s *Store) confidenceHistory(ctx context.Context, q querier, managerID, clubID uuid.UUID) ([]ConfidencePoint, error) {
+	rows, err := q.Query(ctx, `
+		SELECT world_tick, total_score, created_at, explanation FROM (
+			SELECT world_tick, total_score, created_at, explanation
+			FROM manager.job_security_snapshots
+			WHERE manager_id = $1 AND club_id = $2
+			ORDER BY world_tick DESC, created_at DESC
+			LIMIT $3
+		) t ORDER BY world_tick, created_at`, managerID, clubID, ConfidenceHistoryLimit)
+	if err != nil {
+		return nil, fmt.Errorf("confidence history: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ConfidencePoint, error) {
+		var (
+			p   ConfidencePoint
+			raw []byte
+		)
+		if err := r.Scan(&p.WorldTick, &p.Total, &p.CreatedAt, &raw); err != nil {
+			return p, err
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p.Explanation); err != nil {
+				return p, fmt.Errorf("confidence explanation: %w", err)
+			}
+		}
+		return p, nil
+	})
 }

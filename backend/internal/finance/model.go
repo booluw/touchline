@@ -59,6 +59,34 @@ type FinanceSummary struct {
 	FutureInstallments      int64          `json:"future_installments"`
 	Debt                    int64          `json:"debt"`
 	Factors                 []Factor       `json:"factors"`
+
+	// IM42 additions.
+	Health          *HealthState     `json:"health"`
+	SeasonBreakdown SeasonBreakdown  `json:"season_breakdown"`
+	CashHistory     []CashHistoryRow `json:"cash_history"`
+}
+
+// HealthState is the club's open financial_crisis_states row (IM42). The
+// summary carries nil when no crisis is open.
+type HealthState struct {
+	Stage     string    `json:"stage"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// SeasonBreakdown splits season-to-date ledger flow into credits (revenue) and
+// debits (expenses) by category (IM42). The opening-balance genesis entry is
+// excluded, matching OperatingProfit.
+type SeasonBreakdown struct {
+	Season   int      `json:"season"`
+	Revenue  []Factor `json:"revenue"`
+	Expenses []Factor `json:"expenses"`
+}
+
+// CashHistoryRow is the cash balance at the end of one calendar month with
+// ledger activity (IM42), oldest first.
+type CashHistoryRow struct {
+	Month   string `json:"month"` // YYYY-MM
+	Balance int64  `json:"balance"`
 }
 
 // Factor is a labeled delta that explains where a financial total came from.
@@ -95,6 +123,8 @@ type LedgerEntry struct {
 	Description    string     `json:"description"`
 	RelatedEventID *uuid.UUID `json:"related_event_id,omitempty"`
 	OccurredAt     time.Time  `json:"occurred_at"`
+	// BalanceAfter is the running cash balance once this entry posted (IM42).
+	BalanceAfter int64 `json:"balance_after"`
 }
 
 // ---------- contracts ----------

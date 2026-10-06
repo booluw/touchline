@@ -88,7 +88,11 @@ func (s *Service) GetSummary(ctx context.Context, clubID uuid.UUID) (*FinanceSum
 	if _, err := s.requireClub(ctx, clubID); err != nil {
 		return nil, err
 	}
-	sum := &FinanceSummary{Currency: "USD"}
+	sum := &FinanceSummary{
+		Currency:        "USD",
+		SeasonBreakdown: SeasonBreakdown{Revenue: []Factor{}, Expenses: []Factor{}},
+		CashHistory:     []CashHistoryRow{},
+	}
 
 	acct, err := s.store.AccountID(ctx, clubID)
 	if err != nil {
@@ -150,15 +154,26 @@ func (s *Service) GetSummary(ctx context.Context, clubID uuid.UUID) (*FinanceSum
 	sum.CommittedSpending = sum.WageCommitments.AnnualWage + budgetCommitted + future
 	sum.ProjectedYearEndBalance = sum.Cash - sum.CommittedSpending + sum.ProjectedRevenue
 
+	if sum.Health, err = s.store.OpenCrisis(ctx, clubID); err != nil {
+		return nil, err
+	}
+	if sum.SeasonBreakdown, err = s.store.SeasonBreakdown(ctx, clubID, season); err != nil {
+		return nil, err
+	}
+	if sum.CashHistory, err = s.store.CashHistory(ctx, clubID); err != nil {
+		return nil, err
+	}
+
 	return sum, nil
 }
 
 // GetLedger returns the most recent ledger entries for a club.
-func (s *Service) GetLedger(ctx context.Context, clubID uuid.UUID, limit int) ([]LedgerEntry, error) {
+// category narrows the rows ("" = all).
+func (s *Service) GetLedger(ctx context.Context, clubID uuid.UUID, category string, limit int) ([]LedgerEntry, error) {
 	if _, err := s.requireClub(ctx, clubID); err != nil {
 		return nil, err
 	}
-	return s.store.Ledger(ctx, clubID, limit)
+	return s.store.Ledger(ctx, clubID, category, limit)
 }
 
 // GetContracts returns every contract currently on the club's books,

@@ -105,13 +105,69 @@ type Item struct {
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
 	Action      *Action   `json:"action,omitempty"`
+	// Explanation is the "Why?" factor list behind the item when the engine
+	// stored one (board items carry the job-security explanation; IM38).
+	Explanation map[string]any `json:"explanation,omitempty"`
 }
 
-// Snapshot is the GET /api/dashboard body: the three ranked sections.
+// Snapshot is the GET /api/dashboard body: the three ranked sections, their
+// counts and the per-club summary panel (IM38).
 type Snapshot struct {
-	Urgent      []Item `json:"urgent"`
-	Important   []Item `json:"important"`
-	Interesting []Item `json:"interesting"`
+	Urgent      []Item        `json:"urgent"`
+	Important   []Item        `json:"important"`
+	Interesting []Item        `json:"interesting"`
+	Counts      Counts        `json:"counts"`
+	Summary     []ClubSummary `json:"summary"`
+}
+
+// Counts tallies the returned items (each section is capped at
+// MaxPerSection) by section and by category, for inbox and nav badges (IM38).
+type Counts struct {
+	Urgent      int            `json:"urgent"`
+	Important   int            `json:"important"`
+	Interesting int            `json:"interesting"`
+	ByCategory  map[string]int `json:"by_category"`
+}
+
+// ClubSummary is the home screen's right-rail numbers for one managed club
+// (IM38). Each block is nil when its source has no data yet.
+type ClubSummary struct {
+	ClubID  uuid.UUID       `json:"club_id"`
+	Board   *BoardSummary   `json:"board"`
+	Morale  *MoraleSummary  `json:"morale"`
+	Finance *FinanceSummary `json:"finance"`
+	League  *LeagueSummary  `json:"league"`
+}
+
+// BoardSummary is the latest job-security confidence and its change since the
+// previous snapshot (nil change when there is only one).
+type BoardSummary struct {
+	Confidence int  `json:"confidence"`
+	Change     *int `json:"change"`
+}
+
+// MoraleSummary is the active roster's average morale (0..1) and how many sit
+// at or below MoraleUnhappyThreshold.
+type MoraleSummary struct {
+	Average float64 `json:"average"`
+	Unhappy int     `json:"unhappy"`
+	Players int     `json:"players"`
+}
+
+// FinanceSummary is cash, the active weekly wage bill and the season wage
+// budget allocation (nil when no budget is seeded).
+type FinanceSummary struct {
+	Cash             int64  `json:"cash"`
+	WeeklyWageBill   int64  `json:"weekly_wage_bill"`
+	SeasonWageBudget *int64 `json:"season_wage_budget"`
+}
+
+// LeagueSummary is the club's position in its active domestic league season.
+type LeagueSummary struct {
+	Position    int    `json:"position"`
+	Points      int    `json:"points"`
+	Played      int    `json:"played"`
+	SeasonLabel string `json:"season_label"`
 }
 
 // DashboardUpdatePayload is the server-pushed realtime envelope

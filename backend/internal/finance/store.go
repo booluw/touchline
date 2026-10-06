@@ -98,19 +98,27 @@ func (s *Store) Cash(ctx context.Context, clubID uuid.UUID) (int64, error) {
 }
 
 // Ledger returns the most recent entries for a club's ledger, ordered by
-// occurred_at descending. limit caps the result set.
-func (s *Store) Ledger(ctx context.Context, clubID uuid.UUID, limit int) ([]LedgerEntry, error) {
+// occurred_at descending, each with its running balance (IM42). A non-empty
+// category narrows the rows; balances still count every entry. limit caps the
+// result set.
+func (s *Store) Ledger(ctx context.Context, clubID uuid.UUID, category string, limit int) ([]LedgerEntry, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT l.id, l.entry_type, l.category, l.amount, l.description,
-		       l.related_event_id, l.occurred_at
-		FROM finance.ledger_entries l
-		JOIN finance.accounts a ON a.id = l.account_id
-		WHERE a.club_id = $1
-		ORDER BY l.occurred_at DESC, l.id DESC
-		LIMIT $2`, clubID, limit)
+		SELECT id, entry_type, category, amount, description, related_event_id, occurred_at, balance_after
+		FROM (
+			SELECT l.id, l.entry_type, l.category, l.amount, l.description,
+			       l.related_event_id, l.occurred_at,
+			       SUM(CASE WHEN l.entry_type = 'credit' THEN l.amount ELSE -l.amount END)
+			           OVER (ORDER BY l.occurred_at, l.id)::bigint AS balance_after
+			FROM finance.ledger_entries l
+			JOIN finance.accounts a ON a.id = l.account_id
+			WHERE a.club_id = $1
+		) t
+		WHERE $2 = '' OR category = $2
+		ORDER BY occurred_at DESC, id DESC
+		LIMIT $3`, clubID, category, limit)
 	if err != nil {
 		return nil, fmt.Errorf("ledger query: %w", err)
 	}
@@ -120,12 +128,91 @@ func (s *Store) Ledger(ctx context.Context, clubID uuid.UUID, limit int) ([]Ledg
 	for rows.Next() {
 		var e LedgerEntry
 		if err := rows.Scan(&e.ID, &e.EntryType, &e.Category, &e.Amount,
-			&e.Description, &e.RelatedEventID, &e.OccurredAt); err != nil {
+			&e.Description, &e.RelatedEventID, &e.OccurredAt, &e.BalanceAfter); err != nil {
 			return nil, fmt.Errorf("ledger scan: %w", err)
 		}
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// OpenCrisis returns the club's unresolved financial_crisis_states row, or nil
+// when none is open (IM42).
+func (s *Store) OpenCrisis(ctx context.Context, clubID uuid.UUID) (*HealthState, error) {
+	var h HealthState
+	err := s.pool.QueryRow(ctx, `
+		SELECT stage, started_at FROM finance.financial_crisis_states
+		WHERE club_id = $1 AND resolved_at IS NULL
+		ORDER BY started_at DESC LIMIT 1`, clubID).Scan(&h.Stage, &h.StartedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open crisis: %w", err)
+	}
+	return &h, nil
+}
+
+// SeasonBreakdown totals season-to-date credits and debits by category, using
+// the same window and genesis exclusion as OperatingProfit (IM42).
+func (s *Store) SeasonBreakdown(ctx context.Context, clubID uuid.UUID, seasonYear int) (SeasonBreakdown, error) {
+	out := SeasonBreakdown{Season: seasonYear, Revenue: []Factor{}, Expenses: []Factor{}}
+	if seasonYear == 0 {
+		return out, nil
+	}
+	seasonStart := time.Date(seasonYear, 1, 1, 0, 0, 0, 0, time.UTC)
+	rows, err := s.pool.Query(ctx, `
+		SELECT l.entry_type, l.category, SUM(l.amount)::bigint
+		FROM finance.ledger_entries l
+		JOIN finance.accounts a ON a.id = l.account_id
+		WHERE a.club_id = $1 AND l.occurred_at >= $2
+		  AND (l.dedup_key IS NULL OR l.dedup_key <> $3)
+		GROUP BY l.entry_type, l.category
+		ORDER BY 3 DESC, l.category`, clubID, seasonStart, genesisDedupKey)
+	if err != nil {
+		return out, fmt.Errorf("season breakdown: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			entryType string
+			f         Factor
+		)
+		if err := rows.Scan(&entryType, &f.Label, &f.Amount); err != nil {
+			return out, fmt.Errorf("season breakdown scan: %w", err)
+		}
+		if entryType == "credit" {
+			out.Revenue = append(out.Revenue, f)
+		} else {
+			out.Expenses = append(out.Expenses, f)
+		}
+	}
+	return out, rows.Err()
+}
+
+// CashHistory returns the month-end cash balance for every month with ledger
+// activity, oldest first (IM42).
+func (s *Store) CashHistory(ctx context.Context, clubID uuid.UUID) ([]CashHistoryRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT to_char(m, 'YYYY-MM'),
+		       SUM(net) OVER (ORDER BY m)::bigint
+		FROM (
+			SELECT date_trunc('month', l.occurred_at AT TIME ZONE 'UTC') AS m,
+			       SUM(CASE WHEN l.entry_type = 'credit' THEN l.amount ELSE -l.amount END) AS net
+			FROM finance.ledger_entries l
+			JOIN finance.accounts a ON a.id = l.account_id
+			WHERE a.club_id = $1
+			GROUP BY 1
+		) t
+		ORDER BY m`, clubID)
+	if err != nil {
+		return nil, fmt.Errorf("cash history: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (CashHistoryRow, error) {
+		var c CashHistoryRow
+		err := r.Scan(&c.Month, &c.Balance)
+		return c, err
+	})
 }
 
 // LedgerCategories returns the net cash flow per category for a club

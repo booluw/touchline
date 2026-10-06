@@ -119,6 +119,10 @@ Events: `LINEUP_SAVED`, `TACTIC_SET`, `TRAINING_PLAN_SET`; `actor_type` is
 `manager` or `policy_bot` (the command layer is actor-agnostic so PolicyBot
 calls the same cores: `tactics.SetLineupForClub`, `SetTacticsForClub`).
 
+## 12.8 Position fit on the lineup read (IM46, OPD-61)
+
+Each filled slot of `GET /api/clubs/:id/lineup` carries `player_position` (primary) and `fit`, the selection engine's own `positionFit`: 1.0 natural, 0.75 same unit, 0.3 cross-unit, 0.05 keeper mismatch. Units are defence (GK, CB, LB, RB), midfield (DM, CM, AM, LM, RM), attack (ST, LW, RW). Because GK counts as defence, a keeper in a defender slot scores 0.75. Secondary positions are not considered.
+
 ## Connections
 
 - How the XI becomes engine ratings: [Chapter 16](16-matchday-and-live-matches.md).

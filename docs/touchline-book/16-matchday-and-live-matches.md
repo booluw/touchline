@@ -127,6 +127,10 @@ After commit, best-effort pushes: `relationship_change`, dashboard updates.
 | `POST /api/matches/:id/tactical` | live style change / sub |
 | `/ws` `match_tick` | live minute envelopes |
 
+## 16.8 Match stats (IM45, OPD-61)
+
+`GET /api/matches/:id/events` also returns `stats.home`/`stats.away`: goals (the score line: stamped when completed, else counted from goal/penalty events), chances created, yellow and red cards, substitutions, penalties awarded and injuries. Events persist minute by minute, so a live match counts only played minutes. Possession, shots and xG are not emitted.
+
 ## Connections
 
 - Engine internals: [Chapter 15](15-match-engine.md).

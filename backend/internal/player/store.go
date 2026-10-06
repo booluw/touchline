@@ -143,12 +143,16 @@ func squadRows(ctx context.Context, q dbtx, clubID uuid.UUID) ([]PlayerMoraleRow
 	rows, err := q.Query(ctx, `
 		SELECT p.id, pe.first_name, pe.last_name, pe.display_name, p.primary_position, p.squad_number,
 		       COALESCE(cr.squad_role, 'squad_player'),
-		       COALESCE(c.morale, 0.5), COALESCE(c.playing_time_pct, 0)
+		       COALESCE(c.morale, 0.5), COALESCE(c.playing_time_pct, 0),
+		       pe.nationality_code, COALESCE(n.name, ''), pe.date_of_birth::text,
+		       date_part('year', age(world.world_date(p.world_id), pe.date_of_birth))::int,
+		       cr.weekly_wage::bigint, cr.end_date::text
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
+		LEFT JOIN ref.nationalities n ON n.code = pe.nationality_code
 		LEFT JOIN player.player_condition c ON c.player_id = p.id
 		LEFT JOIN LATERAL (
-			SELECT squad_role FROM player.contracts
+			SELECT squad_role, weekly_wage, end_date FROM player.contracts
 			WHERE player_id = p.id AND status = 'active'
 			ORDER BY start_date DESC LIMIT 1
 		) cr ON TRUE
@@ -163,9 +167,19 @@ func squadRows(ctx context.Context, q dbtx, clubID uuid.UUID) ([]PlayerMoraleRow
 	for rows.Next() {
 		var r PlayerMoraleRow
 		r.Player = &apiref.PlayerRef{}
+		var (
+			natCode, natName string
+			wage             *int64
+			endDate          *string
+		)
 		if err := rows.Scan(&r.Player.ID, &r.FirstName, &r.LastName, &r.Player.Name,
-			&r.Position, &r.SquadNumber, &r.SquadRole, &r.Morale, &r.PlayingTimePct); err != nil {
+			&r.Position, &r.SquadNumber, &r.SquadRole, &r.Morale, &r.PlayingTimePct,
+			&natCode, &natName, &r.DateOfBirth, &r.Age, &wage, &endDate); err != nil {
 			return nil, err
+		}
+		r.Nationality = &apiref.CountryRef{Code: natCode, Name: natName}
+		if wage != nil && endDate != nil {
+			r.Contract = &RosterContract{WeeklyWage: *wage, EndDate: *endDate}
 		}
 		out = append(out, r)
 	}
