@@ -99,6 +99,7 @@ export interface Standings {
 export interface FixtureMatchday {
   matchday: number
   scheduled_at: string
+  gameweek: number
   fixtures: Fixture[]
 }
 

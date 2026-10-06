@@ -82,12 +82,12 @@ onMounted(async () => {
 
         <div class="" v-if="player.dossier.private.contracts.length !== 0">
           <h3 class="heading heading--small">wsalary</h3>
-          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.weekly_wage) }}</h2>
+          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.weekly_wage as number) }}</h2>
         </div>
 
         <div class="" v-if="player.dossier.private.contracts.length !== 0">
           <h3 class="heading heading--small">release fee</h3>
-          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.release_clause) }}</h2>
+          <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.release_clause as number) }}</h2>
         </div>
 
         <div class="text-center" v-if="player.dossier.private.contracts.length !== 0">
