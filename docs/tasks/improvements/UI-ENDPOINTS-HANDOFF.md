@@ -61,6 +61,9 @@ each milestone.
 - [x] Implementation IM38–IM46 (see each file's Delivery evidence); docs mirrored in `docs/product_manager.md` (OPD-61), Touchline Book ch. 9/10/12/16/20/21/23/26, `how-to/transfer-market.md`
 - [x] Verification 2026-10-06: gofmt clean; build, vet, vet -tags integration, `go test ./...` pass; every touched integration test passes on embedded Postgres 16 (port 55432, launcher in the session scratchpad).
 - Full serial integration run (`go test -p 1 -tags integration ./internal/... ./pkg/...`): 29 packages ok, 7 fail. `competition` fails 19 tests with the changes stashed too (scheduling/cup fixtures; existing). `match`, `matchday`, `player`, `policybot`, `social`, `scout` pass when run as a group, both before and after the change; they fail only after earlier packages leave state in the shared DB. `scout` `TestNextFixtureScout` fails on its own at an existing `league_position` assertion.
+- [x] `/ui` component catalogue (`frontend/app/pages/ui.vue`, 2026-10-06): all 31 `components/ui` components with dummy data in the IM38–IM46 response shapes plus `toWhy`/`toFit`/`toStage` mappers; `nuxi typecheck` clean, dev server serves `/ui` 200. Not yet viewed in a browser.
+- [ ] Follow-up: pitch token ratings on `/ui` are placeholders until the API exposes an effective slot rating (IM46 open question).
+- [ ] Follow-up: `/ui` is public (outside `/play`); decide whether to gate or drop it before release.
 - Not committed (per workflow).
 
 ## Next action
