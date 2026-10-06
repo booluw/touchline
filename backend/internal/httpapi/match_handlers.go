@@ -18,18 +18,18 @@ import (
 func (s *server) handleGetFixture(c *gin.Context) {
 	fixtureID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid fixture id"})
+		respondError(c, http.StatusBadRequest, "invalid_fixture_id", "invalid fixture id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 
 	view, err := s.matchSvc.GetFixtureMatch(c.Request.Context(), fixtureID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "fixture not found"})
+		respondError(c, http.StatusNotFound, "fixture_not_found", "fixture not found")
 		return
 	}
 	if err != nil {
@@ -37,7 +37,7 @@ func (s *server) handleGetFixture(c *gin.Context) {
 		return
 	}
 	if view.Fixture.WorldID != worldID {
-		c.JSON(http.StatusNotFound, gin.H{"error": "fixture not found"})
+		respondError(c, http.StatusNotFound, "fixture_not_found", "fixture not found")
 		return
 	}
 	c.JSON(http.StatusOK, view)
@@ -49,19 +49,19 @@ func (s *server) handleGetFixture(c *gin.Context) {
 func (s *server) handleGetMatchEvents(c *gin.Context) {
 	matchID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid match id"})
+		respondError(c, http.StatusBadRequest, "invalid_match_id", "invalid match id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 
 	ctx := c.Request.Context()
 	m, err := s.matchSvc.GetMatch(ctx, matchID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
+		respondError(c, http.StatusNotFound, "match_not_found", "match not found")
 		return
 	}
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *server) handleGetMatchEvents(c *gin.Context) {
 		return
 	}
 	if m.WorldID != worldID {
-		c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
+		respondError(c, http.StatusNotFound, "match_not_found", "match not found")
 		return
 	}
 	if m.Status == internalmatch.MatchStatusPending {

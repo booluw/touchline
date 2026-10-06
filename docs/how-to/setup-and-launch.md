@@ -163,7 +163,7 @@ a manager's world). Any other account is resolved against its
   `{"status":"worlds","worlds":[{world_id,name,status}]}` — no cookies set, the
   client re-posts with the chosen `world_id`;
 - with **no** joined world login is refused
-  `403 {"error":"no world joined — …"}`.
+  `403 {"error":"no world joined — …","code":"no_world_joined"}`. Every error body carries a stable `code` alongside the display `error` text (see `backend/internal/httpapi/errors.go`).
 
 Verify by logging in (an `is_admin` flag shows up on the response):
 

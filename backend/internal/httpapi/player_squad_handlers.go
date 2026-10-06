@@ -14,17 +14,17 @@ import (
 func playerStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, internalplayer.ErrPlayerNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "player not found"})
+		respondError(c, http.StatusNotFound, "player_not_found", "player not found")
 	case errors.Is(err, internalplayer.ErrManagerHasNoClub):
-		c.JSON(http.StatusConflict, gin.H{"error": "no active club"})
+		respondError(c, http.StatusConflict, "no_active_club", "no active club")
 	case errors.Is(err, internalplayer.ErrRequestNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "no open transfer request"})
+		respondError(c, http.StatusNotFound, "no_open_transfer_request", "no open transfer request")
 	case errors.Is(err, internalplayer.ErrNoOpenInjury):
-		c.JSON(http.StatusNotFound, gin.H{"error": "no open injury"})
+		respondError(c, http.StatusNotFound, "no_open_injury", "no open injury")
 	case errors.Is(err, internalplayer.ErrPlayerNotInClub):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	case errors.Is(err, internalplayer.ErrRequestResolved):
-		c.JSON(http.StatusConflict, gin.H{"error": "request already resolved"})
+		respondError(c, http.StatusConflict, "request_already_resolved", "request already resolved")
 	default:
 		internalError(c, err)
 	}
@@ -43,12 +43,12 @@ func playerStatus(c *gin.Context, err error) {
 func (s *server) handleGetPlayerProfile(c *gin.Context) {
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -69,7 +69,7 @@ func (s *server) handleListClubPlayers(c *gin.Context) {
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -90,12 +90,12 @@ func (s *server) handleGetPlayerMorale(c *gin.Context) {
 	}
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -118,12 +118,12 @@ func (s *server) handleGetPlayerDevelopment(c *gin.Context) {
 	}
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -146,12 +146,12 @@ func (s *server) handleGetPlayerInjury(c *gin.Context) {
 	}
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -173,12 +173,12 @@ func (s *server) handleRushReturn(c *gin.Context) {
 	}
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -200,12 +200,12 @@ func (s *server) handlePromisePlayingTime(c *gin.Context) {
 	}
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -226,12 +226,12 @@ func (s *server) handleApproveTransferRequest(c *gin.Context) {
 	}
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -253,12 +253,12 @@ func (s *server) handleDenyTransferRequest(c *gin.Context) {
 	}
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)

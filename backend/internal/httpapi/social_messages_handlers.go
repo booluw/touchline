@@ -17,7 +17,7 @@ import (
 func (s *server) handleListMessages(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -43,17 +43,17 @@ type sendMessageRequest struct {
 func (s *server) handleSendMessage(c *gin.Context) {
 	var req sendMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "recipient_id and body are required"})
+		respondError(c, http.StatusBadRequest, "recipient_id_and_body_are_required", "recipient_id and body are required")
 		return
 	}
 	recipientID, err := uuid.Parse(req.RecipientID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid recipient_id"})
+		respondError(c, http.StatusBadRequest, "invalid_recipient_id", "invalid recipient_id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -61,19 +61,19 @@ func (s *server) handleSendMessage(c *gin.Context) {
 	msg, err := s.socialSvc.SendMessage(c.Request.Context(), worldID, ident.ManagerID, recipientID, req.Body)
 	switch {
 	case errors.Is(err, internalsocial.ErrManagerNotFound), errors.Is(err, internalsocial.ErrManagerNotInWorld):
-		c.JSON(http.StatusNotFound, gin.H{"error": "recipient not found"})
+		respondError(c, http.StatusNotFound, "recipient_not_found", "recipient not found")
 		return
 	case errors.Is(err, internalsocial.ErrMessageTooLong):
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "message exceeds the maximum length"})
+		respondError(c, http.StatusRequestEntityTooLarge, "message_exceeds_the_maximum_length", "message exceeds the maximum length")
 		return
 	case errors.Is(err, internalsocial.ErrRateLimited):
 		c.Header("Retry-After", "60")
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "message rate limit exceeded"})
+		respondError(c, http.StatusTooManyRequests, "message_rate_limit_exceeded", "message rate limit exceeded")
 		return
 	case errors.Is(err, internalsocial.ErrEmptyMessage),
 		errors.Is(err, internalsocial.ErrSelfMessage),
 		errors.Is(err, internalsocial.ErrBotRecipient):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -88,12 +88,12 @@ func (s *server) handleSendMessage(c *gin.Context) {
 func (s *server) handleReadMessage(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
+		respondError(c, http.StatusBadRequest, "invalid_message_id", "invalid message id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -101,7 +101,7 @@ func (s *server) handleReadMessage(c *gin.Context) {
 	msg, err := s.socialSvc.MarkRead(c.Request.Context(), worldID, ident.ManagerID, id)
 	switch {
 	case errors.Is(err, internalsocial.ErrMessageNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		respondError(c, http.StatusNotFound, "message_not_found", "message not found")
 		return
 	case err != nil:
 		internalError(c, err)

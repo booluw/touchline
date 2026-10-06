@@ -19,26 +19,26 @@ func (s *server) handleAdminRenameClub(c *gin.Context) {
 	}
 	clubID, err := uuid.Parse(c.Param("clubID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid club id"})
+		respondError(c, http.StatusBadRequest, "invalid_club_id", "invalid club id")
 		return
 	}
 	var in internaladmin.RenameInput
 	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	res, err := s.adminSvc.RenameClub(c.Request.Context(), worldID, countryID, clubID, in)
 	if err != nil {
 		switch {
 		case errors.Is(err, internaladmin.ErrClubNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "club not found in world"})
+			respondError(c, http.StatusNotFound, "club_not_found_in_world", "club not found in world")
 		case errors.Is(err, internaladmin.ErrCountryNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "country not found in world"})
+			respondError(c, http.StatusNotFound, "country_not_found_in_world", "country not found in world")
 		case errors.Is(err, internaladmin.ErrClubNameTaken):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusConflict, err)
 		case errors.Is(err, internaladmin.ErrClubNameRequired),
 			errors.Is(err, internaladmin.ErrRenameNewsRequired):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusBadRequest, err)
 		default:
 			internalError(c, err)
 		}
@@ -51,7 +51,7 @@ func (s *server) handleAdminRenameClub(c *gin.Context) {
 func (s *server) handleAdminWorldNews(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	limit := intQuery(c, "limit", 30, 100)
@@ -70,11 +70,11 @@ func (s *server) handleAdminWorldNews(c *gin.Context) {
 func (s *server) handleNews(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	if s.adminSvc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "news unavailable"})
+		respondError(c, http.StatusServiceUnavailable, "news_unavailable", "news unavailable")
 		return
 	}
 	countryID, err := s.callerCountry(c)

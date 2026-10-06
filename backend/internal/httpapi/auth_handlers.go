@@ -35,7 +35,7 @@ func internalError(c *gin.Context, err error) {
 	}
 	// The cause stays in the server log: raw errors carry SQL and schema
 	// detail that must not reach clients (IM28).
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+	respondError(c, http.StatusInternalServerError, "internal_server_error", "internal server error")
 }
 
 type loginRequest struct {
@@ -54,11 +54,11 @@ type loginRequest struct {
 func (s *server) handleLogin(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "request body must be JSON with email and password"})
+		respondError(c, http.StatusBadRequest, "request_body_must_be_json_with_email_and_password", "request body must be JSON with email and password")
 		return
 	}
 	if !strings.Contains(req.Email, "@") || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
+		respondError(c, http.StatusBadRequest, "email_and_password_are_required", "email and password are required")
 		return
 	}
 
@@ -71,13 +71,13 @@ func (s *server) handleLogin(c *gin.Context) {
 	})
 	switch {
 	case errors.Is(err, internalauth.ErrInvalidCredentials):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
+		respondError(c, http.StatusUnauthorized, "invalid_email_or_password", "invalid email or password")
 		return
 	case errors.Is(err, internalauth.ErrNoManager):
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusForbidden, err)
 		return
 	case errors.Is(err, internalauth.ErrNotMember):
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusForbidden, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -117,13 +117,13 @@ func (s *server) handleLogin(c *gin.Context) {
 func (s *server) handleRefresh(c *gin.Context) {
 	raw, err := c.Cookie(refreshCookie)
 	if err != nil || raw == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing refresh token"})
+		respondError(c, http.StatusUnauthorized, "missing_refresh_token", "missing refresh token")
 		return
 	}
 
 	res, err := s.svc.Refresh(c.Request.Context(), raw, clientIP(c), deviceFingerprint(c))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session"})
+		respondError(c, http.StatusUnauthorized, "invalid_or_expired_session", "invalid or expired session")
 		return
 	}
 
@@ -163,11 +163,11 @@ type registerRequest struct {
 func (s *server) handleRegister(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "request body must be JSON with email, password and optional display_name"})
+		respondError(c, http.StatusBadRequest, "request_body_must_be_json_with_email_password_and_optional_display_name", "request body must be JSON with email, password and optional display_name")
 		return
 	}
 	if !strings.Contains(req.Email, "@") || req.Password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
+		respondError(c, http.StatusBadRequest, "email_and_password_are_required", "email and password are required")
 		return
 	}
 
@@ -178,10 +178,10 @@ func (s *server) handleRegister(c *gin.Context) {
 	})
 	switch {
 	case errors.Is(err, internalauth.ErrEmailTaken):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case errors.Is(err, internalauth.ErrPasswordTooLong):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 		return
 	case err != nil:
 		internalError(c, err)

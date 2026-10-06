@@ -13,7 +13,7 @@ import (
 func factionStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, internalfaction.ErrNotOwned):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	default:
 		internalError(c, err)
 	}
@@ -29,7 +29,7 @@ func (s *server) handleGetSquadDynamics(c *gin.Context) {
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)

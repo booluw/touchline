@@ -1,0 +1,121 @@
+package httpapi
+
+import (
+	internaladmin "github.com/touchline/backend/internal/admin"
+	internalauth "github.com/touchline/backend/internal/auth"
+	internalboard "github.com/touchline/backend/internal/board"
+	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
+	internalclub "github.com/touchline/backend/internal/club"
+	internalcompetition "github.com/touchline/backend/internal/competition"
+	internalmanager "github.com/touchline/backend/internal/manager"
+	internalmatch "github.com/touchline/backend/internal/match"
+	playerpool "github.com/touchline/backend/internal/playerpool"
+	internalsocial "github.com/touchline/backend/internal/social"
+	tactics "github.com/touchline/backend/internal/tactics"
+	training "github.com/touchline/backend/internal/training"
+	internaltransfer "github.com/touchline/backend/internal/transfer"
+	internalworld "github.com/touchline/backend/internal/world"
+)
+
+// sentinelCodes maps domain sentinel errors whose message is returned to
+// clients (respondErr) to their stable machine-readable code. First match
+// wins; an unlisted error falls back to its HTTP status code (statusCode).
+var sentinelCodes = []struct {
+	err  error
+	code string
+}{
+	{internaladmin.ErrClubNameRequired, "club_name_required"},
+	{internaladmin.ErrClubNameTaken, "club_name_taken"},
+	{internaladmin.ErrRenameNewsRequired, "rename_news_required"},
+	{internalauth.ErrEmailTaken, "email_taken"},
+	{internalauth.ErrNoManager, "no_world_joined"},
+	{internalauth.ErrNotMember, "not_member"},
+	{internalauth.ErrPasswordTooLong, "password_too_long"},
+	{internalboard.ErrMandateResolved, "mandate_resolved"},
+	{internalboard.ErrMandateTypeNotNegotiable, "mandate_type_not_negotiable"},
+	{internalboard.ErrMandateValueInvalid, "mandate_value_invalid"},
+	{internalboard.ErrNegotiationRejected, "negotiation_rejected"},
+	{internalboard.ErrWorldMismatch, "world_mismatch"},
+	{internalbootstrap.ErrClubNamePartRequired, "club_name_part_required"},
+	{internalbootstrap.ErrInvalidClubNameCountry, "invalid_club_name_country"},
+	{internalbootstrap.ErrInvalidClubNamePart, "invalid_club_name_part"},
+	{internalclub.ErrClubNotFound, "club_not_found"},
+	{internalcompetition.ErrAdjacencyMismatch, "adjacency_mismatch"},
+	{internalcompetition.ErrBadAdjacency, "bad_adjacency"},
+	{internalcompetition.ErrChoiceNotEligible, "choice_not_eligible"},
+	{internalcompetition.ErrClubAlreadyInLeague, "club_already_in_league"},
+	{internalcompetition.ErrClubNotFound, "club_not_found"},
+	{internalcompetition.ErrClubWorldMismatch, "club_world_mismatch"},
+	{internalcompetition.ErrCompetitionNotFound, "competition_not_found"},
+	{internalcompetition.ErrCompetitionNotSeeded, "competition_not_seeded"},
+	{internalcompetition.ErrCompetitionTypeMismatch, "competition_type_mismatch"},
+	{internalcompetition.ErrCompetitionWorldMismatch, "competition_world_mismatch"},
+	{internalcompetition.ErrCountryNotFound, "country_not_found"},
+	{internalcompetition.ErrCupCampaignExists, "cup_campaign_exists"},
+	{internalcompetition.ErrCupFinalDateInvalid, "cup_final_date_invalid"},
+	{internalcompetition.ErrCupFinalDateLocked, "cup_final_date_locked"},
+	{internalcompetition.ErrCupLimit, "cup_limit"},
+	{internalcompetition.ErrInvalidCounts, "invalid_counts"},
+	{internalcompetition.ErrInvalidTeamCount, "invalid_team_count"},
+	{internalcompetition.ErrInvalidTier, "invalid_tier"},
+	{internalcompetition.ErrKickoffDateInPast, "kickoff_date_in_past"},
+	{internalcompetition.ErrKickoffNotAllowedWeekday, "kickoff_not_allowed_weekday"},
+	{internalcompetition.ErrLeagueAlreadySeeded, "league_already_seeded"},
+	{internalcompetition.ErrLeagueFull, "league_full"},
+	{internalcompetition.ErrLeagueShrink, "league_shrink"},
+	{internalcompetition.ErrNameCollision, "name_collision"},
+	{internalcompetition.ErrNoSeason, "no_season"},
+	{internalcompetition.ErrQualificationField, "qualification_field"},
+	{internalcompetition.ErrQualificationOverlap, "qualification_overlap"},
+	{internalcompetition.ErrQualificationUnavailable, "qualification_unavailable"},
+	{internalcompetition.ErrRegionMismatch, "region_mismatch"},
+	{internalcompetition.ErrRegionNameCollision, "region_name_collision"},
+	{internalcompetition.ErrRegionNotFound, "region_not_found"},
+	{internalcompetition.ErrRegionWorldMismatch, "region_world_mismatch"},
+	{internalcompetition.ErrReputationOutOfRange, "reputation_out_of_range"},
+	{internalcompetition.ErrSeasonNotFound, "season_not_found"},
+	{internalcompetition.ErrStagingInvalid, "staging_invalid"},
+	{internalcompetition.ErrWorldArchived, "world_archived"},
+	{internalcompetition.ErrWorldHasNoLeagues, "world_has_no_leagues"},
+	{internalcompetition.ErrWorldNotFound, "world_not_found"},
+	{internalmanager.ErrClubHasOffer, "club_has_offer"},
+	{internalmanager.ErrClubNotFound, "club_not_found"},
+	{internalmanager.ErrClubNotInLeague, "club_not_in_league"},
+	{internalmanager.ErrClubNotPlayable, "club_not_playable"},
+	{internalmanager.ErrClubOccupied, "club_occupied"},
+	{internalmanager.ErrClubWorldMismatch, "club_world_mismatch"},
+	{internalmanager.ErrManagerEmployed, "manager_employed"},
+	{internalmanager.ErrManagerUnavailable, "manager_unavailable"},
+	{internalmanager.ErrNotAIClub, "not_ai_club"},
+	{internalmanager.ErrNotEmployed, "not_employed"},
+	{internalmanager.ErrNotOfferCandidate, "not_offer_candidate"},
+	{internalmanager.ErrOfferNotFound, "offer_not_found"},
+	{internalmanager.ErrOfferResolved, "offer_resolved"},
+	{internalmatch.ErrMatchNotLive, "match_not_live"},
+	{internalmatch.ErrMinuteClosed, "minute_closed"},
+	{playerpool.ErrClubCannotAfford, "club_cannot_afford"},
+	{playerpool.ErrNoActiveContract, "no_active_contract"},
+	{playerpool.ErrNotFreeAgent, "not_free_agent"},
+	{playerpool.ErrStreetUnder18, "street_under18"},
+	{internalsocial.ErrBotRecipient, "bot_recipient"},
+	{internalsocial.ErrEmptyMessage, "empty_message"},
+	{internalsocial.ErrSelfMessage, "self_message"},
+	{tactics.ErrFixtureLive, "fixture_live"},
+	{tactics.ErrInvalidFormation, "invalid_formation"},
+	{tactics.ErrInvalidLineup, "invalid_lineup"},
+	{tactics.ErrInvalidStyle, "invalid_style"},
+	{tactics.ErrPlayerUnavailable, "player_unavailable"},
+	{training.ErrInvalidArchetype, "invalid_archetype"},
+	{internaltransfer.ErrBidExpired, "bid_expired"},
+	{internaltransfer.ErrBidResolved, "bid_resolved"},
+	{internaltransfer.ErrCounterLimitReached, "counter_limit_reached"},
+	{internaltransfer.ErrDuplicateListing, "duplicate_listing"},
+	{internaltransfer.ErrDuplicateOpenBid, "duplicate_open_bid"},
+	{internaltransfer.ErrInsufficientFunds, "insufficient_funds"},
+	{internaltransfer.ErrInvalidActionForRole, "invalid_action_for_role"},
+	{internaltransfer.ErrInvalidTerms, "invalid_terms"},
+	{internaltransfer.ErrPlayerNotTransferable, "player_not_transferable"},
+	{internalworld.ErrInvalidTransition, "invalid_transition"},
+	{internalworld.ErrNameCollision, "name_collision"},
+	{internalworld.ErrWorldNotFound, "world_not_found"},
+}

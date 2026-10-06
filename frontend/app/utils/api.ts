@@ -1,102 +1,108 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { defu } from 'defu'
-import type { RequestInterceptor, ResponseInterceptor, ErrorInterceptor, CustomFetchOptions } from "../types"
+import { defu } from "defu";
+import type {
+  RequestInterceptor,
+  ResponseInterceptor,
+  ErrorInterceptor,
+  CustomFetchOptions,
+} from "../types";
+import { ApiError } from "../types";
+import { toApiError } from "./api-error";
 
 // Internal-only flags layered onto CustomFetchOptions so a request can be
 // marked "already went through the refresh-retry cycle" and "this IS the
 // refresh call itself" — keeps both out of the shared types file since
 // nothing outside this class needs to set them.
 type InternalFetchOptions<T = any> = CustomFetchOptions<T> & {
-  _retriedAfterRefresh?: boolean
-  _isAuthRefreshCall?: boolean
-}
+  _retriedAfterRefresh?: boolean;
+  _isAuthRefreshCall?: boolean;
+};
 
 class ApiClient {
-  private baseURL: string
-  private defaultHeaders: HeadersInit
-  private requestInterceptors: RequestInterceptor[] = []
-  private responseInterceptors: ResponseInterceptor<any>[] = []
-  private errorInterceptors: ErrorInterceptor[] = []
+  private baseURL: string;
+  private defaultHeaders: HeadersInit;
+  private requestInterceptors: RequestInterceptor[] = [];
+  private responseInterceptors: ResponseInterceptor<any>[] = [];
+  private errorInterceptors: ErrorInterceptor[] = [];
 
   // Route(s) that should never themselves trigger a refresh-on-401 — refreshing
   // in response to the refresh endpoint's own 401 would recurse forever.
-  private authRefreshUrl = '/api/auth/refresh'
-  private authLoginUrl = '/api/auth/login'
+  private authRefreshUrl = "/api/auth/refresh";
+  private authLoginUrl = "/api/auth/login";
 
   // Dedupes concurrent refreshes: every 401 that lands while a refresh is
   // already in flight awaits this same promise instead of firing its own
   // POST /api/auth/refresh.
-  private refreshPromise: Promise<void> | null = null
+  private refreshPromise: Promise<void> | null = null;
 
   // Optional hook for "the refresh itself failed" — the session is genuinely
   // over (expired/invalid refresh cookie), not just a request-level error.
   // Wire this to your auth store / router in app startup, e.g.:
   //   useApi().onSessionExpired(() => { authStore.clear(); navigateTo('/login') })
-  private sessionExpiredHandler: (() => void) | null = null
+  private sessionExpiredHandler: (() => void) | null = null;
 
   constructor() {
-    const { public: { apiBase } } = useRuntimeConfig()
-    this.baseURL = apiBase || import.meta.env.VITE_API_URL
+    const {
+      public: { apiBase },
+    } = useRuntimeConfig();
+    this.baseURL = apiBase || import.meta.env.VITE_API_URL;
     this.defaultHeaders = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    }
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    };
   }
 
   // Add request interceptor
   addRequestInterceptor(interceptor: RequestInterceptor) {
-    this.requestInterceptors.push(interceptor)
+    this.requestInterceptors.push(interceptor);
   }
 
   // Add response interceptor
   addResponseInterceptor<T>(interceptor: ResponseInterceptor<T>) {
-    this.responseInterceptors.push(interceptor)
+    this.responseInterceptors.push(interceptor);
   }
 
   // Add error interceptor
   addErrorInterceptor(interceptor: ErrorInterceptor) {
-    this.errorInterceptors.push(interceptor)
+    this.errorInterceptors.push(interceptor);
   }
 
   // Called when a refresh attempt itself fails — the refresh token is dead,
   // not just the access token expired. Typical usage: clear auth state and
   // redirect to login.
   onSessionExpired(handler: () => void) {
-    this.sessionExpiredHandler = handler
+    this.sessionExpiredHandler = handler;
   }
 
-  private buildHeaders(options?: Pick<CustomFetchOptions, 'headers'>): HeadersInit {
-    const headers: HeadersInit = { ...this.defaultHeaders }
+  private buildHeaders(
+    options?: Pick<CustomFetchOptions, "headers">,
+  ): HeadersInit {
+    const headers: HeadersInit = { ...this.defaultHeaders };
 
     if (options?.headers) {
-      Object.assign(headers, options.headers)
+      Object.assign(headers, options.headers);
     }
 
-    return headers
+    return headers;
   }
 
   private async handleError(error: any): Promise<never> {
-    let processedError = {
-      statusCode: error?.response?.status || 500,
-      statusMessage: error?.response?.statusText || 'Internal Server Error',
-      message: error?.data?.message || error?.message || 'An error occurred',
-      data: error?.data
-    }
+    let processedError = toApiError(error);
 
     // Run error interceptors
     for (const interceptor of this.errorInterceptors) {
       try {
-        await interceptor(processedError)
+        await interceptor(processedError);
       } catch (err) {
-        processedError = err as any
+        if (err instanceof ApiError) processedError = err;
       }
     }
 
     if (import.meta.dev) {
-      console.error('API Error:', processedError)
+      console.error("API Error:", processedError);
     }
 
-    throw processedError
+    throw processedError;
   }
 
   /**
@@ -108,77 +114,86 @@ class ApiClient {
    */
   private refreshAccessToken(): Promise<void> {
     if (this.refreshPromise) {
-      return this.refreshPromise
+      return this.refreshPromise;
     }
 
-    const authStore = useAuthStore()
+    const authStore = useAuthStore();
 
     this.refreshPromise = $fetch(this.authRefreshUrl, {
       baseURL: this.baseURL,
-      method: 'POST',
-      credentials: 'include',
+      method: "POST",
+      credentials: "include",
       headers: this.defaultHeaders,
     })
       .then(() => undefined)
       .catch(() => {
-        this.sessionExpiredHandler?.()
-        authStore.$reset()
+        this.sessionExpiredHandler?.();
+        authStore.$reset();
         // throw err
       })
       .finally(() => {
-        this.refreshPromise = null
-      })
+        this.refreshPromise = null;
+      });
 
-    return this.refreshPromise
+    return this.refreshPromise;
   }
 
   private async fetchWithRetry<T>(
     url: string,
-    options: InternalFetchOptions<T> = {}
+    options: InternalFetchOptions<T> = {},
   ): Promise<T> {
-    const { retry = 0, retryDelay = 1000, timeout, _retriedAfterRefresh, _isAuthRefreshCall, ...fetchOptions } = options
+    const {
+      retry = 0,
+      retryDelay = 1000,
+      timeout,
+      _retriedAfterRefresh,
+      _isAuthRefreshCall,
+      ...fetchOptions
+    } = options;
 
-    let processedUrl = url
-    let processedOptions = fetchOptions
+    let processedUrl = url;
+    let processedOptions = fetchOptions;
 
     // Run request interceptors
     for (const interceptor of this.requestInterceptors) {
-      const result = await interceptor(processedUrl, processedOptions)
+      const result = await interceptor(processedUrl, processedOptions);
       if (result) {
-        processedUrl = result.url || processedUrl
-        processedOptions = result.options || processedOptions
+        processedUrl = result.url || processedUrl;
+        processedOptions = result.options || processedOptions;
       }
     }
 
-    const headers = this.buildHeaders(options)
+    const headers = this.buildHeaders(options);
 
     const mergedOptions = defu(processedOptions, {
       baseURL: this.baseURL,
       headers,
       credentials: "include",
       ...(timeout && {
-        signal: AbortSignal.timeout(timeout)
-      })
-    })
+        signal: AbortSignal.timeout(timeout),
+      }),
+    });
 
-    let lastError: any
+    let lastError: any;
 
     for (let attempt = 0; attempt <= retry; attempt++) {
       try {
-        let response = await $fetch<T>(processedUrl, mergedOptions as any)
+        let response = await $fetch<T>(processedUrl, mergedOptions as any);
 
         // Run response interceptors
         for (const interceptor of this.responseInterceptors) {
-          response = await interceptor(response)
+          response = await interceptor(response);
         }
 
-        return response
+        return response;
       } catch (error: any) {
-        lastError = error
+        lastError = error;
 
-        const status = error?.response?.status
-        const isUnauthorized = status === 401
-        const isAuthRoute = processedUrl === this.authRefreshUrl || processedUrl === this.authLoginUrl
+        const status = error?.response?.status;
+        const isUnauthorized = status === 401;
+        const isAuthRoute =
+          processedUrl === this.authRefreshUrl ||
+          processedUrl === this.authLoginUrl;
 
         // 401, not from the auth routes themselves, and not already retried
         // once after a refresh → refresh, then retry this exact request one
@@ -186,88 +201,109 @@ class ApiClient {
         // normal error path instead of looping forever.
         if (isUnauthorized && !isAuthRoute && !_retriedAfterRefresh) {
           try {
-            await this.refreshAccessToken()
+            await this.refreshAccessToken();
             return await this.fetchWithRetry<T>(url, {
               ...options,
               _retriedAfterRefresh: true,
-            })
+            });
           } catch (refreshError) {
-            throw refreshError as any
+            throw refreshError as any;
             // return this.handleError(refreshError)
           }
         }
 
         if (status >= 400 && status < 500) {
-          break
+          break;
         }
 
         if (attempt < retry) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)))
+          await new Promise((resolve) =>
+            setTimeout(resolve, retryDelay * (attempt + 1)),
+          );
         }
       }
     }
 
-    return this.handleError(lastError)
+    return this.handleError(lastError);
   }
 
   async get<T = any>(url: string, options?: CustomFetchOptions<T>): Promise<T> {
-    return this.fetchWithRetry<T>(url, { ...options, method: 'GET' })
+    return this.fetchWithRetry<T>(url, { ...options, method: "GET" });
   }
 
-  async post<T = any>(url: string, body?: any, options?: CustomFetchOptions<T>): Promise<T> {
-    return this.fetchWithRetry<T>(url, { ...options, method: 'POST', body })
+  async post<T = any>(
+    url: string,
+    body?: any,
+    options?: CustomFetchOptions<T>,
+  ): Promise<T> {
+    return this.fetchWithRetry<T>(url, { ...options, method: "POST", body });
   }
 
-  async put<T = any>(url: string, body?: any, options?: CustomFetchOptions<T>): Promise<T> {
-    return this.fetchWithRetry<T>(url, { ...options, method: 'PUT', body })
+  async put<T = any>(
+    url: string,
+    body?: any,
+    options?: CustomFetchOptions<T>,
+  ): Promise<T> {
+    return this.fetchWithRetry<T>(url, { ...options, method: "PUT", body });
   }
 
-  async patch<T = any>(url: string, body?: any, options?: CustomFetchOptions<T>): Promise<T> {
-    return this.fetchWithRetry<T>(url, { ...options, method: 'PATCH', body })
+  async patch<T = any>(
+    url: string,
+    body?: any,
+    options?: CustomFetchOptions<T>,
+  ): Promise<T> {
+    return this.fetchWithRetry<T>(url, { ...options, method: "PATCH", body });
   }
 
-  async delete<T = any>(url: string, options?: CustomFetchOptions<T>): Promise<T> {
-    return this.fetchWithRetry<T>(url, { ...options, method: 'DELETE' })
+  async delete<T = any>(
+    url: string,
+    options?: CustomFetchOptions<T>,
+  ): Promise<T> {
+    return this.fetchWithRetry<T>(url, { ...options, method: "DELETE" });
   }
 
-  async upload<T = any>(url: string, file: File | FormData, options?: CustomFetchOptions<T>): Promise<T> {
-    const formData = file instanceof FormData ? file : new FormData()
+  async upload<T = any>(
+    url: string,
+    file: File | FormData,
+    options?: CustomFetchOptions<T>,
+  ): Promise<T> {
+    const formData = file instanceof FormData ? file : new FormData();
 
     if (file instanceof File) {
-      formData.append('file', file)
+      formData.append("file", file);
     }
 
-    const headers = this.buildHeaders(options)
-    delete (headers as any)['Content-Type']
+    const headers = this.buildHeaders(options);
+    delete (headers as any)["Content-Type"];
 
     return this.fetchWithRetry<T>(url, {
       ...options,
-      method: 'POST',
+      method: "POST",
       body: formData,
-      headers
-    })
+      headers,
+    });
   }
 
   setHeader(key: string, value: string) {
-    this.defaultHeaders = { ...this.defaultHeaders, [key]: value }
+    this.defaultHeaders = { ...this.defaultHeaders, [key]: value };
   }
 
   removeHeader(key: string) {
-    const headers = { ...this.defaultHeaders }
-    delete (headers as any)[key]
-    this.defaultHeaders = headers
+    const headers = { ...this.defaultHeaders };
+    delete (headers as any)[key];
+    this.defaultHeaders = headers;
   }
 
   setBaseURL(url: string) {
-    this.baseURL = url
+    this.baseURL = url;
   }
 }
 
-let apiClient: ApiClient | null = null
+let apiClient: ApiClient | null = null;
 
 export const useApi = () => {
   if (!apiClient) {
-    apiClient = new ApiClient()
+    apiClient = new ApiClient();
   }
-  return apiClient
-}
+  return apiClient;
+};

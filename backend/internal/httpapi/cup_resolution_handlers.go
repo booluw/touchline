@@ -16,11 +16,11 @@ import (
 func cupResolutionStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, competition.ErrClubNotFound), errors.Is(err, competition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		respondError(c, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, competition.ErrClubNotOwned):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	case errors.Is(err, competition.ErrChoiceNotEligible), errors.Is(err, competition.ErrCompetitionWorldMismatch):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusUnprocessableEntity, err)
 	default:
 		internalError(c, err)
 	}
@@ -62,7 +62,7 @@ func (s *server) handleRecordCupChoice(c *gin.Context) {
 	}
 	var req cupChoiceRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.CupID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cup_id is required"})
+		respondError(c, http.StatusBadRequest, "cup_id_is_required", "cup_id is required")
 		return
 	}
 	ctx := c.Request.Context()

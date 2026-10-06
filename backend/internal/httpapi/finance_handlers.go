@@ -17,9 +17,9 @@ import (
 func financeStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, finance.ErrClubNotFound), errors.Is(err, finance.ErrWorldNotActive):
-		c.JSON(http.StatusNotFound, gin.H{"error": "club not found"})
+		respondError(c, http.StatusNotFound, "club_not_found", "club not found")
 	case errors.Is(err, finance.ErrNotOwned):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	default:
 		internalError(c, err)
 	}
@@ -34,7 +34,7 @@ func (s *server) ownedClubParams(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 	}
 	ident, ok := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return uuid.Nil, uuid.Nil, false
 	}
 	return id, ident.ManagerID, true

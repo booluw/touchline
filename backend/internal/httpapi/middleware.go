@@ -18,13 +18,13 @@ const identityKey = "identity"
 func (s *server) requireAuth(c *gin.Context) {
 	raw, err := c.Cookie(accessCookie)
 	if err != nil || raw == "" {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		abortError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 
 	identity, err := pkgjwt.ValidateAccessToken(s.jwtCfg, raw)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		abortError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 
@@ -44,7 +44,7 @@ func (s *server) requireAdmin(c *gin.Context) {
 	identity, _ := c.Get(identityKey)
 	ident, ok := identity.(*pkgjwt.ManagerIdentity)
 	if !ok {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		abortError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 
@@ -52,7 +52,7 @@ func (s *server) requireAdmin(c *gin.Context) {
 	err := s.pool.QueryRow(c.Request.Context(),
 		`SELECT is_admin FROM auth.users WHERE id = $1`, ident.UserID).Scan(&isAdmin)
 	if err != nil || !isAdmin {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		abortError(c, http.StatusForbidden, "forbidden", "forbidden")
 		return
 	}
 	c.Next()

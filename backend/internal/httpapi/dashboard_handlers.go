@@ -16,11 +16,11 @@ func (s *server) handleDashboard(c *gin.Context) {
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	if s.dashSvc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "dashboard unavailable"})
+		respondError(c, http.StatusServiceUnavailable, "dashboard_unavailable", "dashboard unavailable")
 		return
 	}
 	snap, err := s.dashSvc.GetDashboard(c.Request.Context(), worldID, ident.ManagerID)

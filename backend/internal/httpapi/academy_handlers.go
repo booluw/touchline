@@ -14,11 +14,11 @@ import (
 func academyStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, academy.ErrClubNotFound), errors.Is(err, academy.ErrWorldNotActive):
-		c.JSON(http.StatusNotFound, gin.H{"error": "club not found"})
+		respondError(c, http.StatusNotFound, "club_not_found", "club not found")
 	case errors.Is(err, academy.ErrNotOwned):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	case errors.Is(err, academy.ErrInvalidTier):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "investment_tier must be between 1 and 5"})
+		respondError(c, http.StatusBadRequest, "investment_tier_must_be_between_1_and_5", "investment_tier must be between 1 and 5")
 	default:
 		internalError(c, err)
 	}
@@ -57,11 +57,11 @@ func (s *server) handleUpdateAcademy(c *gin.Context) {
 	}
 	var req academyUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	if req.InvestmentTier == nil && req.IsActive == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "nothing to update"})
+		respondError(c, http.StatusBadRequest, "nothing_to_update", "nothing to update")
 		return
 	}
 	ctx := c.Request.Context()

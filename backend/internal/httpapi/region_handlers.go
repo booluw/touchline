@@ -36,20 +36,20 @@ type leagueReputationRequest struct {
 func (s *server) handleCreateRegion(c *gin.Context) {
 	var req regionRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.WorldID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "world_id is required"})
+		respondError(c, http.StatusBadRequest, "world_id_is_required", "world_id is required")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "region name is required"})
+		respondError(c, http.StatusUnprocessableEntity, "region_name_is_required", "region name is required")
 		return
 	}
 	region, err := s.compSvc.CreateRegion(c.Request.Context(), req.WorldID, req.Name)
 	switch {
 	case errors.Is(err, internalcompetition.ErrWorldNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrRegionNameCollision):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -62,7 +62,7 @@ func (s *server) handleCreateRegion(c *gin.Context) {
 func (s *server) handleListRegions(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Query("world_id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "world_id query parameter is required"})
+		respondError(c, http.StatusBadRequest, "world_id_query_parameter_is_required", "world_id query parameter is required")
 		return
 	}
 	regions, err := s.compSvc.ListRegions(c.Request.Context(), worldID)
@@ -77,25 +77,25 @@ func (s *server) handleListRegions(c *gin.Context) {
 func (s *server) handleRenameRegion(c *gin.Context) {
 	regionID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid region id"})
+		respondError(c, http.StatusBadRequest, "invalid_region_id", "invalid region id")
 		return
 	}
 	var req regionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "region name is required"})
+		respondError(c, http.StatusUnprocessableEntity, "region_name_is_required", "region name is required")
 		return
 	}
 	region, err := s.compSvc.RenameRegion(c.Request.Context(), regionID, req.Name)
 	switch {
 	case errors.Is(err, internalcompetition.ErrRegionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrRegionNameCollision):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -108,12 +108,12 @@ func (s *server) handleRenameRegion(c *gin.Context) {
 func (s *server) handleDeleteRegion(c *gin.Context) {
 	regionID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid region id"})
+		respondError(c, http.StatusBadRequest, "invalid_region_id", "invalid region id")
 		return
 	}
 	if err := s.compSvc.DeleteRegion(c.Request.Context(), regionID); err != nil {
 		if errors.Is(err, internalcompetition.ErrRegionNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusNotFound, err)
 			return
 		}
 		internalError(c, err)
@@ -126,24 +126,24 @@ func (s *server) handleDeleteRegion(c *gin.Context) {
 func (s *server) handleSetCountryRegion(c *gin.Context) {
 	countryID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid country id"})
+		respondError(c, http.StatusBadRequest, "invalid_country_id", "invalid country id")
 		return
 	}
 	var req countryRegionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	country, err := s.compSvc.SetCountryRegion(c.Request.Context(), countryID, req.RegionID)
 	switch {
 	case errors.Is(err, internalcompetition.ErrCountryNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "country not found"})
+		respondError(c, http.StatusNotFound, "country_not_found", "country not found")
 		return
 	case errors.Is(err, internalcompetition.ErrRegionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrRegionWorldMismatch):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusUnprocessableEntity, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -156,21 +156,21 @@ func (s *server) handleSetCountryRegion(c *gin.Context) {
 func (s *server) handleSetLeagueReputation(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid league id"})
+		respondError(c, http.StatusBadRequest, "invalid_league_id", "invalid league id")
 		return
 	}
 	var req leagueReputationRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Reputation == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reputation is required"})
+		respondError(c, http.StatusBadRequest, "reputation_is_required", "reputation is required")
 		return
 	}
 	league, err := s.compSvc.SetLeagueReputation(c.Request.Context(), leagueID, *req.Reputation)
 	switch {
 	case errors.Is(err, internalcompetition.ErrReputationOutOfRange):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 		return
 	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "league not found"})
+		respondError(c, http.StatusNotFound, "league_not_found", "league not found")
 		return
 	case err != nil:
 		internalError(c, err)

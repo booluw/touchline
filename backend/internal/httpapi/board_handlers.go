@@ -16,18 +16,18 @@ import (
 func boardStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, internalboard.ErrNotEmployed):
-		c.JSON(http.StatusConflict, gin.H{"error": "no active club"})
+		respondError(c, http.StatusConflict, "no_active_club", "no active club")
 	case errors.Is(err, internalboard.ErrMandateNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		respondError(c, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, internalboard.ErrNotMandateManager):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	case errors.Is(err, internalboard.ErrMandateResolved),
 		errors.Is(err, internalboard.ErrNegotiationRejected),
 		errors.Is(err, internalboard.ErrWorldMismatch):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 	case errors.Is(err, internalboard.ErrMandateTypeNotNegotiable),
 		errors.Is(err, internalboard.ErrMandateValueInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 	default:
 		internalError(c, err)
 	}
@@ -38,7 +38,7 @@ func boardStatus(c *gin.Context, err error) {
 func (s *server) handleBoardView(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -59,19 +59,19 @@ func (s *server) handleBoardView(c *gin.Context) {
 func (s *server) handleNegotiateMandate(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mandate id"})
+		respondError(c, http.StatusBadRequest, "invalid_mandate_id", "invalid mandate id")
 		return
 	}
 	var req internalboard.NegotiateInput
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid negotiation payload"})
+		respondError(c, http.StatusBadRequest, "invalid_negotiation_payload", "invalid negotiation payload")
 		return
 	}
 	req.MandateID = id
 
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)

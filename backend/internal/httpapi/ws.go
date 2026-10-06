@@ -18,7 +18,7 @@ import (
 func (s *server) handleWS(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)

@@ -25,17 +25,17 @@ func (s *server) policyActor(c *gin.Context) (policybot.Actor, uuid.UUID, error)
 func (s *server) handleGetPolicy(c *gin.Context) {
 	actor, _, err := s.policyActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	policyType := c.Param("type")
 	if !policybot.ValidPolicyTypes[policyType] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid policy type"})
+		respondError(c, http.StatusBadRequest, "invalid_policy_type", "invalid policy type")
 		return
 	}
 	p, err := s.policySvc.GetPolicy(c.Request.Context(), actor.ManagerID, policyType)
 	if errors.Is(err, policybot.ErrNoPolicy) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no policy saved"})
+		respondError(c, http.StatusNotFound, "no_policy_saved", "no policy saved")
 		return
 	}
 	if err != nil {
@@ -49,19 +49,19 @@ func (s *server) handleGetPolicy(c *gin.Context) {
 func (s *server) handleUpsertPolicy(c *gin.Context) {
 	actor, worldID, err := s.policyActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	policyType := c.Param("type")
 	if !policybot.ValidPolicyTypes[policyType] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid policy type"})
+		respondError(c, http.StatusBadRequest, "invalid_policy_type", "invalid policy type")
 		return
 	}
 	var req struct {
 		Params json.RawMessage `json:"params"`
 	}
 	if c.ShouldBindJSON(&req) != nil || len(req.Params) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid policy params"})
+		respondError(c, http.StatusBadRequest, "invalid_policy_params", "invalid policy params")
 		return
 	}
 	p, err := s.policySvc.UpsertPolicy(c.Request.Context(), actor, worldID, actor.ManagerID, policyType, req.Params)
@@ -76,12 +76,12 @@ func (s *server) handleUpsertPolicy(c *gin.Context) {
 func (s *server) handleDeletePolicy(c *gin.Context) {
 	actor, worldID, err := s.policyActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	policyType := c.Param("type")
 	if !policybot.ValidPolicyTypes[policyType] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid policy type"})
+		respondError(c, http.StatusBadRequest, "invalid_policy_type", "invalid policy type")
 		return
 	}
 	found, err := s.policySvc.DeletePolicy(c.Request.Context(), actor, worldID, actor.ManagerID, policyType)
@@ -90,7 +90,7 @@ func (s *server) handleDeletePolicy(c *gin.Context) {
 		return
 	}
 	if !found {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no policy saved"})
+		respondError(c, http.StatusNotFound, "no_policy_saved", "no policy saved")
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -100,7 +100,7 @@ func (s *server) handleDeletePolicy(c *gin.Context) {
 func (s *server) handleGetAbsence(c *gin.Context) {
 	actor, worldID, err := s.policyActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	view, err := s.policySvc.GetAbsence(c.Request.Context(), worldID, actor.ManagerID)
@@ -115,14 +115,14 @@ func (s *server) handleGetAbsence(c *gin.Context) {
 func (s *server) handleSetAway(c *gin.Context) {
 	actor, worldID, err := s.policyActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	var req struct {
 		Away bool `json:"away"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid away payload"})
+		respondError(c, http.StatusBadRequest, "invalid_away_payload", "invalid away payload")
 		return
 	}
 	if err := s.policySvc.SetAway(c.Request.Context(), worldID, actor.ManagerID, req.Away); err != nil {
@@ -136,7 +136,7 @@ func (s *server) handleSetAway(c *gin.Context) {
 func (s *server) handleClearAway(c *gin.Context) {
 	actor, worldID, err := s.policyActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	if err := s.policySvc.SetAway(c.Request.Context(), worldID, actor.ManagerID, false); err != nil {
@@ -150,7 +150,7 @@ func (s *server) handleClearAway(c *gin.Context) {
 func (s *server) handleGetAbsenceSummary(c *gin.Context) {
 	actor, worldID, err := s.policyActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	summary, err := s.policySvc.GetAbsenceSummary(c.Request.Context(), worldID, actor.ManagerID)

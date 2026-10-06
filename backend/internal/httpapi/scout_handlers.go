@@ -19,19 +19,19 @@ import (
 func (s *server) handleNextClubFixture(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid club id"})
+		respondError(c, http.StatusBadRequest, "invalid_club_id", "invalid club id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	view, err := s.scoutSvc.NextFixture(c.Request.Context(), worldID, id)
 	switch {
 	case errors.Is(err, internalcompetition.ErrClubNotFound),
 		errors.Is(err, internalcompetition.ErrClubWorldMismatch):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case err != nil:
 		internalError(c, err)

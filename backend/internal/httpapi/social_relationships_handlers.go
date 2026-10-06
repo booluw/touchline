@@ -17,7 +17,7 @@ import (
 func (s *server) handleListRelationships(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -25,7 +25,7 @@ func (s *server) handleListRelationships(c *gin.Context) {
 	edges, err := s.socialSvc.ListRelationships(c.Request.Context(), worldID, ident.ManagerID)
 	switch {
 	case errors.Is(err, internalsocial.ErrManagerNotFound), errors.Is(err, internalsocial.ErrManagerNotInWorld):
-		c.JSON(http.StatusNotFound, gin.H{"error": "manager not found"})
+		respondError(c, http.StatusNotFound, "manager_not_found", "manager not found")
 		return
 	case err != nil:
 		internalError(c, err)

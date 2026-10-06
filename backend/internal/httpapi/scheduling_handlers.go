@@ -27,14 +27,14 @@ func (s *server) handleUpdateCountryScheduling(c *gin.Context) {
 	}
 	var in schedulingUpdate
 	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	res, err := s.compSvc.UpdateCountryScheduling(c.Request.Context(), worldID, countryID, in.AllowedWeekdays)
 	if err != nil {
 		switch {
 		case errors.Is(err, internalcompetition.ErrCountryNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "country not found in world"})
+			respondError(c, http.StatusNotFound, "country_not_found_in_world", "country not found in world")
 		default:
 			internalError(c, err)
 		}
@@ -48,21 +48,21 @@ func (s *server) handleUpdateCountryScheduling(c *gin.Context) {
 func (s *server) handleUpdateLeagueScheduling(c *gin.Context) {
 	var in schedulingUpdate
 	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid league id"})
+		respondError(c, http.StatusBadRequest, "invalid_league_id", "invalid league id")
 		return
 	}
 	res, updErr := s.compSvc.UpdateLeagueScheduling(c.Request.Context(), leagueID, in.AllowedWeekdays)
 	if updErr != nil {
 		switch {
 		case errors.Is(updErr, internalcompetition.ErrCompetitionNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "league not found"})
+			respondError(c, http.StatusNotFound, "league_not_found", "league not found")
 		case errors.Is(updErr, internalcompetition.ErrCompetitionTypeMismatch):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "competition is not a league"})
+			respondError(c, http.StatusBadRequest, "competition_is_not_a_league", "competition is not a league")
 		default:
 			internalError(c, updErr)
 		}
@@ -76,21 +76,21 @@ func (s *server) handleUpdateLeagueScheduling(c *gin.Context) {
 func (s *server) handleUpdateCupScheduling(c *gin.Context) {
 	var in schedulingUpdate
 	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	cupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cup id"})
+		respondError(c, http.StatusBadRequest, "invalid_cup_id", "invalid cup id")
 		return
 	}
 	res, updErr := s.compSvc.UpdateCupScheduling(c.Request.Context(), cupID, in.AllowedWeekdays)
 	if updErr != nil {
 		switch {
 		case errors.Is(updErr, internalcompetition.ErrCompetitionNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "cup not found"})
+			respondError(c, http.StatusNotFound, "cup_not_found", "cup not found")
 		case errors.Is(updErr, internalcompetition.ErrCompetitionTypeMismatch):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "competition is not a domestic cup"})
+			respondError(c, http.StatusBadRequest, "competition_is_not_a_domestic_cup", "competition is not a domestic cup")
 		default:
 			internalError(c, updErr)
 		}

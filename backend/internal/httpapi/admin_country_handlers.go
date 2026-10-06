@@ -17,12 +17,12 @@ import (
 func (s *server) parseAdminCountryParams(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return uuid.Nil, uuid.Nil, false
 	}
 	countryID, err := uuid.Parse(c.Param("countryID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid country id"})
+		respondError(c, http.StatusBadRequest, "invalid_country_id", "invalid country id")
 		return uuid.Nil, uuid.Nil, false
 	}
 	return worldID, countryID, true
@@ -36,7 +36,7 @@ func (s *server) respondAdminCountry(c *gin.Context, data any, err error) {
 		return
 	}
 	if errors.Is(err, internaladmin.ErrCountryNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "country not found in world"})
+		respondError(c, http.StatusNotFound, "country_not_found_in_world", "country not found in world")
 		return
 	}
 	internalError(c, err)

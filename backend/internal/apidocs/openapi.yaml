@@ -4520,12 +4520,17 @@ components:
   schemas:
     Error:
       type: object
-      required: [error]
+      required: [error, code]
       properties:
         error:
           type: string
-          description: Human-readable reason. A 500 always carries the generic "internal server error" — the cause is logged server-side, never returned.
+          description: Human-readable reason, safe to display; wording may change. A 500 always carries the generic "internal server error" — the cause is logged server-side, never returned.
           example: internal server error
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9_]*$"
+          description: Stable snake_case machine-readable code to branch on (e.g. "no_active_club", "mandate_resolved"). Never changes once shipped. Domain errors without a registered code fall back to the HTTP status text ("conflict", "not_found").
+          example: internal_server_error
     DashboardItem:
       type: object
       description: |

@@ -22,11 +22,11 @@ import (
 func (s *server) handleCreateCup(c *gin.Context) {
 	var req internalcompetition.CupParams
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed cup payload"})
+		respondError(c, http.StatusBadRequest, "malformed_cup_payload", "malformed cup payload")
 		return
 	}
 	if req.WorldID == uuid.Nil || req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "world_id and name are required"})
+		respondError(c, http.StatusBadRequest, "world_id_and_name_are_required", "world_id and name are required")
 		return
 	}
 
@@ -36,7 +36,7 @@ func (s *server) handleCreateCup(c *gin.Context) {
 	)
 	if req.RegionID != nil {
 		if *req.RegionID == uuid.Nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "region_id is required for a regional cup"})
+			respondError(c, http.StatusBadRequest, "region_id_is_required_for_a_regional_cup", "region_id is required for a regional cup")
 			return
 		}
 		cup, err = s.compSvc.CreateRegionalCup(c.Request.Context(), internalcompetition.RegionalCupParams{
@@ -50,7 +50,7 @@ func (s *server) handleCreateCup(c *gin.Context) {
 		})
 	} else {
 		if req.CountryID == uuid.Nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "country_id or region_id is required"})
+			respondError(c, http.StatusBadRequest, "country_id_or_region_id_is_required", "country_id or region_id is required")
 			return
 		}
 		cup, err = s.compSvc.CreateCup(c.Request.Context(), req)
@@ -60,14 +60,14 @@ func (s *server) handleCreateCup(c *gin.Context) {
 		errors.Is(err, internalcompetition.ErrRegionNotFound),
 		errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch),
 		errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrNameCollision),
 		errors.Is(err, internalcompetition.ErrStagingInvalid),
 		errors.Is(err, internalcompetition.ErrRegionMismatch),
 		errors.Is(err, internalcompetition.ErrQualificationOverlap),
 		errors.Is(err, internalcompetition.ErrInvalidTier):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -81,23 +81,23 @@ func (s *server) handleCreateCup(c *gin.Context) {
 func (s *server) handlePreviewCup(c *gin.Context) {
 	var req internalcompetition.CupPreviewParams
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed preview payload"})
+		respondError(c, http.StatusBadRequest, "malformed_preview_payload", "malformed preview payload")
 		return
 	}
 	if req.WorldID == uuid.Nil || req.RegionID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "world_id and region_id are required"})
+		respondError(c, http.StatusBadRequest, "world_id_and_region_id_are_required", "world_id and region_id are required")
 		return
 	}
 	preview, err := s.compSvc.PreviewCupField(c.Request.Context(), req)
 	switch {
 	case errors.Is(err, internalcompetition.ErrRegionNotFound),
 		errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrRegionMismatch),
 		errors.Is(err, internalcompetition.ErrQualificationOverlap),
 		errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusUnprocessableEntity, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -110,27 +110,27 @@ func (s *server) handlePreviewCup(c *gin.Context) {
 func (s *server) handleSetCupQualification(c *gin.Context) {
 	cupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cup id"})
+		respondError(c, http.StatusBadRequest, "invalid_cup_id", "invalid cup id")
 		return
 	}
 	var req struct {
 		Qualification []internalcompetition.QualBandInput `json:"qualification"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed qualification payload"})
+		respondError(c, http.StatusBadRequest, "malformed_qualification_payload", "malformed qualification payload")
 		return
 	}
 	cup, err := s.compSvc.SetQualification(c.Request.Context(), cupID, req.Qualification)
 	switch {
 	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrCompetitionTypeMismatch):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case errors.Is(err, internalcompetition.ErrRegionMismatch),
 		errors.Is(err, internalcompetition.ErrQualificationOverlap):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusUnprocessableEntity, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -148,12 +148,12 @@ func (s *server) handleSetCupQualification(c *gin.Context) {
 func (s *server) handleSetCupFinalDate(c *gin.Context) {
 	cupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cup id"})
+		respondError(c, http.StatusBadRequest, "invalid_cup_id", "invalid cup id")
 		return
 	}
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed final-date payload"})
+		respondError(c, http.StatusBadRequest, "malformed_final_date_payload", "malformed final-date payload")
 		return
 	}
 	var req struct {
@@ -161,7 +161,7 @@ func (s *server) handleSetCupFinalDate(c *gin.Context) {
 		FinalOffsetDays *int    `json:"final_offset_days"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed final-date payload"})
+		respondError(c, http.StatusBadRequest, "malformed_final_date_payload", "malformed final-date payload")
 		return
 	}
 	var fields map[string]json.RawMessage
@@ -169,20 +169,20 @@ func (s *server) handleSetCupFinalDate(c *gin.Context) {
 	_, finalDateSet := fields["final_date"]
 	_, offsetSet := fields["final_offset_days"]
 	if !finalDateSet && !offsetSet {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "final_date or final_offset_days is required"})
+		respondError(c, http.StatusBadRequest, "final_date_or_final_offset_days_is_required", "final_date or final_offset_days is required")
 		return
 	}
 	cup, err := s.compSvc.SetCupFinalDate(c.Request.Context(), cupID, req.FinalDate, finalDateSet, req.FinalOffsetDays)
 	switch {
 	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrCompetitionTypeMismatch):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case errors.Is(err, internalcompetition.ErrCupFinalDateInvalid),
 		errors.Is(err, internalcompetition.ErrCupFinalDateLocked):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusUnprocessableEntity, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -196,17 +196,17 @@ func (s *server) handleSetCupFinalDate(c *gin.Context) {
 func (s *server) handleStartCupCampaign(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	countryID, err := uuid.Parse(c.Param("countryID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid country id"})
+		respondError(c, http.StatusBadRequest, "invalid_country_id", "invalid country id")
 		return
 	}
 	cupID, err := uuid.Parse(c.Param("cupID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cup id"})
+		respondError(c, http.StatusBadRequest, "invalid_cup_id", "invalid cup id")
 		return
 	}
 	season, err := s.compSvc.StartCupCampaign(c.Request.Context(), worldID, countryID, cupID)
@@ -214,14 +214,14 @@ func (s *server) handleStartCupCampaign(c *gin.Context) {
 	case errors.Is(err, internalcompetition.ErrWorldNotFound),
 		errors.Is(err, internalcompetition.ErrCompetitionNotFound),
 		errors.Is(err, internalcompetition.ErrCountryNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrWorldArchived),
 		errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch),
 		errors.Is(err, internalcompetition.ErrCupCampaignExists),
 		errors.Is(err, internalcompetition.ErrStagingInvalid),
 		errors.Is(err, internalcompetition.ErrCupLimit):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -237,18 +237,18 @@ func (s *server) handleStartCupCampaign(c *gin.Context) {
 func (s *server) handleStartRegionalCupCampaign(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	cupID, err := uuid.Parse(c.Param("cupID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cup id"})
+		respondError(c, http.StatusBadRequest, "invalid_cup_id", "invalid cup id")
 		return
 	}
 
 	ctype, countryID, err := s.compSvc.CupScope(c.Request.Context(), cupID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	}
 
@@ -260,20 +260,20 @@ func (s *server) handleStartRegionalCupCampaign(c *gin.Context) {
 		switch {
 		case errors.Is(err, internalcompetition.ErrWorldNotFound),
 			errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusNotFound, err)
 			return
 		case errors.Is(err, internalcompetition.ErrWorldArchived),
 			errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch),
 			errors.Is(err, internalcompetition.ErrCompetitionTypeMismatch),
 			errors.Is(err, internalcompetition.ErrCupCampaignExists),
 			errors.Is(err, internalcompetition.ErrCupLimit):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusConflict, err)
 			return
 		case errors.Is(err, internalcompetition.ErrQualificationUnavailable),
 			errors.Is(err, internalcompetition.ErrQualificationField),
 			errors.Is(err, internalcompetition.ErrRegionMismatch),
 			errors.Is(err, internalcompetition.ErrQualificationOverlap):
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusUnprocessableEntity, err)
 			return
 		case err != nil:
 			internalError(c, err)
@@ -283,7 +283,7 @@ func (s *server) handleStartRegionalCupCampaign(c *gin.Context) {
 		warnings = res.Warnings
 	case "domestic_cup":
 		if countryID == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "non-regional cup has no country"})
+			respondError(c, http.StatusConflict, "non_regional_cup_has_no_country", "non-regional cup has no country")
 			return
 		}
 		season, err = s.compSvc.StartCupCampaign(c.Request.Context(), worldID, *countryID, cupID)
@@ -291,21 +291,21 @@ func (s *server) handleStartRegionalCupCampaign(c *gin.Context) {
 		case errors.Is(err, internalcompetition.ErrWorldNotFound),
 			errors.Is(err, internalcompetition.ErrCompetitionNotFound),
 			errors.Is(err, internalcompetition.ErrCountryNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusNotFound, err)
 			return
 		case errors.Is(err, internalcompetition.ErrWorldArchived),
 			errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch),
 			errors.Is(err, internalcompetition.ErrCupCampaignExists),
 			errors.Is(err, internalcompetition.ErrStagingInvalid),
 			errors.Is(err, internalcompetition.ErrCupLimit):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusConflict, err)
 			return
 		case err != nil:
 			internalError(c, err)
 			return
 		}
 	default:
-		c.JSON(http.StatusConflict, gin.H{"error": "cannot start a campaign for this competition type"})
+		respondError(c, http.StatusConflict, "cannot_start_a_campaign_for_this_competition_type", "cannot start a campaign for this competition type")
 		return
 	}
 
@@ -320,7 +320,7 @@ func (s *server) handleStartRegionalCupCampaign(c *gin.Context) {
 func (s *server) handleListCups(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	cups, err := s.compSvc.ListCups(c.Request.Context(), worldID)
@@ -335,17 +335,17 @@ func (s *server) handleListCups(c *gin.Context) {
 func (s *server) handleGetCup(c *gin.Context) {
 	cupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cup id"})
+		respondError(c, http.StatusBadRequest, "invalid_cup_id", "invalid cup id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	cup, err := s.compSvc.GetCup(c.Request.Context(), worldID, cupID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	}
 	c.JSON(http.StatusOK, cup)

@@ -24,23 +24,23 @@ func transferStatus(c *gin.Context, err error) {
 		errors.Is(err, internaltransfer.ErrNoActiveClub),
 		errors.Is(err, internaltransfer.ErrWorldMismatch),
 		errors.Is(err, internaltransfer.ErrPlayerWorldMismatch):
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		respondError(c, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, internaltransfer.ErrNotClubMember),
 		errors.Is(err, internaltransfer.ErrNotListingClub),
 		errors.Is(err, internaltransfer.ErrNotBidParticipant),
 		errors.Is(err, internaltransfer.ErrSelfBid):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	case errors.Is(err, internaltransfer.ErrInvalidTerms),
 		errors.Is(err, internaltransfer.ErrInvalidActionForRole),
 		errors.Is(err, internaltransfer.ErrCounterLimitReached),
 		errors.Is(err, internaltransfer.ErrDuplicateListing),
 		errors.Is(err, internaltransfer.ErrDuplicateOpenBid),
 		errors.Is(err, internaltransfer.ErrPlayerNotTransferable):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 	case errors.Is(err, internaltransfer.ErrInsufficientFunds),
 		errors.Is(err, internaltransfer.ErrBidResolved),
 		errors.Is(err, internaltransfer.ErrBidExpired):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 	default:
 		internalError(c, err)
 	}
@@ -63,7 +63,7 @@ func (s *server) transferActor(c *gin.Context) (internaltransfer.Actor, error) {
 func listingParam(c *gin.Context) (uuid.UUID, bool) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid listing id"})
+		respondError(c, http.StatusBadRequest, "invalid_listing_id", "invalid listing id")
 		return uuid.Nil, false
 	}
 	return id, true
@@ -72,13 +72,13 @@ func listingParam(c *gin.Context) (uuid.UUID, bool) {
 func (s *server) handleListListings(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	var sellingClub uuid.UUID
 	if raw := c.Query("club_id"); raw != "" {
 		if sellingClub, err = uuid.Parse(raw); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid club_id"})
+			respondError(c, http.StatusBadRequest, "invalid_club_id", "invalid club_id")
 			return
 		}
 	}
@@ -98,7 +98,7 @@ func (s *server) handleGetListing(c *gin.Context) {
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	l, err := s.transfersSvc.GetListing(c.Request.Context(), worldID, id)
@@ -112,17 +112,17 @@ func (s *server) handleGetListing(c *gin.Context) {
 func (s *server) handleCreateListing(c *gin.Context) {
 	var req internaltransfer.CreateListingInput
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid listing payload"})
+		respondError(c, http.StatusBadRequest, "invalid_listing_payload", "invalid listing payload")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	actor, err := s.transferActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	l, err := s.transfersSvc.CreateListing(c.Request.Context(), actor, worldID, req)
@@ -140,12 +140,12 @@ func (s *server) handleWithdrawListing(c *gin.Context) {
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	actor, err := s.transferActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	l, err := s.transfersSvc.WithdrawListing(c.Request.Context(), actor, worldID, id)
@@ -159,17 +159,17 @@ func (s *server) handleWithdrawListing(c *gin.Context) {
 func (s *server) handlePlaceBid(c *gin.Context) {
 	var req internaltransfer.BidInput
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bid payload"})
+		respondError(c, http.StatusBadRequest, "invalid_bid_payload", "invalid bid payload")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	actor, err := s.transferActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	bid, transfer, explanation, err := s.transfersSvc.PlaceBid(c.Request.Context(), actor, worldID, req)
@@ -183,7 +183,7 @@ func (s *server) handlePlaceBid(c *gin.Context) {
 func (s *server) handleListBids(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -198,7 +198,7 @@ func (s *server) handleListBids(c *gin.Context) {
 func (s *server) handleRespondBid(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid bid id"})
+		respondError(c, http.StatusBadRequest, "invalid_bid_id", "invalid bid id")
 		return
 	}
 	var req struct {
@@ -206,17 +206,17 @@ func (s *server) handleRespondBid(c *gin.Context) {
 		Terms  *internaltransfer.Terms `json:"terms,omitempty"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid respond payload"})
+		respondError(c, http.StatusBadRequest, "invalid_respond_payload", "invalid respond payload")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	actor, err := s.transferActor(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
+		respondError(c, http.StatusUnauthorized, "unauthenticated", "unauthenticated")
 		return
 	}
 	bid, transfer, explanation, err := s.transfersSvc.RespondToBid(c.Request.Context(), actor, worldID, id, req.Action, req.Terms)

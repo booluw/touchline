@@ -17,7 +17,7 @@ func (s *server) handleListClubNameParts(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, internalbootstrap.ErrInvalidClubNameCountry):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusBadRequest, err)
 		default:
 			internalError(c, err)
 		}
@@ -34,7 +34,7 @@ func (s *server) handleAddClubNamePart(c *gin.Context) {
 		CountryCode string `json:"country_code"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		respondError(c, http.StatusBadRequest, "invalid_body", "invalid body")
 		return
 	}
 	if err := s.bootSvc.AddClubNamePart(c.Request.Context(), req.Kind, req.Value, req.CountryCode); err != nil {
@@ -42,7 +42,7 @@ func (s *server) handleAddClubNamePart(c *gin.Context) {
 		case errors.Is(err, internalbootstrap.ErrInvalidClubNamePart),
 			errors.Is(err, internalbootstrap.ErrClubNamePartRequired),
 			errors.Is(err, internalbootstrap.ErrInvalidClubNameCountry):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusBadRequest, err)
 		default:
 			internalError(c, err)
 		}
@@ -60,7 +60,7 @@ func (s *server) handleRemoveClubNamePart(c *gin.Context) {
 		case errors.Is(err, internalbootstrap.ErrInvalidClubNamePart),
 			errors.Is(err, internalbootstrap.ErrClubNamePartRequired),
 			errors.Is(err, internalbootstrap.ErrInvalidClubNameCountry):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusBadRequest, err)
 		default:
 			internalError(c, err)
 		}

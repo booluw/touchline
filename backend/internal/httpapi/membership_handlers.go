@@ -35,12 +35,12 @@ func (s *server) handleAdminAddClubToLeague(c *gin.Context) {
 	}
 	clubID, err := uuid.Parse(c.Param("clubID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid club id"})
+		respondError(c, http.StatusBadRequest, "invalid_club_id", "invalid club id")
 		return
 	}
 	var req addClubToLeagueRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.LeagueID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "league_id is required"})
+		respondError(c, http.StatusBadRequest, "league_id_is_required", "league_id is required")
 		return
 	}
 
@@ -49,21 +49,21 @@ func (s *server) handleAdminAddClubToLeague(c *gin.Context) {
 	case errors.Is(err, internalcompetition.ErrWorldNotFound),
 		errors.Is(err, internalcompetition.ErrClubNotFound),
 		errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrWorldArchived),
 		errors.Is(err, internalcompetition.ErrClubWorldMismatch),
 		errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch),
 		errors.Is(err, internalcompetition.ErrClubAlreadyInLeague),
 		errors.Is(err, internalcompetition.ErrLeagueFull):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
 		return
 	}
 	if admission.League.Country.ID != countryID {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "the league does not belong to this country"})
+		respondError(c, http.StatusUnprocessableEntity, "the_league_does_not_belong_to_this_country", "the league does not belong to this country")
 		return
 	}
 	c.JSON(http.StatusOK, admission)
@@ -84,16 +84,16 @@ type setLeagueCapacityRequest struct {
 func (s *server) handleSetLeagueCapacity(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid league id"})
+		respondError(c, http.StatusBadRequest, "invalid_league_id", "invalid league id")
 		return
 	}
 	var req setLeagueCapacityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed capacity payload"})
+		respondError(c, http.StatusBadRequest, "malformed_capacity_payload", "malformed capacity payload")
 		return
 	}
 	if req.TeamCount == nil || req.Promotions == nil || req.Relegations == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team_count, promotions and relegations are required"})
+		respondError(c, http.StatusBadRequest, "team_count_promotions_and_relegations_are_required", "team_count, promotions and relegations are required")
 		return
 	}
 
@@ -105,15 +105,15 @@ func (s *server) handleSetLeagueCapacity(c *gin.Context) {
 	switch {
 	case errors.Is(err, internalcompetition.ErrInvalidTeamCount),
 		errors.Is(err, internalcompetition.ErrInvalidCounts):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 		return
 	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "league not found"})
+		respondError(c, http.StatusNotFound, "league_not_found", "league not found")
 		return
 	case errors.Is(err, internalcompetition.ErrLeagueShrink),
 		errors.Is(err, internalcompetition.ErrAdjacencyMismatch),
 		errors.Is(err, internalcompetition.ErrBadAdjacency):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)

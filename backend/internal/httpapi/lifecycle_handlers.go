@@ -23,14 +23,14 @@ type createWorldRequest struct {
 func (s *server) handleCreateWorld(c *gin.Context) {
 	var req createWorldRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		respondError(c, http.StatusBadRequest, "name_is_required", "name is required")
 		return
 	}
 
 	w, err := s.worldSvc.CreateWorld(c.Request.Context(), req.Name)
 	switch {
 	case errors.Is(err, internalworld.ErrNameCollision):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -58,22 +58,22 @@ type worldStatusRequest struct {
 func (s *server) handleWorldStatus(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	var req worldStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "status is required"})
+		respondError(c, http.StatusBadRequest, "status_is_required", "status is required")
 		return
 	}
 
 	w, err := s.worldSvc.SetStatus(c.Request.Context(), id, req.Status)
 	switch {
 	case errors.Is(err, internalworld.ErrWorldNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalworld.ErrInvalidTransition):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -92,19 +92,19 @@ type worldConfigRequest struct {
 func (s *server) handleWorldConfig(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	var req worldConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Key == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "key is required"})
+		respondError(c, http.StatusBadRequest, "key_is_required", "key is required")
 		return
 	}
 
 	err = s.worldSvc.SetConfig(c.Request.Context(), id, req.Key, req.Value)
 	switch {
 	case errors.Is(err, internalworld.ErrWorldNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -123,14 +123,14 @@ type createOfferRequest struct {
 func (s *server) handleCreateOffer(c *gin.Context) {
 	var req createOfferRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.ClubID == uuid.Nil || req.ManagerID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "club_id and manager_id are required"})
+		respondError(c, http.StatusBadRequest, "club_id_and_manager_id_are_required", "club_id and manager_id are required")
 		return
 	}
 
 	o, err := s.mgrSvc.CreateJobOffer(c.Request.Context(), req.ClubID, req.ManagerID)
 	switch {
 	case errors.Is(err, internalmanager.ErrClubNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalmanager.ErrManagerUnavailable),
 		errors.Is(err, internalmanager.ErrNotAIClub),
@@ -140,7 +140,7 @@ func (s *server) handleCreateOffer(c *gin.Context) {
 		errors.Is(err, internalmanager.ErrClubHasOffer),
 		errors.Is(err, internalmanager.ErrClubNotPlayable),
 		errors.Is(err, internalmanager.ErrClubNotInLeague):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -184,7 +184,7 @@ func (s *server) managerWorld(ctx context.Context, managerID uuid.UUID) (uuid.UU
 func (s *server) handleAcceptOffer(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid offer id"})
+		respondError(c, http.StatusBadRequest, "invalid_offer_id", "invalid offer id")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -192,14 +192,14 @@ func (s *server) handleAcceptOffer(c *gin.Context) {
 	o, err := s.mgrSvc.AcceptJobOffer(c.Request.Context(), id, ident.ManagerID)
 	switch {
 	case errors.Is(err, internalmanager.ErrOfferNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalmanager.ErrOfferResolved),
 		errors.Is(err, internalmanager.ErrNotOfferCandidate),
 		errors.Is(err, internalmanager.ErrManagerEmployed),
 		errors.Is(err, internalmanager.ErrClubOccupied),
 		errors.Is(err, internalmanager.ErrClubNotPlayable):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -220,7 +220,7 @@ type declineResponse struct {
 func (s *server) handleDeclineOffer(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid offer id"})
+		respondError(c, http.StatusBadRequest, "invalid_offer_id", "invalid offer id")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
@@ -228,11 +228,11 @@ func (s *server) handleDeclineOffer(c *gin.Context) {
 	o, err := s.mgrSvc.DeclineJobOffer(c.Request.Context(), id, ident.ManagerID)
 	switch {
 	case errors.Is(err, internalmanager.ErrOfferNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalmanager.ErrOfferResolved),
 		errors.Is(err, internalmanager.ErrNotOfferCandidate):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -254,7 +254,7 @@ func (s *server) handleResign(c *gin.Context) {
 	err := s.mgrSvc.Resign(c.Request.Context(), ident.ManagerID)
 	switch {
 	case errors.Is(err, internalmanager.ErrNotEmployed):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)

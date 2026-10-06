@@ -30,12 +30,12 @@ type freeAgentFilterRequest struct {
 func (s *server) handleListFreeAgents(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("worldID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	countryID, err := uuid.Parse(c.Param("countryID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid country id"})
+		respondError(c, http.StatusBadRequest, "invalid_country_id", "invalid country id")
 		return
 	}
 
@@ -46,7 +46,7 @@ func (s *server) handleListFreeAgents(c *gin.Context) {
 		return
 	}
 	if ownWorld != worldID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "outside your world"})
+		respondError(c, http.StatusForbidden, "outside_your_world", "outside your world")
 		return
 	}
 
@@ -86,11 +86,11 @@ func (s *server) handleSignFreeAgent(c *gin.Context) {
 	}
 	var req signFreeAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.PlayerID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "player_id is required"})
+		respondError(c, http.StatusBadRequest, "player_id_is_required", "player_id is required")
 		return
 	}
 	if req.WeeklyWage <= 0 || req.Years <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "weekly_wage and years must be positive"})
+		respondError(c, http.StatusBadRequest, "weekly_wage_and_years_must_be_positive", "weekly_wage and years must be positive")
 		return
 	}
 
@@ -130,12 +130,12 @@ type releasePlayerRequest struct {
 func (s *server) handleReleasePlayer(c *gin.Context) {
 	playerID, err := uuid.Parse(c.Param("playerID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid player id"})
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
 		return
 	}
 	var req releasePlayerRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reason is required"})
+		respondError(c, http.StatusBadRequest, "reason_is_required", "reason is required")
 		return
 	}
 
@@ -145,11 +145,11 @@ func (s *server) handleReleasePlayer(c *gin.Context) {
 	if !s.isAdmin(ctx, ident.UserID) {
 		clubID, err := s.playerClub(ctx, playerID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			respondError(c, http.StatusNotFound, "not_found", "not found")
 			return
 		}
 		if clubID == uuid.Nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "player is a free agent"})
+			respondError(c, http.StatusConflict, "player_is_a_free_agent", "player is a free agent")
 			return
 		}
 		if _, err := s.financeSvc.RequireOwnership(ctx, ident.ManagerID, clubID); err != nil {
@@ -180,11 +180,11 @@ func (s *server) handleReleasePlayer(c *gin.Context) {
 func poolStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, playerpool.ErrNotFreeAgent), errors.Is(err, playerpool.ErrClubCannotAfford):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 	case errors.Is(err, playerpool.ErrNoActiveContract):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 	case errors.Is(err, playerpool.ErrStreetUnder18):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 	default:
 		internalError(c, err)
 	}
@@ -194,9 +194,9 @@ func poolStatus(c *gin.Context, err error) {
 func financeOwnershipStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, internalfinance.ErrClubNotFound), errors.Is(err, internalfinance.ErrWorldNotActive):
-		c.JSON(http.StatusNotFound, gin.H{"error": "club not found"})
+		respondError(c, http.StatusNotFound, "club_not_found", "club not found")
 	case errors.Is(err, internalfinance.ErrNotOwned):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	default:
 		internalError(c, err)
 	}
@@ -227,7 +227,7 @@ func parseFreeAgentFilter(c *gin.Context) (freeAgentFilterRequest, bool) {
 	if raw := c.Query("age_min"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid age_min"})
+			respondError(c, http.StatusBadRequest, "invalid_age_min", "invalid age_min")
 			return f, false
 		}
 		f.AgeMin = &v
@@ -235,7 +235,7 @@ func parseFreeAgentFilter(c *gin.Context) (freeAgentFilterRequest, bool) {
 	if raw := c.Query("age_max"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid age_max"})
+			respondError(c, http.StatusBadRequest, "invalid_age_max", "invalid age_max")
 			return f, false
 		}
 		f.AgeMax = &v

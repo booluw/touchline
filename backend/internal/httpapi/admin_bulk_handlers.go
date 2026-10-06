@@ -31,18 +31,18 @@ type bulkCreatePlayersRequest struct {
 func (s *server) handleAdminBulkCreatePlayers(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	countryID, err := uuid.Parse(c.Param("countryID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid country id"})
+		respondError(c, http.StatusBadRequest, "invalid_country_id", "invalid country id")
 		return
 	}
 
 	var req bulkCreatePlayersRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed bulk payload"})
+		respondError(c, http.StatusBadRequest, "malformed_bulk_payload", "malformed bulk payload")
 		return
 	}
 	opts := playerpool.BulkOpts{
@@ -55,13 +55,13 @@ func (s *server) handleAdminBulkCreatePlayers(c *gin.Context) {
 		Origin:      req.Origin,
 	}
 	if err := opts.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 		return
 	}
 
 	ctx := c.Request.Context()
 	if err := s.countryInWorld(ctx, worldID, countryID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "country not found in world"})
+		respondError(c, http.StatusNotFound, "country_not_found_in_world", "country not found in world")
 		return
 	}
 

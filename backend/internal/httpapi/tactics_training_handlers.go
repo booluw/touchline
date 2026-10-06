@@ -28,7 +28,7 @@ func (s *server) commandActor(c *gin.Context) (tactics.Actor, error) {
 func clubParam(c *gin.Context) (uuid.UUID, bool) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid club id"})
+		respondError(c, http.StatusBadRequest, "invalid_club_id", "invalid club id")
 		return uuid.Nil, false
 	}
 	return id, true
@@ -37,15 +37,15 @@ func clubParam(c *gin.Context) (uuid.UUID, bool) {
 func tacticStatus(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, tactics.ErrClubNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "club not found"})
+		respondError(c, http.StatusNotFound, "club_not_found", "club not found")
 	case errors.Is(err, tactics.ErrNotOwned):
-		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	case errors.Is(err, tactics.ErrFixtureLive):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 	case errors.Is(err, tactics.ErrInvalidStyle) || errors.Is(err, tactics.ErrInvalidFormation) || errors.Is(err, tactics.ErrInvalidLineup):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusBadRequest, err)
 	case errors.Is(err, tactics.ErrPlayerUnavailable):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusUnprocessableEntity, err)
 	default:
 		internalError(c, err)
 	}
@@ -84,12 +84,12 @@ func (s *server) handleSetLineup(c *gin.Context) {
 		Slots []tactics.LineupInput `json:"slots"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(400, gin.H{"error": "invalid lineup"})
+		respondError(c, 400, "invalid_lineup", "invalid lineup")
 		return
 	}
 	a, err := s.commandActor(c)
 	if err != nil {
-		c.JSON(401, gin.H{"error": "unauthenticated"})
+		respondError(c, 401, "unauthenticated", "unauthenticated")
 		return
 	}
 	if err = s.tacticsSvc.SetLineup(c.Request.Context(), a, id, req.Slots); err != nil {
@@ -108,12 +108,12 @@ func (s *server) handleSetTactics(c *gin.Context) {
 		Formation string `json:"formation"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(400, gin.H{"error": "invalid tactics"})
+		respondError(c, 400, "invalid_tactics", "invalid tactics")
 		return
 	}
 	a, err := s.commandActor(c)
 	if err != nil {
-		c.JSON(401, gin.H{"error": "unauthenticated"})
+		respondError(c, 401, "unauthenticated", "unauthenticated")
 		return
 	}
 	if err = s.tacticsSvc.SetTactics(c.Request.Context(), a, id, req.Style, req.Formation); err != nil {
@@ -143,20 +143,20 @@ func (s *server) handleSetTrainingPlan(c *gin.Context) {
 		Archetype string `json:"archetype"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(400, gin.H{"error": "invalid training plan"})
+		respondError(c, 400, "invalid_training_plan", "invalid training plan")
 		return
 	}
 	a, err := s.commandActor(c)
 	if err != nil {
-		c.JSON(401, gin.H{"error": "unauthenticated"})
+		respondError(c, 401, "unauthenticated", "unauthenticated")
 		return
 	}
 	ta := training.Actor{ManagerID: a.ManagerID, IsPolicyBot: a.IsPolicyBot}
 	if err = s.trainingSvc.SubmitPlan(c.Request.Context(), ta, id, req.Archetype); err != nil {
 		if errors.Is(err, training.ErrNotOwned) {
-			c.JSON(403, gin.H{"error": "forbidden"})
+			respondError(c, 403, "forbidden", "forbidden")
 		} else if errors.Is(err, training.ErrInvalidArchetype) {
-			c.JSON(400, gin.H{"error": err.Error()})
+			respondErr(c, 400, err)
 		} else {
 			internalError(c, err)
 		}
@@ -167,7 +167,7 @@ func (s *server) handleSetTrainingPlan(c *gin.Context) {
 func (s *server) handleLiveTacticChange(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(400, gin.H{"error": "invalid match id"})
+		respondError(c, 400, "invalid_match_id", "invalid match id")
 		return
 	}
 	var req struct {
@@ -175,16 +175,16 @@ func (s *server) handleLiveTacticChange(c *gin.Context) {
 		Style  string `json:"style"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
-		c.JSON(400, gin.H{"error": "invalid tactical change"})
+		respondError(c, 400, "invalid_tactical_change", "invalid tactical change")
 		return
 	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
 	err = s.matchSvc.TacticChange(c.Request.Context(), id, ident.ManagerID, req.Minute, map[string]any{"style": req.Style})
 	if err != nil {
 		if errors.Is(err, internalmatch.ErrMinuteClosed) || errors.Is(err, internalmatch.ErrMatchNotLive) {
-			c.JSON(409, gin.H{"error": err.Error()})
+			respondErr(c, 409, err)
 		} else {
-			c.JSON(400, gin.H{"error": err.Error()})
+			respondErr(c, 400, err)
 		}
 		return
 	}

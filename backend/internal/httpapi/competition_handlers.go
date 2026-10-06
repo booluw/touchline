@@ -29,12 +29,12 @@ type countryRequest struct {
 func (s *server) handleCreateCountry(c *gin.Context) {
 	var req countryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "world_id, code and name are required"})
+		respondError(c, http.StatusBadRequest, "world_id_code_and_name_are_required", "world_id, code and name are required")
 		return
 	}
 	country, err := s.compSvc.CreateCountry(c.Request.Context(), req.WorldID, req.Code, req.Name)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	}
 	c.JSON(http.StatusCreated, country)
@@ -43,7 +43,7 @@ func (s *server) handleCreateCountry(c *gin.Context) {
 func (s *server) handleListCountries(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Query("world_id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "world_id query parameter is required"})
+		respondError(c, http.StatusBadRequest, "world_id_query_parameter_is_required", "world_id query parameter is required")
 		return
 	}
 	countries, err := s.compSvc.ListCountries(c.Request.Context(), worldID)
@@ -58,24 +58,24 @@ func (s *server) handleCreateLeague(c *gin.Context) {
 	var req internalcompetition.LeagueParams
 	if err := c.ShouldBindJSON(&req); err != nil {
 		fmt.Printf("%v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed league payload"})
+		respondError(c, http.StatusBadRequest, "malformed_league_payload", "malformed league payload")
 		return
 	}
 	if req.CountryID == uuid.Nil || req.Name == "" || req.TeamCount < 4 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "country_id, name and team_count are required"})
+		respondError(c, http.StatusBadRequest, "country_id_name_and_team_count_are_required", "country_id, name and team_count are required")
 		return
 	}
 	league, err := s.compSvc.CreateLeague(c.Request.Context(), req)
 	switch {
 	case errors.Is(err, internalcompetition.ErrCountryNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrNameCollision),
 		errors.Is(err, internalcompetition.ErrInvalidTeamCount),
 		errors.Is(err, internalcompetition.ErrInvalidTier),
 		errors.Is(err, internalcompetition.ErrInvalidCounts),
 		errors.Is(err, internalcompetition.ErrBadAdjacency):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -87,7 +87,7 @@ func (s *server) handleCreateLeague(c *gin.Context) {
 func (s *server) handleListLeagues(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Query("world_id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "world_id query parameter is required"})
+		respondError(c, http.StatusBadRequest, "world_id_query_parameter_is_required", "world_id query parameter is required")
 		return
 	}
 	leagues, err := s.compSvc.ListLeagues(c.Request.Context(), worldID)
@@ -106,21 +106,21 @@ type adjacencyRequest struct {
 func (s *server) handleUpdateAdjacency(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid league id"})
+		respondError(c, http.StatusBadRequest, "invalid_league_id", "invalid league id")
 		return
 	}
 	var req adjacencyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "malformed adjacency payload"})
+		respondError(c, http.StatusBadRequest, "malformed_adjacency_payload", "malformed adjacency payload")
 		return
 	}
 	err = s.compSvc.UpdateLeagueAdjacency(c.Request.Context(), leagueID, req.PromotesTo, req.RelegatesTo)
 	switch {
 	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrBadAdjacency):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -132,7 +132,7 @@ func (s *server) handleUpdateAdjacency(c *gin.Context) {
 func (s *server) handleSeedWorld(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	// Validate synchronously so a bad world 4xxs immediately instead of through
@@ -140,17 +140,17 @@ func (s *server) handleSeedWorld(c *gin.Context) {
 	if err := s.compSvc.ValidateSeedWorld(c.Request.Context(), worldID); err != nil {
 		switch {
 		case errors.Is(err, internalcompetition.ErrWorldNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusNotFound, err)
 		case errors.Is(err, internalcompetition.ErrWorldArchived),
 			errors.Is(err, internalcompetition.ErrWorldHasNoLeagues):
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			respondErr(c, http.StatusUnprocessableEntity, err)
 		default:
 			internalError(c, err)
 		}
 		return
 	}
 	if s.seedJobs == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "seed job enqueuer not wired"})
+		respondError(c, http.StatusInternalServerError, "seed_job_enqueuer_not_wired", "seed job enqueuer not wired")
 		return
 	}
 	jobID, err := s.seedJobs(c.Request.Context(), worldID)
@@ -174,12 +174,12 @@ func (s *server) handleSeedWorld(c *gin.Context) {
 func (s *server) handleStartSeason(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	leagueID, err := uuid.Parse(c.Param("leagueID"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid league id"})
+		respondError(c, http.StatusBadRequest, "invalid_league_id", "invalid league id")
 		return
 	}
 
@@ -187,14 +187,14 @@ func (s *server) handleStartSeason(c *gin.Context) {
 		KickoffDate *string `json:"kickoff_date"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid kickoff date body"})
+		respondError(c, http.StatusBadRequest, "invalid_kickoff_date_body", "invalid kickoff date body")
 		return
 	}
 	var kickoff *time.Time
 	if body.KickoffDate != nil {
 		day, err := time.Parse("2006-01-02", *body.KickoffDate)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "kickoff_date must be a calendar date (YYYY-MM-DD)"})
+			respondError(c, http.StatusBadRequest, "kickoff_date_must_be_a_calendar_date_yyyy_mm_dd", "kickoff_date must be a calendar date (YYYY-MM-DD)")
 			return
 		}
 		kickoff = &day
@@ -204,17 +204,17 @@ func (s *server) handleStartSeason(c *gin.Context) {
 	switch {
 	case errors.Is(err, internalcompetition.ErrWorldNotFound),
 		errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case errors.Is(err, internalcompetition.ErrWorldArchived),
 		errors.Is(err, internalcompetition.ErrCompetitionWorldMismatch),
 		errors.Is(err, internalcompetition.ErrLeagueAlreadySeeded),
 		errors.Is(err, internalcompetition.ErrCompetitionNotSeeded):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusConflict, err)
 		return
 	case errors.Is(err, internalcompetition.ErrKickoffDateInPast),
 		errors.Is(err, internalcompetition.ErrKickoffNotAllowedWeekday):
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusUnprocessableEntity, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -237,7 +237,7 @@ type seedJobStatus struct {
 func (s *server) handleSeedWorldStatus(c *gin.Context) {
 	worldID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid world id"})
+		respondError(c, http.StatusBadRequest, "invalid_world_id", "invalid world id")
 		return
 	}
 	ctx := c.Request.Context()
@@ -257,7 +257,7 @@ func (s *server) handleSeedWorldStatus(c *gin.Context) {
 		return
 	}
 	if !worldExists {
-		c.JSON(http.StatusNotFound, gin.H{"error": internalcompetition.ErrWorldNotFound.Error()})
+		respondErr(c, http.StatusNotFound, internalcompetition.ErrWorldNotFound)
 		return
 	}
 
@@ -336,7 +336,7 @@ func (s *server) handleSeedWorldStatus(c *gin.Context) {
 func (s *server) handleMyCountries(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	countries, err := s.compSvc.ListCountries(c.Request.Context(), worldID)
@@ -350,7 +350,7 @@ func (s *server) handleMyCountries(c *gin.Context) {
 func (s *server) handleMyCompetitions(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	leagues, err := s.compSvc.ListLeagues(c.Request.Context(), worldID)
@@ -368,7 +368,7 @@ func (s *server) handleMyCompetitions(c *gin.Context) {
 func (s *server) handleMyClubCompetitions(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	clubID, err := s.callerClubID(c)
@@ -391,17 +391,17 @@ func (s *server) handleMyClubCompetitions(c *gin.Context) {
 func (s *server) handleGetCompetition(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid competition id"})
+		respondError(c, http.StatusBadRequest, "invalid_competition_id", "invalid competition id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	league, err := s.compSvc.GetLeague(c.Request.Context(), worldID, id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	}
 	c.JSON(http.StatusOK, league)
@@ -413,13 +413,13 @@ func (s *server) handleGetCompetition(c *gin.Context) {
 func (s *server) handleAdminGetCompetitionDetail(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid competition id"})
+		respondError(c, http.StatusBadRequest, "invalid_competition_id", "invalid competition id")
 		return
 	}
 	detail, err := s.compSvc.CompetitionDetail(c.Request.Context(), id)
 	switch {
 	case errors.Is(err, internalcompetition.ErrCompetitionNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		respondError(c, http.StatusNotFound, "competition_not_found", "competition not found")
 		return
 	case err != nil:
 		internalError(c, err)
@@ -431,12 +431,12 @@ func (s *server) handleAdminGetCompetitionDetail(c *gin.Context) {
 func (s *server) handleGetFixtures(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid competition id"})
+		respondError(c, http.StatusBadRequest, "invalid_competition_id", "invalid competition id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 
@@ -445,7 +445,7 @@ func (s *server) handleGetFixtures(c *gin.Context) {
 		if v, err := strconv.Atoi(raw); err == nil {
 			matchday = &v
 		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid matchday"})
+			respondError(c, http.StatusBadRequest, "invalid_matchday", "invalid matchday")
 			return
 		}
 	}
@@ -464,19 +464,19 @@ func (s *server) handleGetFixtures(c *gin.Context) {
 func (s *server) handleGetSeasonCalendar(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid competition id"})
+		respondError(c, http.StatusBadRequest, "invalid_competition_id", "invalid competition id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	var season *int
 	if raw := c.Query("season"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid season"})
+			respondError(c, http.StatusBadRequest, "invalid_season", "invalid season")
 			return
 		}
 		season = &n
@@ -486,7 +486,7 @@ func (s *server) handleGetSeasonCalendar(c *gin.Context) {
 	case errors.Is(err, internalcompetition.ErrCompetitionNotFound),
 		errors.Is(err, internalcompetition.ErrNoSeason),
 		errors.Is(err, internalcompetition.ErrSeasonNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	case err != nil:
 		internalError(c, err)
@@ -498,17 +498,17 @@ func (s *server) handleGetSeasonCalendar(c *gin.Context) {
 func (s *server) handleGetStandings(c *gin.Context) {
 	leagueID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid competition id"})
+		respondError(c, http.StatusBadRequest, "invalid_competition_id", "invalid competition id")
 		return
 	}
 	worldID, err := s.callerWorld(c)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "no world context"})
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
 	standings, err := s.compSvc.GetStandings(c.Request.Context(), leagueID, worldID)
 	if errors.Is(err, internalcompetition.ErrNoSeason) {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondErr(c, http.StatusNotFound, err)
 		return
 	}
 	if err != nil {
