@@ -5,7 +5,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '~/components/ui/Toast'
 
-import type { Cup, CupCampaign, Fixture, League, SeasonCalendar, Standings } from '~/composables/useCompetition'
+import type { Cup, CupCampaign, League, SeasonCalendar, Standings } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
 
 const store = useClubStore()
@@ -20,7 +20,6 @@ const cupCampaigns = ref<Record<string, CupCampaign | null>>({})
 const selected = ref<string | null>(null)
 const calendar = ref<SeasonCalendar | null>(null)
 const standings = ref<Standings | null>(null)
-const error = ref('')
 
 const loading = reactive({ leagues: "loading", league: "loading" })
 
