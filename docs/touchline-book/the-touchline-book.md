@@ -83,6 +83,7 @@ the rest of the world.** Cross-references are links — follow them.
 23. [The board: match ratings, confidence, mandates and sacking](23-board-and-job-security.md)
 24. [Social: trust, messaging and rivalries](24-social-and-rivalries.md)
 25. [PolicyBot and absence mode](25-policybot-and-absence.md)
+31. [Storylines, arcs and emergent narrative](31-storylines-and-narratives.md)
 
 ### Part VIII — Surfaces
 26. [Dashboard, news, scouting and realtime](26-dashboard-news-scouting-realtime.md)
