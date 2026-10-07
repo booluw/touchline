@@ -7,7 +7,7 @@ const props = withDefaults(defineProps<{ tier?: AttentionTier, eyebrow?: string,
 const tierClass: Record<AttentionTier, { box: string, text: string }> = {
   urgent: { box: 'border-urgent bg-urgent-bg', text: 'text-urgent' },
   important: { box: 'border-important bg-important-bg', text: 'text-important' },
-  info: { box: 'border-info bg-info-bg', text: 'text-info' },
+  interesting: { box: 'border-info bg-info-bg', text: 'text-info' },
 }
 </script>
 
