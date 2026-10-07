@@ -182,10 +182,15 @@ paths:
                         allOf: [{ $ref: "#/components/schemas/ClubRef" }]
                         nullable: true
                       offer:
-                        description: "A fresh job offer when the manager is unemployed with no pending offer (never offered, declined, expired, resigned or sacked); null otherwise or when no club is free."
+                        description: "First of `offers` (legacy single-offer field); null when none were issued."
                         anyOf:
                           - $ref: "#/components/schemas/JobOffer"
                           - type: "null"
+                      offers:
+                        description: "Fresh job offers issued at this login: an unemployed manager is topped up to 5 pending offers (spread across countries/leagues, each club proposing to one manager at a time). Null when nothing was due or no club is free."
+                        type: array
+                        nullable: true
+                        items: { $ref: "#/components/schemas/JobOffer" }
                   - title: worldPicker
                     type: object
                     required: [status, worlds]
@@ -264,8 +269,13 @@ paths:
                       - $ref: "#/components/schemas/WorldChoice"
                       - nullable: true
                   offer:
-                    description: The auto-issued first job offer, or null.
+                    description: The first auto-issued job offer (legacy single-offer field), or null.
                     $ref: "#/components/schemas/JobOffer"
+                  offers:
+                    description: Up to 5 auto-issued job offers from league clubs spread across countries and leagues; no club is ever proposing to two managers at once. Null when no club is free.
+                    type: array
+                    nullable: true
+                    items: { $ref: "#/components/schemas/JobOffer" }
               examples:
                 joined:
                   value:
@@ -2508,7 +2518,7 @@ paths:
       tags: [manager]
       summary: My job offer inbox
       operationId: listOffers
-      description: Open AI-club job offers for the signed-in manager.
+      description: Open AI-club job offers for the signed-in manager, plus clubs once offered to them (declined or expired) that another human manager has since taken — those can't be offered to them again while occupied.
       responses:
         "200":
           description: Offer list.
@@ -2520,6 +2530,10 @@ paths:
                   offers:
                     type: array
                     items: { $ref: "#/components/schemas/JobOffer" }
+                  taken_clubs:
+                    type: array
+                    nullable: true
+                    items: { $ref: "#/components/schemas/ClubRef" }
               examples:
                 sample:
                   value:

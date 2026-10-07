@@ -165,7 +165,12 @@ func (s *server) handleListOffers(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"offers": offers})
+	taken, err := s.mgrSvc.TakenClubs(c.Request.Context(), ident.ManagerID)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"offers": offers, "taken_clubs": taken})
 }
 
 // managerWorld resolves the world bound to a manager row (the JWT's

@@ -28,12 +28,12 @@ no direct assignment.
 | Source | Trigger |
 | --- | --- |
 | Registration | `POST /api/auth/register` auto-offers a random eligible AI club |
-| Login | `EnsureOffer`: an unemployed human with no pending offer gets one |
+| Login | `EnsureOffers`: an unemployed human is topped up to 5 pending offers (registration also issues 5, spread across countries then leagues) |
 | After resign / sack | immediate re-offer, excluding the club just left |
 | After decline | immediate re-offer, excluding the club just declined |
 | Admin | `POST /api/admin/offers {club_id, manager_id}` |
 
-An eligible offering club (`OnboardingAIClubID`) is AI-controlled, managed by
+An eligible offering club (`OnboardingAIClubIDs`) is AI-controlled, managed by
 nobody or its own policy bot, **a league member**, and **not already proposing
 to someone else**.
 
@@ -109,7 +109,7 @@ Reads: `GET /api/managers/me/career`, the reputation log, public profiles
 
 | Route | Success | Errors |
 | --- | --- | --- |
-| `GET /api/offers` | 200 pending offers | — |
+| `GET /api/offers` | 200 pending offers + `taken_clubs` (clubs you let go that another human has since taken) | — |
 | `POST /api/offers/:id/accept` | 200 | 404 · 409 not yours / resolved / employed / occupied |
 | `POST /api/offers/:id/decline` | 200 (+ `next_offer`) | 404 · 409 |
 | `POST /api/managers/me/resign` | 200 | 409 not employed |

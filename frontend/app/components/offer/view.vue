@@ -26,7 +26,8 @@ async function acceptJobOffer() {
 
     emit('done', true)
   } catch {
-    emit("close")    
+    // e.g. the club was taken meanwhile: refresh so the inbox shows it as taken
+    emit("done", false)
   } finally {
     loading.value = false
   }

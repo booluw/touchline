@@ -246,79 +246,152 @@ func (s *Service) CreateJobOffer(ctx context.Context, clubID, candidateID uuid.U
 	return o, nil
 }
 
-// OnboardingAIClubID picks a random league club in a world that can still
-// issue a job offer: AI-controlled, run by its policy bot (or nobody), and not
-// already proposing to another manager. exclude (uuid.Nil for none) skips the
-// club a manager just declined. Returns ErrNoOnboardingClub when no club fits.
-func (s *Service) OnboardingAIClubID(ctx context.Context, worldID, exclude uuid.UUID) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := s.pool.QueryRow(ctx, `
-		SELECT c.id
-		FROM club.clubs c
-		LEFT JOIN manager.managers m ON m.id = c.current_manager_id
-		WHERE c.world_id = $1
-		  AND c.is_ai_controlled = TRUE
-		  AND (c.current_manager_id IS NULL OR m.is_policy_bot = TRUE)
-		  AND EXISTS (SELECT 1 FROM competition.club_competitions cc
-		               WHERE cc.club_id = c.id AND cc.role = 'league')
-		  AND NOT EXISTS (SELECT 1 FROM manager.job_offers o
-		                   WHERE o.club_id = c.id AND o.status = 'proposed')
-		  AND c.id <> $2
-		ORDER BY random()
-		LIMIT 1`, worldID, exclude).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, ErrNoOnboardingClub
-	}
+// OnboardingOfferCount is how many clubs a new (or re-onboarded) manager is
+// offered at once. Each club still proposes to one manager at a time (0058),
+// so a busy world simply yields fewer.
+const OnboardingOfferCount = 5
+
+// OnboardingAIClubIDs picks up to n random league clubs in a world that can
+// still issue a job offer: AI-controlled, run by its policy bot (or nobody),
+// and not already proposing to anyone. Picks are spread across countries
+// first, then across leagues within a country. exclude (uuid.Nil for none)
+// skips the club a manager just declined. Returns ErrNoOnboardingClub when no
+// club fits.
+func (s *Service) OnboardingAIClubIDs(ctx context.Context, worldID, exclude uuid.UUID, n int) ([]uuid.UUID, error) {
+	rows, err := s.pool.Query(ctx, `
+		WITH eligible AS (
+			SELECT DISTINCT ON (c.id) c.id, c.country, cc.competition_id
+			FROM club.clubs c
+			JOIN competition.club_competitions cc ON cc.club_id = c.id AND cc.role = 'league'
+			LEFT JOIN manager.managers m ON m.id = c.current_manager_id
+			WHERE c.world_id = $1
+			  AND c.is_ai_controlled = TRUE
+			  AND (c.current_manager_id IS NULL OR m.is_policy_bot = TRUE)
+			  AND NOT EXISTS (SELECT 1 FROM manager.job_offers o
+			                   WHERE o.club_id = c.id AND o.status = 'proposed')
+			  AND c.id <> $2
+		), by_league AS (
+			SELECT id, country, row_number() OVER (PARTITION BY competition_id ORDER BY random()) AS lr
+			FROM eligible
+		)
+		SELECT id FROM by_league
+		ORDER BY row_number() OVER (PARTITION BY country ORDER BY lr, random()), random()
+		LIMIT $3`, worldID, exclude, n)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("pick onboarding club: %w", err)
+		return nil, fmt.Errorf("pick onboarding clubs: %w", err)
 	}
-	return id, nil
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("pick onboarding clubs: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, ErrNoOnboardingClub
+	}
+	return ids, nil
 }
 
-// OfferOnboardingJob pairs an unemployed manager with a random eligible club
-// (see OnboardingAIClubID), used at registration and right after a decline.
-// A concurrent onboarding can claim the same club first; that is retried.
-func (s *Service) OfferOnboardingJob(ctx context.Context, worldID, managerID, exclude uuid.UUID) (*JobOffer, error) {
-	for attempt := 0; ; attempt++ {
-		clubID, err := s.OnboardingAIClubID(ctx, worldID, exclude)
+// OfferOnboardingJobs offers an unemployed manager up to n eligible clubs (see
+// OnboardingAIClubIDs), used at registration, login top-up and after a
+// decline. A concurrent onboarding can claim a picked club first; that club is
+// skipped and the pick retried, so no club ever proposes to two managers.
+func (s *Service) OfferOnboardingJobs(ctx context.Context, worldID, managerID, exclude uuid.UUID, n int) ([]*JobOffer, error) {
+	var out []*JobOffer
+	for attempt := 0; attempt < 3 && len(out) < n; attempt++ {
+		ids, err := s.OnboardingAIClubIDs(ctx, worldID, exclude, n-len(out))
+		if errors.Is(err, ErrNoOnboardingClub) && len(out) > 0 {
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
-		o, err := s.CreateJobOffer(ctx, clubID, managerID)
-		if errors.Is(err, ErrClubHasOffer) && attempt < 3 {
-			continue
+		for _, clubID := range ids {
+			o, err := s.CreateJobOffer(ctx, clubID, managerID)
+			if errors.Is(err, ErrClubHasOffer) {
+				continue
+			}
+			if err != nil {
+				if len(out) > 0 {
+					return out, nil
+				}
+				return nil, err
+			}
+			out = append(out, o)
 		}
-		return o, err
 	}
+	if len(out) == 0 {
+		return nil, ErrNoOnboardingClub
+	}
+	return out, nil
 }
 
-// EnsureOffer gives an unemployed human manager with no pending offer a fresh
-// one (called at login): covers never-offered, declined with no club free at
-// the time, expired, resigned and sacked. Returns nil, nil when nothing is due.
-// ponytail: two simultaneous logins can both offer; accepting one expires the other.
-func (s *Service) EnsureOffer(ctx context.Context, managerID uuid.UUID) (*JobOffer, error) {
+// OfferOnboardingJob offers a single replacement club (after a decline).
+func (s *Service) OfferOnboardingJob(ctx context.Context, worldID, managerID, exclude uuid.UUID) (*JobOffer, error) {
+	offers, err := s.OfferOnboardingJobs(ctx, worldID, managerID, exclude, 1)
+	if err != nil {
+		return nil, err
+	}
+	return offers[0], nil
+}
+
+// EnsureOffers tops an unemployed human manager up to OnboardingOfferCount
+// pending offers (called at login): covers never-offered, declined with no
+// club free at the time, expired, resigned and sacked. Returns nil, nil when
+// nothing is due.
+// ponytail: two simultaneous logins can both top up; accepting one expires the rest.
+func (s *Service) EnsureOffers(ctx context.Context, managerID uuid.UUID) ([]*JobOffer, error) {
 	var (
 		worldID uuid.UUID
-		due     bool
+		human   bool
+		pending int
 	)
 	err := s.pool.QueryRow(ctx, `
 		SELECT m.world_id,
-		       m.user_id IS NOT NULL AND NOT m.is_policy_bot AND m.status = 'unemployed'
-		       AND NOT EXISTS (SELECT 1 FROM manager.job_offers o
-		                        WHERE o.manager_id = m.id AND o.status = 'proposed')
-		FROM manager.managers m WHERE m.id = $1`, managerID).Scan(&worldID, &due)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !due) {
+		       m.user_id IS NOT NULL AND NOT m.is_policy_bot AND m.status = 'unemployed',
+		       (SELECT count(*) FROM manager.job_offers o
+		         WHERE o.manager_id = m.id AND o.status = 'proposed')
+		FROM manager.managers m WHERE m.id = $1`, managerID).Scan(&worldID, &human, &pending)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (!human || pending >= OnboardingOfferCount)) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("check offer due: %w", err)
 	}
-	return s.OfferOnboardingJob(ctx, worldID, managerID, uuid.Nil)
+	offers, err := s.OfferOnboardingJobs(ctx, worldID, managerID, uuid.Nil, OnboardingOfferCount-pending)
+	if errors.Is(err, ErrNoOnboardingClub) && pending > 0 {
+		return nil, nil // already holding offers; nothing free to add
+	}
+	return offers, err
+}
+
+// TakenClubs lists clubs once offered to the manager (declined or expired)
+// that a human manager has since taken: those clubs can't be offered to them
+// again while occupied, so the offer inbox tells them.
+func (s *Service) TakenClubs(ctx context.Context, managerID uuid.UUID) ([]apiref.ClubRef, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT c.id, c.name
+		FROM manager.job_offers o
+		JOIN club.clubs c ON c.id = o.club_id
+		JOIN manager.managers m ON m.id = c.current_manager_id
+		WHERE o.manager_id = $1 AND o.status IN ('declined', 'expired')
+		  AND m.id <> $1 AND NOT m.is_policy_bot
+		ORDER BY c.name`, managerID)
+	if err != nil {
+		return nil, fmt.Errorf("taken clubs: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (apiref.ClubRef, error) {
+		var c apiref.ClubRef
+		err := r.Scan(&c.ID, &c.Name)
+		return c, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("taken clubs: %w", err)
+	}
+	return out, nil
 }
 
 // ExpireStaleOffers expires a world's offers left unanswered for offerTTLDays
 // in-game days. The manager is not re-offered here: they get a fresh offer at
-// their next login (EnsureOffer), so inactive managers don't hold clubs.
+// their next login (EnsureOffers), so inactive managers don't hold clubs.
 func (s *Service) ExpireStaleOffers(ctx context.Context, worldID uuid.UUID) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE manager.job_offers SET status = 'expired', responded_at = now()
