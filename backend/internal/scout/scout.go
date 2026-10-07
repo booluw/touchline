@@ -74,6 +74,9 @@ type NextFixtureView struct {
 	DerbyIntensity int                  `json:"derby_intensity,omitempty"`
 	GoldenGoal     bool                 `json:"golden_goal"`
 	Opponent       *Report              `json:"opponent,omitempty"`
+	// Club is the same dossier for the requesting club (IM39), so the match
+	// card can show both sides' position, form and tier.
+	Club *Report `json:"club,omitempty"`
 }
 
 // Service builds scouting read-models. It reads persisted state only.
@@ -108,6 +111,10 @@ func (s *Service) NextFixture(ctx context.Context, worldID, clubID uuid.UUID) (*
 	if err != nil {
 		return nil, err
 	}
+	own, err := s.Report(ctx, worldID, clubID)
+	if err != nil {
+		return nil, err
+	}
 	intensity, goldenGoal, err := s.matchup(ctx, f)
 	if err != nil {
 		return nil, err
@@ -120,6 +127,7 @@ func (s *Service) NextFixture(ctx context.Context, worldID, clubID uuid.UUID) (*
 		DerbyIntensity: intensity,
 		GoldenGoal:     goldenGoal,
 		Opponent:       report,
+		Club:           own,
 	}, nil
 }
 

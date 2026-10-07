@@ -171,6 +171,22 @@ func TestHTTPTransferMarketRoundTrip(t *testing.T) {
 	if incoming, ok := inbox["incoming"].([]any); !ok || len(incoming) < 1 {
 		t.Fatalf("incoming bids = %v", inbox["incoming"])
 	}
+	// IM44: every listed bid carries its negotiation thread, and the last
+	// round is the live offer.
+	for _, side := range []string{"incoming", "outgoing"} {
+		for _, raw := range inbox[side].([]any) {
+			b := raw.(map[string]any)
+			rounds, rOK := b["rounds"].([]any)
+			if !rOK || len(rounds) == 0 {
+				t.Fatalf("%s bid %v has no rounds", side, b["id"])
+			}
+			lastRound := rounds[len(rounds)-1].(map[string]any)
+			terms, tOK := lastRound["terms"].(map[string]any)
+			if !tOK || lastRound["round"] != b["round"] || terms["fee"] != b["fee"] {
+				t.Fatalf("%s bid %v last round %v, want round %v fee %v", side, b["id"], lastRound, b["round"], b["fee"])
+			}
+		}
+	}
 
 	// The human rejects one AI offer on the listed player.
 	resp = get(t, ts, client, "/api/transfers/listings/"+listingID, cookies)

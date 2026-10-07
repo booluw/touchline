@@ -66,6 +66,8 @@ func (s *Service) build(ctx context.Context, worldID, managerID uuid.UUID, clubs
 		Urgent:      []Item{},
 		Important:   []Item{},
 		Interesting: []Item{},
+		Counts:      Counts{ByCategory: map[string]int{}},
+		Summary:     []ClubSummary{},
 	}
 
 	urgent, err := s.buildUrgent(ctx, managerID, clubs)
@@ -86,7 +88,98 @@ func (s *Service) build(ctx context.Context, worldID, managerID uuid.UUID, clubs
 	}
 	snap.Interesting = interesting
 
+	snap.Counts = countItems(snap)
+	snap.Summary = s.buildSummary(ctx, managerID, clubs)
 	return snap, nil
+}
+
+// countItems tallies the returned sections by priority and category (IM38).
+func countItems(snap Snapshot) Counts {
+	c := Counts{
+		Urgent:      len(snap.Urgent),
+		Important:   len(snap.Important),
+		Interesting: len(snap.Interesting),
+		ByCategory:  map[string]int{},
+	}
+	for _, sec := range [][]Item{snap.Urgent, snap.Important, snap.Interesting} {
+		for _, it := range sec {
+			c.ByCategory[it.Category]++
+		}
+	}
+	return c
+}
+
+// buildSummary assembles the right-rail numbers per managed club (IM38). Like
+// the feeds it is best-effort: a failed source leaves its block nil.
+func (s *Service) buildSummary(ctx context.Context, managerID uuid.UUID, clubs []uuid.UUID) []ClubSummary {
+	out := make([]ClubSummary, len(clubs))
+	byClub := make(map[uuid.UUID]*ClubSummary, len(clubs))
+	for i, id := range clubs {
+		out[i].ClubID = id
+		byClub[id] = &out[i]
+	}
+
+	snaps, err := s.store.BoardSnapshots(ctx, managerID)
+	if err != nil {
+		log.Printf("dashboard: summary board: %v", err)
+	}
+	for i, t := range snaps { // newest first per club
+		cs := byClub[t.ClubID]
+		if cs == nil || cs.Board != nil {
+			continue
+		}
+		cs.Board = &BoardSummary{Confidence: t.TotalScore}
+		if i+1 < len(snaps) && snaps[i+1].ClubID == t.ClubID {
+			change := t.TotalScore - snaps[i+1].TotalScore
+			cs.Board.Change = &change
+		}
+	}
+
+	moods, err := s.store.SquadMoods(ctx, clubs, MoraleUnhappyThreshold)
+	if err != nil {
+		log.Printf("dashboard: summary morale: %v", err)
+	}
+	for _, m := range moods {
+		if cs := byClub[m.ClubID]; cs != nil {
+			cs.Morale = &MoraleSummary{Average: m.Average, Unhappy: m.Unhappy, Players: m.Players}
+		}
+	}
+
+	cash, err := s.store.CashBalances(ctx, clubs)
+	if err != nil {
+		log.Printf("dashboard: summary cash: %v", err)
+	}
+	for _, c := range cash {
+		if cs := byClub[c.ClubID]; cs != nil {
+			cs.Finance = &FinanceSummary{Cash: c.Cash}
+		}
+	}
+	wages, err := s.store.WageBills(ctx, clubs)
+	if err != nil {
+		log.Printf("dashboard: summary wages: %v", err)
+	}
+	for _, w := range wages {
+		cs := byClub[w.ClubID]
+		if cs == nil {
+			continue
+		}
+		if cs.Finance == nil {
+			cs.Finance = &FinanceSummary{}
+		}
+		cs.Finance.WeeklyWageBill = w.WeeklyWage
+		cs.Finance.SeasonWageBudget = w.SeasonWageBudget
+	}
+
+	spots, err := s.store.StandingsPositions(ctx, clubs)
+	if err != nil {
+		log.Printf("dashboard: summary standings: %v", err)
+	}
+	for _, st := range spots {
+		if cs := byClub[st.ClubID]; cs != nil {
+			cs.League = &LeagueSummary{Position: st.Position, Points: st.Points, Played: st.Played, SeasonLabel: st.SeasonLabel}
+		}
+	}
+	return out
 }
 
 // buildUrgent = open bids, expiring contracts, imminent fixtures, board
@@ -170,7 +263,8 @@ func (s *Service) buildUrgent(ctx context.Context, managerID uuid.UUID, clubs []
 				Title:    "Board confidence is critically low",
 				Description: fmt.Sprintf("Confidence at %d/100 — you are close to being sacked.",
 					t.TotalScore),
-				CreatedAt: t.CreatedAt,
+				CreatedAt:   t.CreatedAt,
+				Explanation: t.Explanation,
 				Action: &Action{
 					Kind:   ActionViewBoard,
 					ClubID: ptr(t.ClubID),
@@ -224,7 +318,8 @@ func (s *Service) buildImportant(ctx context.Context, managerID uuid.UUID, clubs
 				Title:    "Board confidence is slipping",
 				Description: fmt.Sprintf("Confidence fell %d points to %d/100 over the last review.",
 					-delta, t.TotalScore),
-				CreatedAt: t.CreatedAt,
+				CreatedAt:   t.CreatedAt,
+				Explanation: t.Explanation,
 				Action: &Action{
 					Kind:   ActionViewBoard,
 					ClubID: ptr(t.ClubID),

@@ -2,10 +2,12 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -203,10 +205,11 @@ func (s *Store) NextUrgentFixtures(ctx context.Context, clubIDs []uuid.UUID, win
 
 // boardSnapshot is one job-security confidence row for a managed club.
 type boardSnapshot struct {
-	ClubID     uuid.UUID
-	WorldTick  int64
-	TotalScore int
-	CreatedAt  time.Time
+	ClubID      uuid.UUID
+	WorldTick   int64
+	TotalScore  int
+	CreatedAt   time.Time
+	Explanation map[string]any // stored job-security explanation (IM38)
 }
 
 // BoardSnapshots returns the two most recent weekly confidence snapshots for
@@ -214,7 +217,7 @@ type boardSnapshot struct {
 // tick, so tick ordering approximates time ordering.
 func (s *Store) BoardSnapshots(ctx context.Context, managerID uuid.UUID) ([]boardSnapshot, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT club_id, world_tick, total_score, created_at
+		SELECT club_id, world_tick, total_score, created_at, explanation
 		FROM manager.job_security_snapshots
 		WHERE manager_id = $1
 		ORDER BY club_id, world_tick DESC, created_at DESC LIMIT 4`, managerID)
@@ -225,8 +228,14 @@ func (s *Store) BoardSnapshots(ctx context.Context, managerID uuid.UUID) ([]boar
 	var out []boardSnapshot
 	for rows.Next() {
 		var t boardSnapshot
-		if err := rows.Scan(&t.ClubID, &t.WorldTick, &t.TotalScore, &t.CreatedAt); err != nil {
+		var raw []byte
+		if err := rows.Scan(&t.ClubID, &t.WorldTick, &t.TotalScore, &t.CreatedAt, &raw); err != nil {
 			return nil, fmt.Errorf("scan board snapshot: %w", err)
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &t.Explanation); err != nil {
+				return nil, fmt.Errorf("board snapshot explanation: %w", err)
+			}
 		}
 		out = append(out, t)
 	}
@@ -327,14 +336,14 @@ func (s *Store) UnhappyPlayers(ctx context.Context, clubIDs []uuid.UUID, thresho
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT pc.player_id, pp.display_name, pc.club_id, pc.morale,
+		SELECT pc.player_id, pp.display_name, p.club_id, pc.morale,
 		       EXISTS (
 				SELECT 1 FROM player.player_transfer_requests r
 				WHERE r.player_id = pc.player_id AND r.status = 'pending')
 		FROM player.player_condition pc
 		JOIN player.players p ON p.id = pc.player_id
 		JOIN person.people pp ON pp.id = p.person_id
-		WHERE pc.club_id = ANY($1) AND pc.morale <= $2
+		WHERE p.club_id = ANY($1) AND pc.morale <= $2
 		ORDER BY pc.morale, pp.display_name`, clubIDs, threshold)
 	if err != nil {
 		return nil, fmt.Errorf("unhappy players: %w", err)
@@ -520,4 +529,69 @@ func (s *Store) RecentMarketEvents(ctx context.Context, worldID uuid.UUID, limit
 		return nil, fmt.Errorf("market events rows: %w", err)
 	}
 	return out, nil
+}
+
+// squadMood is a managed club's active-roster morale average and the count at
+// or below the unhappy line (IM38).
+type squadMood struct {
+	ClubID  uuid.UUID
+	Average float64
+	Unhappy int
+	Players int
+}
+
+// SquadMoods averages player_condition.morale over each club's active roster
+// (IM38). Players without a condition row count at the 0.5 default, matching
+// the roster read.
+func (s *Store) SquadMoods(ctx context.Context, clubIDs []uuid.UUID, threshold float64) ([]squadMood, error) {
+	if len(clubIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.club_id, AVG(COALESCE(pc.morale, 0.5))::float8,
+		       COUNT(*) FILTER (WHERE COALESCE(pc.morale, 0.5) <= $2), COUNT(*)
+		FROM player.players p
+		LEFT JOIN player.player_condition pc ON pc.player_id = p.id
+		WHERE p.club_id = ANY($1) AND p.status = 'active'
+		GROUP BY p.club_id`, clubIDs, threshold)
+	if err != nil {
+		return nil, fmt.Errorf("squad moods: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (squadMood, error) {
+		var m squadMood
+		err := r.Scan(&m.ClubID, &m.Average, &m.Unhappy, &m.Players)
+		return m, err
+	})
+}
+
+// wageBill is a managed club's active weekly wage total and its current wage
+// budget allocation (IM38).
+type wageBill struct {
+	ClubID           uuid.UUID
+	WeeklyWage       int64
+	SeasonWageBudget *int64
+}
+
+// WageBills sums active contracts' weekly wages and reads the latest season's
+// wage budget allocation (IM38).
+func (s *Store) WageBills(ctx context.Context, clubIDs []uuid.UUID) ([]wageBill, error) {
+	if len(clubIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id,
+		       COALESCE((SELECT SUM(ct.weekly_wage)::bigint FROM player.contracts ct
+		                 WHERE ct.club_id = c.id AND ct.status = 'active'), 0),
+		       (SELECT b.allocated_amount::bigint FROM finance.budgets b
+		         WHERE b.club_id = c.id AND b.budget_type = 'wage'
+		         ORDER BY b.season DESC LIMIT 1)
+		FROM club.clubs c WHERE c.id = ANY($1)`, clubIDs)
+	if err != nil {
+		return nil, fmt.Errorf("wage bills: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (wageBill, error) {
+		var w wageBill
+		err := r.Scan(&w.ClubID, &w.WeeklyWage, &w.SeasonWageBudget)
+		return w, err
+	})
 }

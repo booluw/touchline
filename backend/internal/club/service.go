@@ -3,6 +3,7 @@ package club
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,7 +52,42 @@ type ClubDetail struct {
 	IsAIControlled bool               `json:"is_ai_controlled"`
 	Manager        *ManagerRef        `json:"manager,omitempty"`
 	Squad          []SquadPlayer      `json:"squad"`
+
+	// Profile fields (IM41). Nullable columns stay null when unseeded.
+	FoundedYear    *int              `json:"founded_year"`
+	City           *string           `json:"city"`
+	Tier           int               `json:"tier"`
+	Reputation     int               `json:"reputation"`
+	PrimaryColor   *string           `json:"primary_color"`
+	SecondaryColor *string           `json:"secondary_color"`
+	Stadium        ClubStadium       `json:"stadium"`
+	Facilities     []ClubFacility    `json:"facilities"`
+	History        []ClubHistoryItem `json:"history"`
 }
+
+// ClubStadium is the club's ground (IM41).
+type ClubStadium struct {
+	Name     *string `json:"name"`
+	Capacity *int    `json:"capacity"`
+}
+
+// ClubFacility is one club.facilities row (IM41).
+type ClubFacility struct {
+	Type       string    `json:"type"`
+	Level      int       `json:"level"`
+	UpgradedAt time.Time `json:"upgraded_at"`
+}
+
+// ClubHistoryItem is one club.club_history row (IM41).
+type ClubHistoryItem struct {
+	Season      int       `json:"season"`
+	EventType   string    `json:"event_type"`
+	Description string    `json:"description"`
+	OccurredAt  time.Time `json:"occurred_at"`
+}
+
+// clubHistoryLimit caps the history list on the club page (IM41).
+const clubHistoryLimit = 10
 
 // Service reads club state. Reads only — club creation is owned by the
 // S03-01 bootstrap orchestrator (internal/bootstrap).
@@ -94,12 +130,16 @@ func (s *Service) GetClubDetail(ctx context.Context, clubID uuid.UUID) (*ClubDet
 	)
 	err := s.pool.QueryRow(ctx, `
 		SELECT c.id, c.world_id, c.name, c.short_name, c.country, c.is_ai_controlled,
-		       wc.id, wc.code
+		       wc.id, wc.code,
+		       c.founded_year, c.city, c.tier, c.reputation, c.primary_color, c.secondary_color,
+		       c.stadium_name, c.stadium_capacity
 		FROM club.clubs c
 		LEFT JOIN world.countries wc ON wc.world_id = c.world_id AND lower(wc.name) = lower(c.country)
 		WHERE c.id = $1`, clubID,
 	).Scan(&d.ID, &d.WorldID, &d.Name, &d.ShortName, &d.Country, &d.IsAIControlled,
-		&countryID, &countryCD)
+		&countryID, &countryCD,
+		&d.FoundedYear, &d.City, &d.Tier, &d.Reputation, &d.PrimaryColor, &d.SecondaryColor,
+		&d.Stadium.Name, &d.Stadium.Capacity)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrClubNotFound
 	}
@@ -136,7 +176,45 @@ func (s *Service) GetClubDetail(ctx context.Context, clubID uuid.UUID) (*ClubDet
 		return nil, err
 	}
 	d.Squad = squad
+
+	if d.Facilities, err = s.clubFacilities(ctx, clubID); err != nil {
+		return nil, err
+	}
+	if d.History, err = s.clubHistory(ctx, clubID); err != nil {
+		return nil, err
+	}
 	return &d, nil
+}
+
+func (s *Service) clubFacilities(ctx context.Context, clubID uuid.UUID) ([]ClubFacility, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT facility_type, level, upgraded_at
+		FROM club.facilities WHERE club_id = $1
+		ORDER BY facility_type`, clubID)
+	if err != nil {
+		return nil, fmt.Errorf("club facilities: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ClubFacility, error) {
+		var f ClubFacility
+		err := r.Scan(&f.Type, &f.Level, &f.UpgradedAt)
+		return f, err
+	})
+}
+
+func (s *Service) clubHistory(ctx context.Context, clubID uuid.UUID) ([]ClubHistoryItem, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT season, event_type, description, occurred_at
+		FROM club.club_history WHERE club_id = $1
+		ORDER BY occurred_at DESC, id DESC
+		LIMIT $2`, clubID, clubHistoryLimit)
+	if err != nil {
+		return nil, fmt.Errorf("club history: %w", err)
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ClubHistoryItem, error) {
+		var h ClubHistoryItem
+		err := r.Scan(&h.Season, &h.EventType, &h.Description, &h.OccurredAt)
+		return h, err
+	})
 }
 
 // GetClubSquad returns the club's players joined to their person + nationality.

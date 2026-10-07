@@ -158,6 +158,10 @@ readable; another world's player is a 404 identical to a non-existent one.
 `player.players.status`: `active`, `injured`, `suspended`, `free_agent`,
 `retired` … Senior headcount (offers) = active/injured/suspended.
 
+### Roster columns (IM40, OPD-61)
+
+Roster rows (`GET /api/clubs/:id/players`) also carry `nationality` (code + name), `date_of_birth`, `age` (completed years on the world calendar) and `contract` (active weekly wage + end date; null without an active contract). The roster still lists `status = 'active'` players only, so injured or loaned players do not appear in it. Potential stays hidden (OPD-60).
+
 ## Connections
 
 - Lifecycle (intake, ageing, retirement, eligibility): [Chapter 11](11-player-lifecycle-and-academy.md).

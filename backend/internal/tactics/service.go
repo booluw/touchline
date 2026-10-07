@@ -89,6 +89,10 @@ type SlotView struct {
 	Slot     int               `json:"slot"`
 	Position string            `json:"position"`
 	Player   *apiref.PlayerRef `json:"player,omitempty"`
+	// IM46: the player's primary position and the engine's fit for this slot
+	// (1.0 natural, 0.75 same unit, 0.3 cross-unit, 0.05 keeper mismatch).
+	PlayerPosition string   `json:"player_position,omitempty"`
+	Fit            *float64 `json:"fit,omitempty"`
 }
 
 // TacticsView is the read shape for GET /api/clubs/:id/tactics. The club id
@@ -303,7 +307,7 @@ func (s *Service) decorateLineupPlayers(ctx context.Context, slots []SlotView) e
 		return nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.id, pe.display_name
+		SELECT p.id, pe.display_name, p.primary_position
 		FROM player.players p JOIN person.people pe ON pe.id = p.person_id
 		WHERE p.id = ANY($1::uuid[])`, ids)
 	if err != nil {
@@ -311,13 +315,15 @@ func (s *Service) decorateLineupPlayers(ctx context.Context, slots []SlotView) e
 	}
 	defer rows.Close()
 	names := make(map[uuid.UUID]string, len(ids))
+	positions := make(map[uuid.UUID]string, len(ids))
 	for rows.Next() {
 		var id uuid.UUID
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var name, pos string
+		if err := rows.Scan(&id, &name, &pos); err != nil {
 			return err
 		}
 		names[id] = name
+		positions[id] = pos
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -327,6 +333,11 @@ func (s *Service) decorateLineupPlayers(ctx context.Context, slots []SlotView) e
 			continue
 		}
 		slots[i].Player.Name = names[slots[i].Player.ID]
+		if pos, ok := positions[slots[i].Player.ID]; ok {
+			fit := squad.PositionFit(pos, slots[i].Position)
+			slots[i].PlayerPosition = pos
+			slots[i].Fit = &fit
+		}
 	}
 	return nil
 }

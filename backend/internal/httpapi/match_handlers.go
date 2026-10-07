@@ -73,7 +73,7 @@ func (s *server) handleGetMatchEvents(c *gin.Context) {
 		return
 	}
 	if m.Status == internalmatch.MatchStatusPending {
-		c.JSON(http.StatusOK, gin.H{"events": []any{}})
+		c.JSON(http.StatusOK, gin.H{"events": []any{}, "stats": internalmatch.MatchStats{}})
 		return
 	}
 
@@ -82,5 +82,10 @@ func (s *server) handleGetMatchEvents(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"events": events})
+	stats, err := s.matchSvc.Stats(ctx, matchID)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"events": events, "stats": stats})
 }

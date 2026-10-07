@@ -429,7 +429,7 @@ func TestGetLedgerOrdersEntriesNewestFirst(t *testing.T) {
 		t.Fatalf("wage run: %v", err)
 	}
 
-	entries, err := svc.GetLedger(ctx, clubID, 100)
+	entries, err := svc.GetLedger(ctx, clubID, "", 100)
 	if err != nil {
 		t.Fatalf("ledger: %v", err)
 	}
@@ -454,11 +454,56 @@ func TestGetLedgerOrdersEntriesNewestFirst(t *testing.T) {
 		t.Fatalf("wage debits = %d, want 24", wages)
 	}
 
+	// IM42: the newest running balance is the cash balance; the category
+	// filter keeps the same balances; summary carries breakdown + history.
+	sum, err := svc.GetSummary(ctx, clubID)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if entries[0].BalanceAfter != sum.Cash {
+		t.Fatalf("newest balance_after = %d, want cash %d", entries[0].BalanceAfter, sum.Cash)
+	}
+	byID := make(map[uuid.UUID]int64, len(entries))
+	for _, e := range entries {
+		byID[e.ID] = e.BalanceAfter
+	}
+	wageRows, err := svc.GetLedger(ctx, clubID, "wages", 100)
+	if err != nil {
+		t.Fatalf("wages ledger: %v", err)
+	}
+	if len(wageRows) != 24 {
+		t.Fatalf("filtered wage rows = %d, want 24", len(wageRows))
+	}
+	for _, e := range wageRows {
+		if e.Category != "wages" || e.BalanceAfter != byID[e.ID] {
+			t.Fatalf("filtered row %+v, want wages with balance %d", e, byID[e.ID])
+		}
+	}
+	if sum.Health != nil {
+		t.Fatalf("health = %+v, want nil without a crisis", sum.Health)
+	}
+	if n := len(sum.CashHistory); n == 0 || sum.CashHistory[n-1].Balance != sum.Cash {
+		t.Fatalf("cash history = %+v, want last month = cash %d", sum.CashHistory, sum.Cash)
+	}
+	var wageTotal int64
+	for _, e := range wageRows {
+		wageTotal += e.Amount
+	}
+	foundWages := false
+	for _, f := range sum.SeasonBreakdown.Expenses {
+		if f.Label == "wages" {
+			foundWages = f.Amount == wageTotal
+		}
+	}
+	if !foundWages || len(sum.SeasonBreakdown.Revenue) != 0 {
+		t.Fatalf("season breakdown = %+v, want wages expense %d and no revenue (genesis excluded)", sum.SeasonBreakdown, wageTotal)
+	}
+
 	// A club without a finance account (raw, non-bootstrapped) yields an
 	// empty ledger rather than an error.
 	otherWorld := testdb.CreateWorld(t, pool, "fin-ledger-empty")
 	otherClub := testdb.CreateClub(t, pool, otherWorld)
-	empty, err := svc.GetLedger(ctx, otherClub, 10)
+	empty, err := svc.GetLedger(ctx, otherClub, "", 10)
 	if err != nil {
 		t.Fatalf("empty ledger: %v", err)
 	}

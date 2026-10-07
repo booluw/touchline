@@ -68,7 +68,7 @@ func (s *server) handleGetLedger(c *gin.Context) {
 		financeStatus(c, err)
 		return
 	}
-	entries, err := s.financeSvc.GetLedger(ctx, clubID, 200)
+	entries, err := s.financeSvc.GetLedger(ctx, clubID, c.Query("category"), 200)
 	if err != nil {
 		financeStatus(c, err)
 		return

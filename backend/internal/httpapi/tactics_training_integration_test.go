@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	internalbootstrap "github.com/touchline/backend/internal/bootstrap"
+	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"
 )
@@ -175,6 +176,33 @@ func TestHTTPLineupRoundTrip(t *testing.T) {
 	for _, id := range got {
 		if !want[id] {
 			t.Fatalf("lineup contains non-roster player %s", id)
+		}
+	}
+
+	// IM46: every filled slot carries the player's primary position and the
+	// engine's fit for that slot.
+	resp = get(t, ts, client, "/api/clubs/"+clubID.String()+"/lineup", cookies)
+	var fitView struct {
+		Slots []struct {
+			Position       string   `json:"position"`
+			PlayerPosition string   `json:"player_position"`
+			Fit            *float64 `json:"fit"`
+			Player         *struct {
+				ID uuid.UUID `json:"id"`
+			} `json:"player"`
+		} `json:"slots"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&fitView); err != nil {
+		t.Fatalf("decode lineup fit: %v", err)
+	}
+	for i, sv := range fitView.Slots {
+		var primary string
+		if err := pool.QueryRow(context.Background(),
+			`SELECT primary_position FROM player.players WHERE id = $1`, sv.Player.ID).Scan(&primary); err != nil {
+			t.Fatalf("slot %d primary position: %v", i, err)
+		}
+		if sv.PlayerPosition != primary || sv.Fit == nil || *sv.Fit != squad.PositionFit(primary, sv.Position) {
+			t.Fatalf("slot %d = %+v, want player_position %s fit %v", i, sv, primary, squad.PositionFit(primary, sv.Position))
 		}
 	}
 

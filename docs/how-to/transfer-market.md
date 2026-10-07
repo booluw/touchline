@@ -25,7 +25,8 @@ The market is a thin layer over listings and bid threads:
 - **Bid** (`transfer.bids`) — a thread attached to a listing. Statuses:
   `pending` → `accepted | rejected | countered | withdrawn | expired`.
   Every listing has one open thread at a time, one open `pending`/`countered`
-  bid per listing max.
+  bid per listing max. `GET /api/transfers/bids` returns each thread's full
+  `rounds` history (IM44); the last round is the live offer.
 - **Completion** — accepting a bid performs the atomic ownership flip
   (see §5), which also closes the player's other listings and expires all
   competing open bids on that player.

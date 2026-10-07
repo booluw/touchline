@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	internalmatch "github.com/touchline/backend/internal/match"
 	"github.com/touchline/backend/internal/testdb"
 )
 
@@ -163,9 +164,18 @@ func TestMatchFeedEventsEndpoint(t *testing.T) {
 			} `json:"club"`
 			Detail json.RawMessage `json:"detail"`
 		} `json:"events"`
+		Stats internalmatch.MatchStats `json:"stats"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode events: %v", err)
+	}
+	// IM45: per-side tallies of the seeded feed (goals from the stamped score).
+	wantStats := internalmatch.MatchStats{
+		Home: internalmatch.SideStats{Goals: 2, YellowCards: 1, Substitutions: 1, Injuries: 1},
+		Away: internalmatch.SideStats{Goals: 1},
+	}
+	if body.Stats != wantStats {
+		t.Fatalf("stats = %+v, want %+v", body.Stats, wantStats)
 	}
 	if len(body.Events) != 9 {
 		t.Fatalf("events = %d, want 9", len(body.Events))

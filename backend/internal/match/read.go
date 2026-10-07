@@ -173,3 +173,61 @@ func (s *Service) ScoreLine(ctx context.Context, matchID uuid.UUID) (int, int, e
 	}
 	return home, away, nil
 }
+
+// SideStats is one side's event tally for the matchday stats panel (IM45).
+// Goals follow ScoreLine; the rest count persisted match events, so a live
+// match only counts what has already been played.
+type SideStats struct {
+	Goals            int `json:"goals"`
+	ChancesCreated   int `json:"chances_created"`
+	YellowCards      int `json:"yellow_cards"`
+	RedCards         int `json:"red_cards"`
+	Substitutions    int `json:"substitutions"`
+	PenaltiesAwarded int `json:"penalties_awarded"`
+	Injuries         int `json:"injuries"`
+}
+
+// MatchStats is the per-side tally of a match (IM45).
+type MatchStats struct {
+	Home SideStats `json:"home"`
+	Away SideStats `json:"away"`
+}
+
+// Stats tallies both sides' events for a match (IM45). On sql.ErrNoRows the
+// match does not exist.
+func (s *Service) Stats(ctx context.Context, matchID uuid.UUID) (*MatchStats, error) {
+	var st MatchStats
+	var err error
+	if st.Home.Goals, st.Away.Goals, err = s.ScoreLine(ctx, matchID); err != nil {
+		return nil, err
+	}
+	err = s.pool.QueryRow(ctx, `
+		SELECT
+			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'chance_created'),
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'chance_created'),
+			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'yellow_card'),
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'yellow_card'),
+			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'red_card'),
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'red_card'),
+			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'substitution'),
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'substitution'),
+			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'penalty_awarded'),
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'penalty_awarded'),
+			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'injury'),
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'injury')
+		FROM match.matches m
+		JOIN match.fixtures f ON f.id = m.fixture_id
+		LEFT JOIN match.match_events me ON me.match_id = m.id
+		WHERE m.id = $1
+		GROUP BY m.id`, matchID).Scan(
+		&st.Home.ChancesCreated, &st.Away.ChancesCreated,
+		&st.Home.YellowCards, &st.Away.YellowCards,
+		&st.Home.RedCards, &st.Away.RedCards,
+		&st.Home.Substitutions, &st.Away.Substitutions,
+		&st.Home.PenaltiesAwarded, &st.Away.PenaltiesAwarded,
+		&st.Home.Injuries, &st.Away.Injuries)
+	if err != nil {
+		return nil, err
+	}
+	return &st, nil
+}

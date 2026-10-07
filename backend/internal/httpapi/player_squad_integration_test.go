@@ -59,6 +59,30 @@ func TestHTTPPlayerSquadRoundTrip(t *testing.T) {
 	if overall < 1 || overall > 99 {
 		t.Fatalf("player overall = %v, want 1..99", overall)
 	}
+	// IM40: nationality, age and the active contract on every bootstrapped row.
+	for _, p := range players {
+		row := p.(map[string]any)
+		nat, natOK := row["nationality"].(map[string]any)
+		if !natOK || nat["code"] == "" || nat["name"] == "" {
+			t.Fatalf("roster nationality = %v", row["nationality"])
+		}
+		if age, ageOK := row["age"].(float64); !ageOK || age < 15 || age > 45 {
+			t.Fatalf("roster age = %v", row["age"])
+		}
+		if dob, dobOK := row["date_of_birth"].(string); !dobOK || len(dob) != 10 {
+			t.Fatalf("roster date_of_birth = %v", row["date_of_birth"])
+		}
+		contract, cOK := row["contract"].(map[string]any)
+		if !cOK {
+			t.Fatalf("roster contract = %v, want object", row["contract"])
+		}
+		if wage, wOK := contract["weekly_wage"].(float64); !wOK || wage <= 0 {
+			t.Fatalf("roster contract weekly_wage = %v", contract["weekly_wage"])
+		}
+		if end, eOK := contract["end_date"].(string); !eOK || len(end) != 10 {
+			t.Fatalf("roster contract end_date = %v", contract["end_date"])
+		}
+	}
 
 	// Individual morale detail exposes the explanation.
 	resp = get(t, ts, client, fmt.Sprintf("/api/clubs/%s/players/%s", tw.HumanClub, playerID), cookies)

@@ -47,22 +47,26 @@ interface FixturePlayer {
   rating: number
 }
 
+export interface FixtureDossier {
+  club: FixtureClub
+  country: FixtureCountry
+  is_ai_controlled: boolean
+  manager?: FixtureManager
+  reputation: number
+  tier: number
+  league_position?: number
+  form: FixtureForm
+  squad_count: number
+  top_players: FixturePlayer[]
+}
+
 export interface ManagerNextFixture {
   fixture: FixtureGame
   gameweek: number
   home_or_away: "home" | "away"
   derby: boolean
   golden_goal: boolean
-    opponent: {
-    club: FixtureClub
-    country: FixtureCountry
-    is_ai_controlled: boolean
-    manager: FixtureManager
-    reputation: number
-    tier: number
-    league_position: number
-    form: FixtureForm
-    squad_count: number
-    top_players: FixturePlayer[]
-  }
+  /** The manager's own club, same shape as the opponent. */
+  club: FixtureDossier
+  opponent: FixtureDossier
 }

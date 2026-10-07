@@ -100,6 +100,13 @@ func TestNextFixtureScout(t *testing.T) {
 	if view.Derby || view.GoldenGoal {
 		t.Fatalf("league fixture derby=%v golden_goal=%v, want both false", view.Derby, view.GoldenGoal)
 	}
+	// IM39: the requesting club's own dossier rides alongside.
+	if view.Club == nil || view.Club.Club.ID != clubID {
+		t.Fatalf("own club dossier = %+v, want club %v", view.Club, clubID)
+	}
+	if view.Club.Tier <= 0 || view.Club.SquadCount == 0 {
+		t.Fatalf("own club tier %d squad %d, want positive", view.Club.Tier, view.Club.SquadCount)
+	}
 	opp := view.Opponent
 	if opp == nil {
 		t.Fatal("opponent dossier missing")

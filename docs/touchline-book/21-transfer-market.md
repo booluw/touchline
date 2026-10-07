@@ -129,6 +129,10 @@ duplicate / non-transferable; 409 funds, resolved or expired.
 Agents and player-side negotiation (S10-01), loans, instalments, release-clause
 triggers, exchange deals, anti-abuse trade monitoring (S10-04).
 
+## 21.10 Negotiation threads on the bid list (IM44, OPD-61)
+
+`GET /api/transfers/bids` returns each bid's `rounds`: every `transfer.negotiations` row (round, proposed_by, terms), oldest first. The last round equals the bid's live offer. No acceptance chance is exposed.
+
 ## Connections
 
 - Finance: [Chapter 20](20-finance.md). Requests: [Chapter 18](18-morale-and-transfer-requests.md).

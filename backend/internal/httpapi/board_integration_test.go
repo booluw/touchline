@@ -60,10 +60,48 @@ func TestHTTPBoardRoundTrip(t *testing.T) {
 		t.Fatalf("first mandate = %v, want league_finish", first)
 	}
 
+	// IM43: persona, members and the confidence timeline ride on the view.
+	if persona, pOK := body["persona"].(string); !pOK || persona == "" {
+		t.Fatalf("board persona = %v", body["persona"])
+	}
+	if members, mOK := body["members"].([]any); !mOK || members == nil {
+		t.Fatalf("board members = %v, want array", body["members"])
+	}
+	history, hOK := body["confidence_history"].([]any)
+	if !hOK || len(history) == 0 {
+		t.Fatalf("confidence_history = %v, want ≥ 1 point", body["confidence_history"])
+	}
+	last := history[len(history)-1].(map[string]any)
+	if lastTotal, lOK := last["total_score"].(float64); !lOK || int(lastTotal) != int(confidence) {
+		t.Fatalf("latest history point = %v, want total %v", last, confidence)
+	}
+
 	// In-window softening is accepted.
 	var newFinish string
 	fmt.Sscanf(currentFinish, "%s", &newFinish)
 	newFinish = fmt.Sprintf("%d", atoi(newFinish)+2)
+
+	// IM43: the preview agrees with negotiate and writes nothing.
+	resp = post(t, ts, client, "/api/managers/me/board/mandates/"+mandateID+"/negotiate/preview",
+		fmt.Sprintf(`{"target_value":%q}`, newFinish), cookies)
+	if code := resp.StatusCode; code != http.StatusOK {
+		t.Fatalf("preview = %d, want 200", code)
+	}
+	preview := decodeTransferBody(t, resp)
+	if preview["accepted"] != true || preview["delta"] != float64(2) {
+		t.Fatalf("preview = %v, want accepted with delta 2", preview)
+	}
+	resp = get(t, ts, client, "/api/managers/me/board", cookies)
+	after := decodeTransferBody(t, resp)
+	if m := after["mandates"].([]any)[0].(map[string]any); m["target_value"] != currentFinish {
+		t.Fatalf("preview changed the mandate: %v", m)
+	}
+	resp = post(t, ts, client, "/api/managers/me/board/mandates/"+mandateID+"/negotiate/preview",
+		`{"target_value":"18"}`, cookies)
+	if code := resp.StatusCode; code != http.StatusBadRequest {
+		t.Fatalf("off-window preview = %d, want 400", code)
+	}
+
 	resp = post(t, ts, client, "/api/managers/me/board/mandates/"+mandateID+"/negotiate",
 		fmt.Sprintf(`{"target_value":%q}`, newFinish), cookies)
 	if code := resp.StatusCode; code != http.StatusOK {
