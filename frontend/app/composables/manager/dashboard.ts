@@ -5,7 +5,7 @@ export function useManagerDashboard() {
   const { $api } = useNuxtApp()
   const { notify } = useToast()
 
-  const clubStore = useClubStore()
+  const clubstore = useClubStore()
 
   async function getDashboardData() {
     try {
@@ -25,7 +25,7 @@ export function useManagerDashboard() {
   async function getBoardStatus() {
     try {
       const resp = await $api.get(`${apiBase}/api/managers/me/board`)
-      clubStore.setBoard(resp)
+      clubstore.setBoard(resp)
     } catch (error) {
       console.error(error)
       notify({

@@ -5,13 +5,13 @@ export function useClubFixtures() {
   const { $api } = useNuxtApp()
   const toast = useToaster()
 
-  const store = useClubStore()
-  const clubId = store.club!.id
+  const clubstore = useClubStore()
+  const clubId = clubstore.club!.id
 
   async function getNextFixture() {
     try {
       const { next_fixture } = await $api.get<{ next_fixture: ManagerNextFixture}>(`${apiBase}/api/clubs/${clubId}/next-fixture`)
-      store.setNextFixture(next_fixture)
+      clubstore.setNextFixture(next_fixture)
     } catch (error) {
       console.error(error)
       toast.error("Error")
