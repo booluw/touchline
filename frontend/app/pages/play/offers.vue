@@ -9,6 +9,7 @@ const { getOffers } = useManagerOffer()
 const { notify } = useToast()
 
 const offers = ref<Offer[]>([])
+const takenClubs = ref<{ id: string, name: string }[]>([])
 const offerToView = ref<Offer>()
 const loading = ref("loading")
 
@@ -16,8 +17,9 @@ async function getManagerOffers() {
   if (offerToView.value) offerToView.value = undefined
   try {
     loading.value = "loading"
-    const { offers: response } = await getOffers()
+    const { offers: response, taken_clubs } = await getOffers()
     offers.value = response ?? []
+    takenClubs.value = taken_clubs ?? []
     loading.value = "loaded"
   } catch {
     loading.value = "error"
@@ -43,6 +45,11 @@ onMounted(() => getManagerOffers())
 
     <OldUiLoader v-if="loading === 'loading'" />
     <template v-else-if="loading === 'loaded'">
+      <div v-if="takenClubs.length" role="status" class="bg-void-800 p-3 text-xs uppercase text-void-300">
+        No longer available — another manager has taken
+        <span class="font-semibold text-void-100">{{ takenClubs.map(c => c.name).join(", ") }}</span>.
+        You can't be offered {{ takenClubs.length === 1 ? "this club" : "these clubs" }} again.
+      </div>
       <div v-if="offers.length === 0" class="p-10 uppercase text-xs text-void-400 text-center">
         No offers for you at this time.
       </div>

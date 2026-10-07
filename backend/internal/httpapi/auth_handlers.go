@@ -90,15 +90,15 @@ func (s *server) handleLogin(c *gin.Context) {
 		return
 	}
 
-	// An unemployed manager with no pending offer gets one on every login
-	// (best-effort, like registration: a failure never blocks the login).
-	var offer *internalmanager.JobOffer
+	// An unemployed manager is topped up to OnboardingOfferCount pending offers
+	// on every login (best-effort, like registration: never blocks the login).
+	var offers []*internalmanager.JobOffer
 	if res.Identity != nil && res.Identity.ManagerID != uuid.Nil {
-		o, oErr := s.mgrSvc.EnsureOffer(c.Request.Context(), res.Identity.ManagerID)
+		o, oErr := s.mgrSvc.EnsureOffers(c.Request.Context(), res.Identity.ManagerID)
 		if oErr != nil {
 			log.Printf("login %s: no offer for manager %s: %v", res.ID, res.Identity.ManagerID, oErr)
 		}
-		offer = o
+		offers = o
 	}
 
 	s.setAuthCookies(c, res.TokenPair)
@@ -108,7 +108,8 @@ func (s *server) handleLogin(c *gin.Context) {
 		"is_admin":     res.IsAdmin,
 		"id":           res.ID,
 		"club":         res.Club,
-		"offer":        offer,
+		"offer":        firstOffer(offers),
+		"offers":       offers,
 	})
 }
 
@@ -188,17 +189,17 @@ func (s *server) handleRegister(c *gin.Context) {
 		return
 	}
 
-	// Auto-offer (best-effort, A13): a random league club not already proposing
-	// to someone else. A failure never fails the registration, but it is logged
-	// so an admin can see why a new manager has no offer (IM28).
-	var offer *internalmanager.JobOffer
+	// Auto-offer (best-effort, A13): up to OnboardingOfferCount league clubs
+	// across countries/leagues, none already proposing to someone else. A
+	// failure never fails the registration, but it is logged so an admin can
+	// see why a new manager has no offer (IM28).
+	var offers []*internalmanager.JobOffer
 	if res.JoinedWorld != nil {
-		o, oErr := s.mgrSvc.OfferOnboardingJob(c.Request.Context(), res.JoinedWorld.ID, *res.ManagerID, uuid.Nil)
+		o, oErr := s.mgrSvc.OfferOnboardingJobs(c.Request.Context(), res.JoinedWorld.ID, *res.ManagerID, uuid.Nil, internalmanager.OnboardingOfferCount)
 		if oErr != nil {
 			log.Printf("register %s: no onboarding offer in world %s: %v", res.UserID, res.JoinedWorld.ID, oErr)
-		} else {
-			offer = o
 		}
+		offers = o
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -207,7 +208,8 @@ func (s *server) handleRegister(c *gin.Context) {
 		"display_name": res.DisplayName,
 		"is_admin":     false,
 		"world":        res.JoinedWorld,
-		"offer":        offer,
+		"offer":        firstOffer(offers),
+		"offers":       offers,
 	})
 }
 
@@ -278,4 +280,12 @@ func deviceFingerprint(c *gin.Context) string {
 	}
 	sum := sha256.Sum256([]byte(ua))
 	return hex.EncodeToString(sum[:])
+}
+
+// firstOffer keeps the legacy single `offer` response field alongside `offers`.
+func firstOffer(offers []*internalmanager.JobOffer) *internalmanager.JobOffer {
+	if len(offers) == 0 {
+		return nil
+	}
+	return offers[0]
 }

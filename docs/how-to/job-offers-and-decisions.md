@@ -25,8 +25,8 @@ Offers are issued to an **unemployed** manager by an **AI club**, two ways:
 
 | Source | Endpoint / seam | Notes |
 | --- | --- | --- |
-| Registration auto-offer | `POST /api/auth/register` | When a new manager joins a playable world, a **random** AI club that can still offer (`OnboardingAIClubID`: AI-controlled, manager is nil or its own policy bot, **a league member**, and **not already proposing to another manager**) is offered via `OfferOnboardingJob`. `offer: null` if no such club exists. |
-| Login | `POST /api/auth/login` | `EnsureOffer`: an unemployed human manager with **no pending offer** (never offered, declined with no club free, expired, resigned/sacked) gets the same random pick; returned as `offer` (else `null`). |
+| Registration auto-offer | `POST /api/auth/register` | When a new manager joins a playable world, up to **5** (`OnboardingOfferCount`) random AI clubs that can still offer (`OnboardingAIClubIDs`: AI-controlled, manager is nil or its own policy bot, **a league member**, and **not already proposing to another manager**) are offered via `OfferOnboardingJobs`, spread across **countries first, then leagues**. Returned as `offers` (plus legacy `offer` = the first); `null` if no club is free. A busy world yields fewer. |
+| Login | `POST /api/auth/login` | `EnsureOffers`: an unemployed human manager is **topped up to 5 pending offers** (never offered, declined, expired, resigned/sacked) with the same pick; returned as `offers`/`offer` (else `null`). |
 | Resign / sack re-offer | `POST /api/managers/me/resign`, board sack | Same random pick right after the exit, excluding the club just left. Best-effort; otherwise at next login. |
 | Decline re-offer | `POST /api/offers/:id/decline` | Same random pick as registration, excluding the club just declined (see §4). |
 | Admin | `POST /api/admin/offers` `{"club_id", "manager_id"}` | On behalf of an AI club at game start (or re-offer after a decline). |
@@ -167,7 +167,7 @@ Consequences that *are* real:
 
 | Route | Success | Errors |
 | --- | --- | --- |
-| `GET /api/offers` | `200` list of pending offers (decorated) | — |
+| `GET /api/offers` | `200` list of pending offers (decorated) + `taken_clubs`: clubs once offered to you (declined/expired) that another human has since taken — they can't be offered to you again while occupied | — |
 | `POST /api/offers/:id/accept` | `200` offer (`status: accepted`) | `404` not found · `409` not your offer / already resolved / employer conflict / club occupied |
 | `POST /api/offers/:id/decline` | `200` offer (`status: declined`) | `404` not found · `409` not your offer / already resolved |
 | `POST /api/managers/me/resign` | `200` | `409` not employed |
