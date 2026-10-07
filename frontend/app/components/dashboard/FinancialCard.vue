@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import { useManagerFinance } from '~/composables/manager/finance';
 import type { LoadingStatus } from '~/types';
-import type { ManagerDashboardSummary } from '~/types/manager';
 
 const { getFinancialSummary } = useManagerFinance()
 const finstore = useFinanceStore()

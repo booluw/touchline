@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { useClubFixtures } from '~/composables/manager/fixtures'
-import type { DisplayDensity } from '~/types/ui/design'
 
 // Opt in per page with definePageMeta({ layout: 'game' }).
 // ponytail: season/date/fixture/inbox are placeholders until a dashboard endpoint feeds the shell.
-const auth = useAuthStore()
 const clubstore = useClubStore()
 const store = useAppStore()
 

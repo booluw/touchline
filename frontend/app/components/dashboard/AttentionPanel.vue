@@ -88,6 +88,7 @@ onMounted(load)
           <UiCard v-if="data[tier as 'urgent'].length !== 0" flush>
             <UiAttentionItem
               v-for="item in data[tier as 'urgent']" :tier
+              :key="item.id"
               :tag="item.category" :title="item.title"
               :consequence="item.description"
               :action-label="item.action.kind.replace('_', ' ')"
