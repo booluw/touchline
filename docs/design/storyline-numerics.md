@@ -141,6 +141,23 @@ Every active storyline operates as a state machine:
 
 ---
 
+### 3.6 Archetype 6: `prodigal_son_manager_return` (Former Player Appointed Manager)
+
+- **Trigger Conditions**:
+  - Retired player appointed head coach of former club (appearances at club ≥ **50**). Modeled on Pep Guardiola, Xabi Alonso, and Cesc Fàbregas.
+- **Escalation Logic**:
+  - Board negotiation tolerance: **+2** bonus.
+  - Supporter sentiment starting floor: **70** (Delighted).
+  - Media Spotlight active for 30 world days.
+- **Dilemma**: "Coaching Former Teammates"
+  - *Option A (Assert Authority)*: Board Discipline factor +15; Teammate Morale -0.10.
+  - *Option B (Collaborative Captain-Coach)*: Teammate Morale +0.15; Faction Alignment +20%; Board Discipline -10.
+- **Resolution**:
+  - Mandate Met: +25 Manager Reputation, `LEGENDARY_RETURN_CELEBRATION` news story.
+  - Sacked: -20 Manager Reputation penalty, `TRAGIC_ICON_SACKING` news story.
+
+---
+
 ## 4. Mind Games & Pre-Match Tactical Stances
 
 Before key fixtures (Derbies, Top-4 Clash, Cup Knockouts, Human vs Human), managers can select a **Pre-Match Tactical Stance**:
