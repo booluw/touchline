@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<{
   emphasis?: boolean
 }>(), { statusTone: 'neutral' })
 const statusText: Record<SemanticTone, string> = {
-  urgent: 'text-urgent', important: 'text-important', info: 'text-info', pos: 'text-pos', neg: 'text-neg', neutral: 'text-t3',
+  urgent: 'text-urgent', important: 'text-important', interesting: 'text-info', pos: 'text-pos', neg: 'text-neg', neutral: 'text-t3',
 }
 </script>
 

@@ -2,7 +2,7 @@
 import type { ShellNavItem } from '~/types/ui/design'
 
 defineProps<{ count: number, tone?: ShellNavItem['countTone'] }>()
-const toneClass = { urgent: 'text-urgent', important: 'text-important', info: 'text-info', neutral: 'text-t3' } as const
+const toneClass = { urgent: 'text-urgent', important: 'text-important', interesting: 'text-info', neutral: 'text-t3' } as const
 </script>
 
 <template>

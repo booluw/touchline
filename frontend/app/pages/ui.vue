@@ -163,7 +163,7 @@ const money = (p: number) => {
   return p < 0 ? `−${s}` : s
 }
 const pct = (x: number) => Math.round(x * 100)
-const tierOf = { urgent: 'urgent', important: 'important', interesting: 'info' } as const
+const tierOf = { urgent: 'urgent', important: 'important', interesting: 'interesting' } as const
 
 // ─── Derived demo state ──────────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ const email = ref('not-an-email')
 const sheetOpen = ref(false)
 const toast = useToaster()
 
-const tones = ['urgent', 'important', 'info', 'pos', 'neg', 'neutral', 'muted', 'outline'] as const
+const tones = ['urgent', 'important', 'interesting', 'pos', 'neg', 'neutral', 'muted', 'outline'] as const
 </script>
 
 <template>

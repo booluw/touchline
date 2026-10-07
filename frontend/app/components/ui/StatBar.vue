@@ -4,7 +4,7 @@ import type { SemanticTone } from '~/types/ui/design'
 /** 0–100 bar (fitness, fatigue, happiness). Tone is the caller's call: what's good depends on the stat. */
 const props = withDefaults(defineProps<{ label: string, value: number, tone?: SemanticTone }>(), { tone: 'neutral' })
 const fill: Record<SemanticTone, string> = {
-  urgent: 'bg-urgent', important: 'bg-important', intresting: 'bg-info', pos: 'bg-pos', neg: 'bg-neg', neutral: 'bg-t2',
+  urgent: 'bg-urgent', important: 'bg-important', interesting: 'bg-info', pos: 'bg-pos', neg: 'bg-neg', neutral: 'bg-t2',
 }
 const clamped = computed(() => Math.min(100, Math.max(0, props.value)))
 </script>

@@ -42,7 +42,7 @@ const tab = 'flex flex-col items-center justify-center gap-1 text-label hover:no
       >
         <component :is="item.icon" :size="18" class="text-t2" aria-hidden="true" />
         {{ item.label }}
-        <span v-if="item.count" class="num text-[10px]" :class="{ urgent: 'text-urgent', important: 'text-important', info: 'text-info', neutral: 'text-t3' }[item.countTone ?? 'neutral']">{{ item.count }} new</span>
+        <span v-if="item.count" class="num text-[10px]" :class="{ urgent: 'text-urgent', important: 'text-important', interesting: 'text-info', neutral: 'text-t3' }[item.countTone ?? 'neutral']">{{ item.count }} new</span>
       </NuxtLink>
     </div>
   </UiBottomSheet>

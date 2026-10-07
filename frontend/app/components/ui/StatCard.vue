@@ -16,10 +16,10 @@ const props = defineProps<{
 }>()
 
 const toneText: Record<SemanticTone, string> = {
-  urgent: 'text-urgent', important: 'text-important', info: 'text-info', pos: 'text-pos', neg: 'text-neg', neutral: 'text-t3',
+  urgent: 'text-urgent', important: 'text-important', interesting: 'text-info', pos: 'text-pos', neg: 'text-neg', neutral: 'text-t3',
 }
 const toneBg: Record<SemanticTone, string> = {
-  urgent: 'bg-urgent', important: 'bg-important', info: 'bg-info', pos: 'bg-pos', neg: 'bg-neg', neutral: 'bg-t2',
+  urgent: 'bg-urgent', important: 'bg-important', interesting: 'bg-info', pos: 'bg-pos', neg: 'bg-neg', neutral: 'bg-t2',
 }
 const resolvedDeltaTone = computed<SemanticTone>(() =>
   props.deltaTone ?? (props.delta === undefined || props.delta === 0 ? 'neutral' : props.delta > 0 ? 'pos' : 'neg'))
