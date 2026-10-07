@@ -93,7 +93,7 @@ export function formatFixtureDateTimeCompact(iso: string): string {
  * formatFixtureDateTimeSmart(<tomorrow's kickoff>) -> "Tomorrow · 7:00 PM"
  * formatFixtureDateTimeSmart(<next week's kickoff>) -> "Sat, Jun 14 · 7:00 PM"
  */
-export function formatFixtureDateTimeSmart(iso: string): string {
+export function formatFixtureDateTimeSmart(iso: string, withTime = true): string {
   const date = new Date(iso);
   const now = new Date();
 
@@ -105,7 +105,15 @@ export function formatFixtureDateTimeSmart(iso: string): string {
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
 
-  if (isSameDay(date, now)) return `Today · ${timeFormatter.format(date)}`;
-  if (isSameDay(date, tomorrow)) return `Tomorrow · ${timeFormatter.format(date)}`;
-  return formatFixtureDateTime(iso);
+  const time = withTime ? ` · ${timeFormatter.format(date)}` : "";
+  if (isSameDay(date, now)) return `Today${time}`;
+  if (isSameDay(date, tomorrow)) return `Tomorrow${time}`;
+  return withTime ? formatFixtureDateTime(iso) : dateFormatter.format(date);
+}
+
+export function ordinal(n: number): string {
+  const suffixes = ['th', 'st', 'nd', 'rd'];
+  const mod100 = n % 100;
+  const suffix = suffixes[(mod100 - 20) % 10] ?? suffixes[mod100] ?? suffixes[0];
+  return `${n}${suffix}`;
 }

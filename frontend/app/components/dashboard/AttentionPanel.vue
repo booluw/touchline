@@ -45,13 +45,15 @@ onMounted(load)
 </script>
 
 <template>
-  <section class="space-y-10">
+  <section class="space-y-5 md:space-y-10">
     <template v-if="status === 'loading'">
       <div class="space-y-10">
-        <div class="flex flex-col gap-2">
+        <div class="hidden md:flex flex-col gap-2">
           <UiLoader class="w-72 h-5" />
           <UiLoader class="w-42 h-3" />
         </div>
+
+        <slot />
 
         <div class="space-y-5">
           <div v-for="i in 3" :key="i" class="flex flex-col gap-2">
@@ -79,7 +81,7 @@ onMounted(load)
           {{ data?.counts.interesting }} intresting since your last visit.
         </p>
       </div>
-
+      <slot />
       <div v-if="data" class="flex flex-col gap-5">
         <div v-for="(tier, key) in tiers" :key class="flex flex-col gap-2">
           <UiTierHeader :tier :count="data.counts[tier as 'urgent']" />

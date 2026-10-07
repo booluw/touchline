@@ -5,7 +5,7 @@ import type { DisplayDensity } from '~/types/ui/design'
 // Opt in per page with definePageMeta({ layout: 'game' }).
 // ponytail: season/date/fixture/inbox are placeholders until a dashboard endpoint feeds the shell.
 const auth = useAuthStore()
-const clubStore = useClubStore()
+const clubstore = useClubStore()
 const store = useAppStore()
 
 const { getNextFixture } = useClubFixtures()
@@ -16,23 +16,23 @@ const density = computed({
   set (val) { store.setDensity(val) }
 })
 const club = computed(() => {
-  const { name, short } = clubStore.club!
+  const { name, short } = clubstore.club!
 
   return {
     name,
     short,
-    league: clubStore.competitions[0]?.league?.competition.name
+    league: clubstore.competitions[0]?.league?.competition.name
   }
 })
 
 const fixture = computed(() => {
-  if (!clubStore.next_fixture) return
+  if (!clubstore.next_fixture) return
 
   return {
-    context: "Next · " + clubStore.next_fixture.home_or_away,
-    opponent: clubStore.next_fixture!.opponent.club.name,
-    opponentShort: clubStore.next_fixture!.opponent.club.short,
-    countdown: formatFixtureDateTimeSmart(clubStore.next_fixture.fixture.scheduled_at)
+    context: "Next · " + clubstore.next_fixture.home_or_away,
+    opponent: clubstore.next_fixture!.opponent.club.name,
+    opponentShort: clubstore.next_fixture!.opponent.club.short,
+    countdown: formatFixtureDateTimeSmart(clubstore.next_fixture.fixture.scheduled_at)
   }
 })
 
@@ -52,7 +52,7 @@ onMounted(async () => {
     :fixture
     :loading
     :items="GAME_NAV"
-    :season="`Season: 2026 · Matchday ${clubStore.next_fixture?.fixture.matchday ?? ''}`"
+    :season="`Season: 2026 · Matchday ${clubstore.next_fixture?.fixture.matchday ?? ''}`"
     :date="formatFixtureDateTime(Date())"
   >
     <slot />

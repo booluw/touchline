@@ -7,9 +7,13 @@ const summary = ref<ManagerDashboardSummary[]>()
 <template>
   <section class="grid gap-10 md:grid-cols-3">
     <div class="md:col-span-2">
-      <DashboardAttentionPanel @summary="(e) => summary = e" />
+      <DashboardAttentionPanel @summary="(e) => summary = e">
+        <DashboardCardCluster class="md:hidden" :summary />
+      </DashboardAttentionPanel>
     </div>
-    <div class="hidden md:block">
+    <div class="hidden md:flex flex-col gap-5">
+      <DashboardNextFixture />
+      <DashboardCardCluster :summary />
       <DashboardFinancialCard />
     </div>
   </section>
