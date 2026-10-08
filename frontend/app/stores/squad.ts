@@ -26,31 +26,28 @@ export const useSquadStore = defineStore('squad', {
 
   actions: {
     async fetchSquad(clubId: string) {
-      const { authedFetch } = useAuth()
+      const { public: { apiBase } } = useRuntimeConfig()
+      const { $api } = useNuxtApp()
       // Club detail is the current server-owned squad read model. Keeping this
       // through authedFetch preserves the httpOnly-cookie session contract.
-      const response = await authedFetch(`/api/clubs/${clubId}`)
-      if (!response.ok) throw new Error('Could not load squad.')
-      const detail = await response.json() as { squad?: Record<string, unknown>[] }
+      const detail = await $api.get(`${apiBase}/api/clubs/${clubId}`)
       this.players = detail.squad ?? []
     },
 
     async fetchLineup(clubId: string) {
-      const { authedFetch } = useAuth()
-      const response = await authedFetch(`/api/clubs/${clubId}/lineup`)
-      if (!response.ok) throw new Error('Could not load lineup.')
-      this.lineup = await response.json() as LineupView
+      const { public: { apiBase } } = useRuntimeConfig()
+      const { $api } = useNuxtApp()
+
+      this.lineup = await $api.get(`${apiBase}/api/clubs/${clubId}/lineup`)
     },
 
     async saveLineup(clubId: string, slots: { slot: number; player_id: string }[]) {
-      const { authedFetch } = useAuth()
+      const { public: { apiBase } } = useRuntimeConfig()
+      const { $api } = useNuxtApp()
+      
       this.saving = true
       try {
-        const response = await authedFetch(`/api/clubs/${clubId}/lineup`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ slots }),
-        })
+        const response = await $api.put(`${apiBase}/api/clubs/${clubId}/lineup`, { slots })
         if (!response.ok) {
           const body = await response.json().catch(() => null)
           throw new Error(body?.error ?? 'Could not save lineup.')

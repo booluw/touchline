@@ -153,47 +153,6 @@ export interface Cup {
 
 // Shape guessed: the code reads fixtures[i].Competition.ID and .Matchday,
 // so it's likely nested rather than the flat OpenAPI CompetitionFixture.
-export interface CompetitionFixture {
-  id: string;
-  world_id: string;
-  competition: { id: string; name?: string };
-  home_club_id: string;
-  home_club_name: string;
-  away_club_id: string;
-  away_club_name: string;
-  matchday: number;
-  scheduled_at: string;
-  status: 'scheduled' | 'running' | 'finished';
-  home_score?: number | null;
-  away_score?: number | null;
-}
-
-export interface ClubLeagueView {
-  competition: League;
-  season?: SeasonRef | null;   // absent/null until a season exists
-  started: boolean;
-  standings?: Standings | null; // null when no season
-  next_fixture?: CompetitionFixture | null;
-}
-
-export interface ClubCupView {
-  competition: Cup;
-  season?: SeasonRef | null;
-  started: boolean;
-  stage: CupStage;
-  total_rounds: number;
-  current_round: number;
-  champion?: unknown | null;   // type comes from cupClubState, not visible here
-  next_fixture?: CompetitionFixture | null;
-}
-
-export interface ManagerCompetition {
-  role: string;
-  joined_at: string;           // ISO timestamp
-  competition_type: CompetitionType;
-  league?: ClubLeagueView | null; // set only when competition_type === 'league'
-  cup?: ClubCupView | null;       // set only when competition_type === 'domestic_cup'
-}
 
 export interface Fixture {
   id: string
@@ -311,11 +270,3 @@ type PlayerPosition =
   | "RW"
   | "ST"
   | "CF";
-
-export type SlotPlayer = { id?: string, player_id?: string, display_name?: string, squad_number?: number }
-export type Slot = { slot: number, position?: string, player: SlotPlayer }
-export type SquadPlayer = {
-  position?: string, squad_number?: number, first_name?: string, last_name?: string, overall?: number,
-  attributes: Record<'goalkeeping' | 'physical' | 'mental' | 'tactical' | 'technical', number>,
-  player: { id: string, name: string }
-}

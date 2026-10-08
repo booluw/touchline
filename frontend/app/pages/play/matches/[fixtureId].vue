@@ -18,12 +18,10 @@ const tacticalError = ref('')
 
 async function changeStyle() {
   if (!match.value) return
-  const { authedFetch } = useAuth()
-  const r = await authedFetch(`/api/matches/${match.value.id}/tactical`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ minute: match.value.minute + 1, style: liveStyle.value }),
-  })
-  tacticalError.value = r.ok ? '' : ((await r.json().catch(() => ({}))).error ?? 'Could not change style.')
+  const { public: { apiBase } } = useRuntimeConfig()
+  const { $api } = useNuxtApp()
+
+  tacticalError.value = await $api.post(`${apiBase}/api/matches/${match.value.id}/tactical`, { minute: match.value.minute + 1, style: liveStyle.value })
 }
 
 const labels: Record<EventType, string> = {

@@ -1,9 +1,9 @@
-interface LedgerCategoryTotal {
+export interface ManagerLedgerCategoryTotal {
   amount: number
   label: string
 }
 
-interface BudgetLine {
+export interface ManagerBudgetLine {
   allocated: number
   available: number
   committed: number
@@ -19,19 +19,19 @@ export interface ManangerFinanceSummary {
   operating_profit: number
   projected_revenue: number
   projected_year_end_balance: number
-  factors: LedgerCategoryTotal[]
+  factors: ManagerLedgerCategoryTotal[]
   cash_history: { balance: number, month: string }[]
   health: {
     stage: "warning" | "restriction" | "emergency" | "administration_risk" | "ownership_intervention" | "bankruptcy"
     started_at: string
   }
   season_breakdown: {
-    expenses: LedgerCategoryTotal[]
-    revenue: LedgerCategoryTotal[]
+    expenses: ManagerLedgerCategoryTotal[]
+    revenue: ManagerLedgerCategoryTotal[]
     season: number
   }
-  transfer_budget: BudgetLine
-  wage_budget: BudgetLine
+  transfer_budget: ManagerBudgetLine
+  wage_budget: ManagerBudgetLine
   wage_commitments: {
     annual_wage: number
     count: number

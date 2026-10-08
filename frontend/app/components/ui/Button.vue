@@ -29,7 +29,7 @@ const sizeClass: Record<ButtonSize, string> = {
     :disabled="props.disabled || props.loading"
     :aria-busy="props.loading || undefined"
     :class="cn(
-      'cursor-pointer font-geist inline-grid grid-cols-3 items-center justify-center gap-1.5 font-medium transition-colors duration-150 ease-out',
+      'cursor-pointer font-geist inline-flex items-center justify-center gap-1.5 font-medium transition-colors duration-150 ease-out',
       'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-t2 disabled:opacity-40 disabled:pointer-events-none',
       variantClass[props.variant], sizeClass[props.size], props.block && 'w-full',
     )"

@@ -2,7 +2,15 @@
 import { useTrainingStore } from '~/stores/training'
 const store = useTrainingStore(); const clubId = ref(''); const selected = ref('technical'); const error = ref('')
 const plans = [['technical', 'Technical', 'Passing, first touch and composure.'], ['physical', 'Physical', 'Stamina, strength and work rate.'], ['defensive', 'Defensive', 'Positioning, tackling and marking.'], ['attacking', 'Attacking', 'Finishing, movement and pace.'], ['recovery', 'Recovery', 'Reduce fatigue and injury risk.']]
-async function init() { const { authedFetch } = useAuth(); const r = await authedFetch('/api/clubs'); const clubs = await r.json(); clubId.value = clubs[0]?.id ?? ''; if (clubId.value) { await store.load(clubId.value); selected.value = store.value?.archetype ?? selected.value } }
+async function init() {
+  const { public: { apiBase } } = useRuntimeConfig()
+  const { $api } = useNuxtApp()
+
+
+  const clubs = await $api.get(`${apiBase}/api/clubs`);
+  clubId.value = clubs[0]?.id ?? '';
+  if (clubId.value) { await store.load(clubId.value); selected.value = store.value?.archetype ?? selected.value }
+}
 async function save() { try { await store.save(clubId.value, selected.value); error.value = '' } catch (e) { error.value = e instanceof Error ? e.message : 'Could not save plan.' } }
 onMounted(() => init().catch(() => error.value = 'Could not load your club.'))
 </script>
@@ -17,7 +25,7 @@ onMounted(() => init().catch(() => error.value = 'Could not load your club.'))
           :class="selected === p[0] ? 'border-emerald-400 bg-emerald-950' : 'border-slate-700 bg-slate-800'"><strong>{{
             p[1] }}</strong><span class="block text-sm text-slate-400">{{ p[2] }}</span></button></div><button
         @click="save" :disabled="store.saving" class="rounded bg-emerald-600 px-4 py-2 font-medium text-white">{{
-          store.saving ? 'Saving…' : 'Set training plan'}}</button>
+          store.saving ? 'Saving…' : 'Set training plan' }}</button>
     </div>
   </main>
 </template>

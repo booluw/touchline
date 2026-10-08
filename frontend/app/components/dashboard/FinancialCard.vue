@@ -5,7 +5,7 @@ import type { LoadingStatus } from '~/types';
 const { getFinancialSummary } = useManagerFinance()
 const finstore = useFinanceStore()
 
-const status = ref<LoadingStatus>("loaded")
+const status = ref<LoadingStatus>("loading")
 const summary = computed(() => finstore.summary) 
 
 onMounted(async () => {
@@ -26,7 +26,6 @@ onMounted(async () => {
       <UiLoader class="w-20 h-3" v-if="status === 'loading'" />
       <div v-else class="flex items-center gap-3">
         <span>{{ formatMoneyCompact(summary!.cash) }}</span>
-        <!-- <span class="text-urgent text-label">hello</span> -->
       </div>
     </div>
 

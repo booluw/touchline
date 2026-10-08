@@ -13,7 +13,9 @@ definePageMeta({
 const route = useRoute()
 const store = useAdminStore()
 const { notify } = useToast()
-const { authedFetch } = useAuth()
+
+const { public: { apiBase } } = useRuntimeConfig()
+const { $api } = useNuxtApp()
 
 const worldId = computed(() => route.params.id as string)
 const countryId = computed(() => route.params.countryId as string)
@@ -83,22 +85,14 @@ async function submitRename() {
   renameBusy.value = true
   renameError.value = ''
   try {
-    const res = await authedFetch(
-      `/api/admin/worlds/${worldId.value}/countries/${countryId.value}/clubs/${club.id}`,
+    const res = await $api.patch(`${apiBase}/api/admin/worlds/${worldId.value}/countries/${countryId.value}/clubs/${club.id}`,
       {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
           name: renameForm.name,
           short_name: renameForm.short_name,
           news: { headline: renameForm.headline, body: renameForm.body }
-        })
       }
     )
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err?.error ?? 'Rename failed')
-    }
+    
     notify({ title: 'Club renamed', description: 'New name published with the news story.', type: 'success' })
     renameTarget.value = null
     await Promise.all([loadCountryClubs(), loadNews()])
@@ -167,7 +161,7 @@ async function loadCountryMarkets() {
 async function loadNews() {
   try {
     status.news = 'loading'
-    const res = await authedFetch(`/api/admin/worlds/${worldId.value}/news`)
+    const res = await $api.get(`${apiBase}/api/admin/worlds/${worldId.value}/news`)
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       throw new Error(err?.error ?? 'Failed to load news')

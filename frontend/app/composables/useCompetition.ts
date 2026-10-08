@@ -170,12 +170,13 @@ export interface RescheduleResult {
 }
 
 export function useCompetition() {
-  const { authedFetch } = useAuth()
+  const { public: { apiBase } } = useRuntimeConfig()
+  const { $api } = useNuxtApp()
 
   // ---------- Admin (world-scoped via body) ----------
 
   async function createCountry(worldId: string, code: string, name: string): Promise<Country> {
-    const res = await authedFetch('/api/admin/countries', {
+    const res = await $api.get(`${apiBase}/api/admin/countries`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ world_id: worldId, code, name }),
@@ -185,9 +186,7 @@ export function useCompetition() {
   }
 
   async function listCountries(worldId: string): Promise<Country[]> {
-    const res = await authedFetch(`/api/admin/countries?world_id=${worldId}`)
-    if (!res.ok) return []
-    const body = await res.json()
+    const body = await $api.get(`${apiBase}/api/admin/countries?world_id=${worldId}`)
     return body.countries ?? []
   }
 
@@ -199,19 +198,11 @@ export function useCompetition() {
     promotions: number
     relegations: number
   }): Promise<League> {
-    const res = await authedFetch('/api/admin/leagues', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
-    return res.json()
+    return await $api.post(`${apiBase}/api/admin/leagues`, params)
   }
 
   async function listLeagues(worldId: string): Promise<League[]> {
-    const res = await authedFetch(`/api/admin/leagues?world_id=${worldId}`)
-    if (!res.ok) return []
-    const body = await res.json()
+    const body = await $api.get(`${apiBase}/api/admin/leagues?world_id=${worldId}`)
     return body.leagues ?? []
   }
 
@@ -219,28 +210,17 @@ export function useCompetition() {
     promotes_to?: string | null
     relegates_to?: string | null
   }): Promise<void> {
-    const res = await authedFetch(`/api/admin/leagues/${leagueId}/adjacency`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    await $api.patch(`${apiBase}/api/admin/leagues/${leagueId}/adjacency`, body)
   }
 
   async function seedCompetition(worldId: string, countryId: string, starterLeagueId: string): Promise<SeedResult> {
-    const res = await authedFetch(`/api/admin/worlds/${worldId}/seed-competition`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ country_id: countryId, starter_league_id: starterLeagueId }),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
-    return res.json()
+    return await $api.post(`${apiBase}/api/admin/worlds/${worldId}/seed-competition`,{ country_id: countryId, starter_league_id: starterLeagueId })
   }
 
   // ---------- Manager reads ----------
 
   async function listMyCompetitions(): Promise<League[]> {
-    const res = await authedFetch('/api/competitions')
+    const res = await $api.get(`${apiBase}/api/competitions`)
     if (!res.ok) return []
     const body = await res.json()
     return body.competitions ?? []
@@ -250,29 +230,22 @@ export function useCompetition() {
     const url = matchday
       ? `/api/competitions/${leagueId}/fixtures?matchday=${matchday}`
       : `/api/competitions/${leagueId}/fixtures`
-    const res = await authedFetch(url)
-    if (!res.ok) return []
-    const body = await res.json()
+    const body = await $api.get(`${apiBase}${url}`)
     return body.fixtures ?? []
   }
 
   async function getSeasonCalendar(leagueId: string): Promise<SeasonCalendar | null> {
-    const res = await authedFetch(`/api/competitions/${leagueId}/calendar`)
-    if (!res.ok) return null
-    return res.json()
+    return await $api.get(`${apiBase}/api/competitions/${leagueId}/calendar`)
   }
 
   async function getClubFixtures(clubId: string): Promise<Fixture[]> {
-    const res = await authedFetch(`/api/clubs/${clubId}/fixtures`)
-    if (!res.ok) return []
-    const body = await res.json()
+    const body = await $api.get(`${apiBase}/api/clubs/${clubId}/fixtures`)
+    
     return body.fixtures ?? []
   }
 
   async function getStandings(leagueId: string): Promise<Standings | null> {
-    const res = await authedFetch(`/api/competitions/${leagueId}/standings`)
-    if (!res.ok) return null
-    return res.json()
+    return await $api.get(`${apiBase}/api/competitions/${leagueId}/standings`)
   }
 
   // ---------- Caps (IM04) ----------
@@ -285,94 +258,51 @@ export function useCompetition() {
     survivor_threshold: number
     prize_pool?: number
   }): Promise<Cup> {
-    const res = await authedFetch('/api/admin/cups', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
-    return res.json()
+   return await $api.post(`${apiBase}/api/admin/cups`, params)
   }
 
   async function startCupCampaign(worldId: string, countryId: string, cupId: string): Promise<{ id: string }> {
-    const res = await authedFetch(
-      `/api/admin/worlds/${worldId}/countries/${countryId}/cups/${cupId}/campaign`,
-      { method: 'POST' },
-    )
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
-    return res.json()
+    return await $api.post(`${apiBase}/api/admin/worlds/${worldId}/countries/${countryId}/cups/${cupId}/campaign`)
   }
 
   async function listMyCups(): Promise<Cup[]> {
-    const res = await authedFetch('/api/cups')
-    if (!res.ok) return []
-    const body = await res.json()
+    const body = await $api.get(`${apiBase}/api/cups`)
     return body.cups ?? []
   }
 
   async function getCup(cupId: string): Promise<CupCampaign | null> {
-    const res = await authedFetch(`/api/cups/${cupId}`)
-    if (!res.ok) return null
-    return res.json()
+    return await $api.get(`${apiBase}/api/cups/${cupId}`)
   }
 
   // ---------- IM05 scheduling (admin: allowed weekdays + re-pacing) ----------
 
   async function updateLeagueScheduling(leagueId: string, allowedWeekdays: number[]): Promise<RescheduleResult> {
-    const res = await authedFetch(`/api/admin/leagues/${leagueId}/scheduling`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowed_weekdays: allowedWeekdays }),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
-    return res.json()
+    return await $api.patch(`${apiBase}/api/admin/leagues/${leagueId}/scheduling`, { allowed_weekdays: allowedWeekdays })
   }
 
   async function updateCupScheduling(cupId: string, allowedWeekdays: number[]): Promise<RescheduleResult> {
-    const res = await authedFetch(`/api/admin/cups/${cupId}/scheduling`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowed_weekdays: allowedWeekdays }),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
-    return res.json()
+    return await $api.patch(`${apiBase}/api/admin/cups/${cupId}/scheduling`, { allowed_weekdays: allowedWeekdays })
   }
 
   async function updateCountryScheduling(worldId: string, countryId: string, allowedWeekdays: number[]): Promise<RescheduleResult> {
-    const res = await authedFetch(`/api/admin/worlds/${worldId}/countries/${countryId}/scheduling`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowed_weekdays: allowedWeekdays }),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
-    return res.json()
+    return await $api.patch(`${apiBase}/api/admin/worlds/${worldId}/countries/${countryId}/scheduling`, { allowed_weekdays: allowedWeekdays })
   }
 
   // ---------- Club-name pools (admin: country-scoped, '' = global) ----------
 
   async function listClubNameParts(countryCode = ''): Promise<ClubNamePools> {
     const qs = countryCode ? `?country_code=${encodeURIComponent(countryCode)}` : ''
-    const res = await authedFetch(`/api/admin/club-name-parts${qs}`)
-    if (!res.ok) return { stems: [], suffixes: [] }
-    const body = await res.json()
+    const body = await $api.get(`${apiBase}/api/admin/club-name-parts${qs}`)
     return { stems: body.stems ?? [], suffixes: body.suffixes ?? [] }
   }
 
   async function addClubNamePart(kind: 'stem' | 'suffix', value: string, countryCode = ''): Promise<void> {
-    const res = await authedFetch('/api/admin/club-name-parts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind, value, country_code: countryCode }),
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    return await $api.post(`${apiBase}/api/admin/club-name-parts`,{ kind, value, country_code: countryCode })
   }
 
   async function removeClubNamePart(kind: 'stem' | 'suffix', value: string, countryCode = ''): Promise<void> {
     const qs = countryCode ? `?country_code=${encodeURIComponent(countryCode)}` : ''
-    const res = await authedFetch(`/api/admin/club-name-parts/${kind}/${encodeURIComponent(value)}${qs}`, {
-      method: 'DELETE',
-    })
-    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? 'Failed')
+    return await $api.delete(`${apiBase}api/admin/club-name-parts/${kind}/${encodeURIComponent(value)}${qs}`)
   }
 
   return {
