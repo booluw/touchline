@@ -20,7 +20,7 @@ const next_fixture = computed(() => ({
 
 <template>
   <UiCard class="flex flex-col gap-5">
-    <template v-if="next_fixture">
+    <template v-if="next_fixture && clubstore.next_fixture">
       <div class="flex items-center justify-between">
         <span class="text-label label-caps">next match · league</span>
         <span class="text-important font-semibold">{{
