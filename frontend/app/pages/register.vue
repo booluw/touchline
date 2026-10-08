@@ -1,11 +1,9 @@
 <script lang="ts" setup>
 import z from 'zod';
 
-
-const router = useRouter()
 const { register } = useAuth()
 
-const schema = z.object({ email: z.email(), password: z.string().min(5, "Should be atleast 5 chars"), display_name: z.string().min(5, "Should be 5 char. or more") })
+const schema = z.object({ email: z.email(), password: z.string().min(5, "Should be at least 5 character"), display_name: z.string().min(5, "Should be 5 characters or more") })
 const state = ref({ email: "", password: "", display_name: "" })
 const loading = ref(false)
 

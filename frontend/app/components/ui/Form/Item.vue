@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { Field } from '@ark-ui/vue';
 
-const props = defineProps<{ label: string, prop: string, as: 'input' | 'textarea' }>()
+defineProps<{ label: string, prop: string, as: 'input' | 'textarea' }>()
 const error = inject("f_errors") as Record<string, string>
 </script>
 

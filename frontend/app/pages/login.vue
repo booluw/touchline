@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import z from "zod"
 
-const router = useRouter()
 const { login } = useAuth()
 
 const schema = z.object({ email: z.email(), password: z.string().min(5, "Should be greater than 5 characters") })
