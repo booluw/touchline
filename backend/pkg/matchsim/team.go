@@ -166,6 +166,12 @@ type MatchResult struct {
 	HomePossession float64      `json:"home_possession_pct"`
 	Events         []MatchEvent `json:"events"`
 
+	// HomeXG/AwayXG are expected goals: the summed goal probability of every
+	// chance and penalty each side had, rounded to 2 dp (IM58). Computed from
+	// values the draws already use, so they never perturb the RNG sequence.
+	HomeXG float64 `json:"home_xg"`
+	AwayXG float64 `json:"away_xg"`
+
 	// HomePlayerRatings/AwayPlayerRatings are the per-player match ratings the
 	// v1.6 attribution pass derives when the sides carry Lineups. Empty for
 	// legacy callers. Goals/Assists/etc. are the attribution tallies; Minutes

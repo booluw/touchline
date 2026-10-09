@@ -279,6 +279,24 @@ Seasons/standings responses embed `season_id`, `season_label` and
 `SEASON_COMPLETED` / `CLUB_PROMOTED` / `CLUB_RELEGATED` land in `world.events`
 with the replay seed on the creation event.
 
+Competitions-screen reads (IM55–IM60, OPD-63):
+
+```bash
+# Table rows carry position + last-5 league form (newest first)
+curl -b /tmp/jar localhost:8080/api/competitions/$LEAGUE_ID/standings
+# 3 above / 3 below my club (7 rows kept at the table edges)
+curl -b /tmp/jar localhost:8080/api/managers/me/competitions/$LEAGUE_ID/standings
+# Stakes (title / promotion / relegation / every cup the league feeds),
+# clinch status, next-match swing, projected finish + factors
+curl -b /tmp/jar localhost:8080/api/managers/me/competitions/$LEAGUE_ID/outlook
+# Next 5 fixtures, all competitions, each with a 1-5 difficulty
+curl -b /tmp/jar "localhost:8080/api/clubs/$CLUB_ID/fixtures?upcoming=true&limit=5"
+```
+
+"Clinched" is only reported when certain: a rival that can still reach our
+points counts against us until the last league game is played. See the
+Touchline Book §6.8–6.9.
+
 ## 6. Common questions
 
 **Is there an admin "start season" endpoint?** Yes — `POST

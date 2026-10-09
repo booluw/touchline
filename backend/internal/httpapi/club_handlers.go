@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -71,6 +72,29 @@ func (s *server) handleListClubFixtures(c *gin.Context) {
 	worldID, err := s.callerWorld(c)
 	if err != nil {
 		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
+		return
+	}
+	if c.Query("upcoming") == "true" {
+		limit := 30
+		if q := c.Query("limit"); q != "" {
+			n, err := strconv.Atoi(q)
+			if err != nil || n < 1 || n > 30 {
+				respondError(c, http.StatusBadRequest, "invalid_limit", "limit must be between 1 and 30")
+				return
+			}
+			limit = n
+		}
+		upcoming, err := s.compSvc.UpcomingClubFixtures(c.Request.Context(), worldID, id, limit)
+		switch {
+		case errors.Is(err, internalcompetition.ErrClubNotFound),
+			errors.Is(err, internalcompetition.ErrClubWorldMismatch):
+			respondErr(c, http.StatusNotFound, err)
+			return
+		case err != nil:
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"fixtures": upcoming})
 		return
 	}
 	fixtures, err := s.compSvc.ListClubFixtures(c.Request.Context(), worldID, id, 30)

@@ -419,6 +419,9 @@ func (s *Service) leagueDetail(ctx context.Context, base *detailBase, seasons []
 	if err != nil {
 		return nil, err
 	}
+	if err := s.attachForm(ctx, base.ID, base.WorldID, cur.start, standings); err != nil {
+		return nil, err
+	}
 	countryIDs := make([]uuid.UUID, 0, len(standings))
 	for _, r := range standings {
 		countryIDs = append(countryIDs, r.Club.ID)
@@ -478,6 +481,8 @@ func (s *Service) leagueStandings(ctx context.Context, seasonID uuid.UUID) ([]St
 			&r.Lost, &r.GoalsFor, &r.GoalsAgainst, &r.Points); err != nil {
 			return nil, fmt.Errorf("scan standing: %w", err)
 		}
+		r.Position = len(out) + 1
+		r.Form = []string{}
 		out = append(out, r)
 	}
 	return out, rows.Err()

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useManagerCompetition } from '~/composables/manager/competitions'
 import { useClubFixtures } from '~/composables/manager/fixtures'
 
 // Opt in per page with definePageMeta({ layout: 'game' }).
@@ -7,6 +8,7 @@ const clubstore = useClubStore()
 const store = useAppStore()
 
 const { getNextFixture } = useClubFixtures()
+const { getCompetitions } = useManagerCompetition()
 
 const loading = ref(false)
 const density = computed({
@@ -39,6 +41,10 @@ onMounted(async () => {
     loading.value = true
     await getNextFixture()
     loading.value = false
+  }
+
+  if (!club.value.league) {
+    await getCompetitions()
   }
 })
 </script>

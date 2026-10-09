@@ -126,10 +126,11 @@ func (s *Service) GetMatch(ctx context.Context, id uuid.UUID) (*Match, error) {
 	m := &Match{}
 	err = conn.QueryRow(ctx, `
 		SELECT id, fixture_id, world_id, seed, engine_version,
-		       COALESCE(home_score, 0), COALESCE(away_score, 0), status, ended_at
+		       COALESCE(home_score, 0), COALESCE(away_score, 0),
+		       home_xg::float8, away_xg::float8, status, ended_at
 		FROM match.matches WHERE id = $1`, id).
 		Scan(&m.ID, &m.FixtureID, &m.WorldID, &m.Seed, &m.EngineVersion,
-			&m.HomeGoals, &m.AwayGoals, &m.Status, &m.EndedAt)
+			&m.HomeGoals, &m.AwayGoals, &m.HomeXG, &m.AwayXG, &m.Status, &m.EndedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +186,9 @@ type SideStats struct {
 	Substitutions    int `json:"substitutions"`
 	PenaltiesAwarded int `json:"penalties_awarded"`
 	Injuries         int `json:"injuries"`
+	// XG is expected goals, stamped when the match completes (IM58); null
+	// while live and for matches played before xG was recorded.
+	XG *float64 `json:"xg"`
 }
 
 // MatchStats is the per-side tally of a match (IM45).
@@ -214,7 +218,8 @@ func (s *Service) Stats(ctx context.Context, matchID uuid.UUID) (*MatchStats, er
 			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'penalty_awarded'),
 			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'penalty_awarded'),
 			count(me.id) FILTER (WHERE me.club_id = f.home_club_id AND me.event_type = 'injury'),
-			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'injury')
+			count(me.id) FILTER (WHERE me.club_id = f.away_club_id AND me.event_type = 'injury'),
+			m.home_xg::float8, m.away_xg::float8
 		FROM match.matches m
 		JOIN match.fixtures f ON f.id = m.fixture_id
 		LEFT JOIN match.match_events me ON me.match_id = m.id
@@ -225,7 +230,8 @@ func (s *Service) Stats(ctx context.Context, matchID uuid.UUID) (*MatchStats, er
 		&st.Home.RedCards, &st.Away.RedCards,
 		&st.Home.Substitutions, &st.Away.Substitutions,
 		&st.Home.PenaltiesAwarded, &st.Away.PenaltiesAwarded,
-		&st.Home.Injuries, &st.Away.Injuries)
+		&st.Home.Injuries, &st.Away.Injuries,
+		&st.Home.XG, &st.Away.XG)
 	if err != nil {
 		return nil, err
 	}

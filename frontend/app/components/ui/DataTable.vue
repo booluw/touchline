@@ -54,7 +54,7 @@ const cellValue = (row: Row, key: K) => (row as Record<string, unknown>)[key] as
       <tbody>
         <tr
           v-for="row in rows" :key="rowKey(row)"
-          :class="['grid cursor-pointer items-center gap-2 px-3 py-[9px] hover:bg-s2 [&+&]:border-t [&+&]:border-line', rowKey(row) === selectedKey && 'bg-s2']"
+          :class="['grid cursor-pointer items-center gap-2 px-3 py-2.25 hover:bg-s2 [&+&]:border-t [&+&]:border-line', rowKey(row) === selectedKey && 'bg-s2']"
           :style="{ gridTemplateColumns: template }"
           :aria-selected="rowKey(row) === selectedKey"
           @click="emit('rowClick', row)"

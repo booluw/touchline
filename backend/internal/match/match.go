@@ -50,15 +50,19 @@ type FixtureMatch struct {
 
 // Match mirrors match.matches. Seed is the deterministic replay input.
 type Match struct {
-	ID            uuid.UUID  `json:"id"`
-	FixtureID     uuid.UUID  `json:"fixture_id"`
-	WorldID       uuid.UUID  `json:"world_id"`
-	Seed          int64      `json:"seed"`
-	EngineVersion string     `json:"engine_version"`
-	HomeGoals     int        `json:"home_goals"`
-	AwayGoals     int        `json:"away_goals"`
-	Status        string     `json:"status"`
-	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	ID            uuid.UUID `json:"id"`
+	FixtureID     uuid.UUID `json:"fixture_id"`
+	WorldID       uuid.UUID `json:"world_id"`
+	Seed          int64     `json:"seed"`
+	EngineVersion string    `json:"engine_version"`
+	HomeGoals     int       `json:"home_goals"`
+	AwayGoals     int       `json:"away_goals"`
+	// HomeXG/AwayXG are expected goals (IM58); null for matches played
+	// before the engine recorded them.
+	HomeXG  *float64   `json:"home_xg"`
+	AwayXG  *float64   `json:"away_xg"`
+	Status  string     `json:"status"`
+	EndedAt *time.Time `json:"ended_at,omitempty"`
 }
 
 // MatchEventRow mirrors match.match_events for the feed/read path. Club and

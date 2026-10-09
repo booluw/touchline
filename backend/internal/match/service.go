@@ -246,6 +246,7 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 			ID: matchID, FixtureID: fixtureID, WorldID: f.WorldID,
 			Seed: seed, EngineVersion: matchsim.EngineVersion,
 			HomeGoals: res.HomeGoals, AwayGoals: res.AwayGoals,
+			HomeXG: &res.HomeXG, AwayXG: &res.AwayXG,
 			Status: fixtureCompleted, EndedAt: &now,
 		},
 		Events: nil, // feed consumers use GetMatchEvents

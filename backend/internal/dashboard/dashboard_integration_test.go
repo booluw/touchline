@@ -5,6 +5,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,6 +201,23 @@ func TestDashboardSummaryCountsAndBoardFactors(t *testing.T) {
 		t.Fatalf("set morale: %v", err)
 	}
 
+	// An active league season with the club on the table (bootstrap creates
+	// no league).
+	if _, err := pool.Exec(ctx, `
+		WITH c AS (
+			INSERT INTO competition.competitions (world_id, name, competition_type)
+			VALUES ($1, 'Second Division North', 'league') RETURNING id
+		), s AS (
+			INSERT INTO competition.seasons (world_id, competition_id, season_label, season_number, start_date, status)
+			SELECT $1, id, '2026/27', 1, CURRENT_DATE, 'in_progress' FROM c RETURNING id
+		), e AS (
+			INSERT INTO competition.competition_entries (season_id, club_id) SELECT id, $2 FROM s
+		)
+		INSERT INTO competition.standings (season_id, club_id, played, won, points, goals_for)
+		SELECT id, $2, 1, 1, 3, 2 FROM s`, worldID, clubID); err != nil {
+		t.Fatalf("seed league: %v", err)
+	}
+
 	snap, err := svc.GetDashboard(ctx, worldID, managerID)
 	if err != nil {
 		t.Fatalf("get dashboard: %v", err)
@@ -243,5 +261,20 @@ func TestDashboardSummaryCountsAndBoardFactors(t *testing.T) {
 	}
 	if sum.Finance == nil || sum.Finance.Cash <= 0 || sum.Finance.WeeklyWageBill <= 0 || sum.Finance.SeasonWageBudget == nil {
 		t.Fatalf("finance summary = %+v", sum.Finance)
+	}
+
+	// The standings item names the league, not the season ("sit 3rd in the
+	// Premier Division", never "in the 2026/27").
+	if sum.League == nil || sum.League.CompetitionName != "Second Division North" {
+		t.Fatalf("league summary = %+v, want a competition name", sum.League)
+	}
+	var standings *Item
+	for i := range snap.Interesting {
+		if snap.Interesting[i].Category == CatStandings {
+			standings = &snap.Interesting[i]
+		}
+	}
+	if standings == nil || !strings.HasSuffix(standings.Title, "in the "+sum.League.CompetitionName) {
+		t.Fatalf("standings item = %+v, want title ending with the league name %q", standings, sum.League.CompetitionName)
 	}
 }

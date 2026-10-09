@@ -176,7 +176,7 @@ func (s *Service) buildSummary(ctx context.Context, managerID uuid.UUID, clubs [
 	}
 	for _, st := range spots {
 		if cs := byClub[st.ClubID]; cs != nil {
-			cs.League = &LeagueSummary{Position: st.Position, Points: st.Points, Played: st.Played, SeasonLabel: st.SeasonLabel}
+			cs.League = &LeagueSummary{Position: st.Position, Points: st.Points, Played: st.Played, SeasonLabel: st.SeasonLabel, CompetitionName: st.CompetitionName}
 		}
 	}
 	return out
@@ -390,7 +390,7 @@ func (s *Service) buildInteresting(ctx context.Context, worldID uuid.UUID, clubs
 			ID:          "standings:" + st.ClubID.String(),
 			Priority:    PriorityInteresting,
 			Category:    CatStandings,
-			Title:       fmt.Sprintf("%s sit %s in the %s", st.ClubName, ordinal(st.Position), st.SeasonLabel),
+			Title:       fmt.Sprintf("%s sit %s in the %s", st.ClubName, ordinal(st.Position), st.CompetitionName),
 			Description: fmt.Sprintf("%d played, %d points.", st.Played, st.Points),
 			CreatedAt:   time.Now().UTC(),
 			Action: &Action{

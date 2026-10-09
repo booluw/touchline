@@ -152,6 +152,69 @@ func TestHTTPSeasonCalendarAndClubFixtures(t *testing.T) {
 		prev = scheduled
 	}
 
+	// IM59: upcoming fixtures carry a difficulty; limit is validated.
+	resp = get(t, ts, client, "/api/clubs/"+clubID+"/fixtures?upcoming=true&limit=2", plainCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upcoming fixtures = %d, want 200", resp.StatusCode)
+	}
+	upcoming := decodeMap(t, resp)["fixtures"].([]any)
+	if len(upcoming) != 2 {
+		t.Fatalf("upcoming fixtures = %d, want 2", len(upcoming))
+	}
+	for _, f := range upcoming {
+		d, ok := f.(map[string]any)["difficulty"].(map[string]any)
+		if !ok || d["level"] == nil || d["label"] == "" {
+			t.Fatalf("upcoming fixture without difficulty: %v", f)
+		}
+	}
+	if resp := get(t, ts, client, "/api/clubs/"+clubID+"/fixtures?upcoming=true&limit=0", plainCookies); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("upcoming limit=0 = %d, want 400", resp.StatusCode)
+	}
+
+	// IM60 + IM56: a manager without a club gets 404; once employed, the
+	// window and the outlook are served for their club.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE manager.managers SET current_club_id = NULL WHERE id = $1`, plainManager); err != nil {
+		t.Fatalf("unemploy: %v", err)
+	}
+	for _, path := range []string{"/standings", "/outlook"} {
+		if resp := get(t, ts, client, "/api/managers/me/competitions/"+leagueID+path, plainCookies); resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("unemployed %s = %d, want 404", path, resp.StatusCode)
+		}
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE manager.managers SET status = 'retired', current_club_id = NULL WHERE current_club_id = $1`, clubID); err != nil {
+		t.Fatalf("retire club's AI manager: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE manager.managers SET status = 'active', current_club_id = $2 WHERE id = $1`, plainManager, clubID); err != nil {
+		t.Fatalf("employ: %v", err)
+	}
+	resp = get(t, ts, client, "/api/managers/me/competitions/"+leagueID+"/standings", plainCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("standings window = %d, want 200", resp.StatusCode)
+	}
+	rows := decodeMap(t, resp)["rows"].([]any)
+	if len(rows) != 4 { // a 4-club league fits inside the 7-row window
+		t.Fatalf("standings window rows = %d, want 4", len(rows))
+	}
+	for i, r := range rows {
+		if int(r.(map[string]any)["position"].(float64)) != i+1 {
+			t.Fatalf("window row %d position = %v", i, r.(map[string]any)["position"])
+		}
+	}
+	resp = get(t, ts, client, "/api/managers/me/competitions/"+leagueID+"/outlook", plainCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("outlook = %d, want 200", resp.StatusCode)
+	}
+	outlook := decodeMap(t, resp)
+	if outlook["club"].(map[string]any)["id"] != clubID || outlook["projection"] == nil || outlook["next_match"] == nil {
+		t.Fatalf("outlook = %v", outlook)
+	}
+	if resp := get(t, ts, client, "/api/managers/me/competitions/"+uuid.New().String()+"/outlook", plainCookies); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown league outlook = %d, want 404", resp.StatusCode)
+	}
+
 	// Cross-world reads 404: another world's fake league/club are invisible.
 	otherLeague := uuid.New().String()
 	if resp := get(t, ts, client, "/api/competitions/"+otherLeague+"/calendar", plainCookies); resp.StatusCode != http.StatusNotFound {

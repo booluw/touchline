@@ -556,8 +556,9 @@ func (s *Service) settleMatch(ctx context.Context, sess *LiveSession, res matchs
 	}
 
 	if _, err := tx.Exec(ctx, `
-		UPDATE match.matches SET status = 'completed', home_score = $2, away_score = $3, ended_at = $4
-		WHERE id = $1`, sess.MatchID, res.HomeGoals, res.AwayGoals, now); err != nil {
+		UPDATE match.matches SET status = 'completed', home_score = $2, away_score = $3, ended_at = $4,
+			home_xg = $5, away_xg = $6
+		WHERE id = $1`, sess.MatchID, res.HomeGoals, res.AwayGoals, now, res.HomeXG, res.AwayXG); err != nil {
 		return nil, fmt.Errorf("finalize: complete match: %w", err)
 	}
 	if _, err := tx.Exec(ctx,

@@ -21,7 +21,7 @@ async function load() {
     emits("summary", data.value!.summary)
     status.value = "loaded"
   } catch (error) {
-    console.log(error)
+    console.error(error)
     status.value = "error"
   }
 }
@@ -36,7 +36,7 @@ function onAction(item: ManagerDashboardItem<"urgent" | "important" | "interesti
       navigateTo(``)
       return
     case "view_standings":
-      navigateTo(``)
+      navigateTo("/play/competitions")
       return
   }
 }

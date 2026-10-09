@@ -1,6 +1,6 @@
 # IM56 — League outlook: what is at stake + next-match swing
 
-**Status:** Planned
+**Status:** Implemented
 **Owner:** Claude Code
 **Sprint:** Improvements (UI redesign endpoints)
 **Source:** New UI design (claude.ai/design project 244e00dd…, `Touchline Screens.dc.html` competitions screen), product-owner review 2026-10-09. See `UI-ENDPOINTS-HANDOFF.md`.
@@ -29,6 +29,8 @@ New `GET /api/me/competitions/:id/outlook` (manager's own club in that league). 
 
 ## Recorded decisions
 
+- As built: route is `GET /api/managers/me/competitions/:id/outlook` (the manager group). Next-match swing assumes 1-0 / 0-0 / 0-1 and moves the opponent's points too. A cup id returns 404 (its table has no rows, so the club is never found).
+
 - Attachments cover **all** competitions the league qualifies for, every scope (product owner, 2026-10-09). Source is the `cup_qualification` table, so a new regional/world cup appears automatically.
 - Say "Qualified/Promoted/Relegated/Champions" when it is mathematically certain (product owner, 2026-10-09). Before that, "on course for".
 - The clinch check is deliberately conservative: it assumes every rival can win all remaining games even when two rivals still play each other. It can be late to declare, but it can never declare wrongly. An exact check (one that accounts for head-to-head fixtures) is a max-flow problem; only add it if late declarations prove noticeable.
@@ -42,3 +44,14 @@ New `GET /api/me/competitions/:id/outlook` (manager's own club in that league). 
 ## Tests
 
 Unit (table-driven): title race on/off at the exact 3×games boundary; zone gap at top/bottom edges; no applicable band → stakes falls through; league attached to a domestic + a regional + a world cup returns all three; clinch boundaries: leader 1 pt clear of a rival who can still win every game → `alive`, not champion; level on points with 0 games left but fixtures unplayed elsewhere → `alive`; strictly out of reach → `clinched`; all fixtures played → final table decides including tiebreaks; band [3, 6] is not clinched while we can still reach 2nd (best = 2), but with bands [1, 2] and [3, 6] and worst ≤ 6, `guaranteed_at_least` names the [3, 6] cup; with a gap in coverage it is null; a league with no promotion, no relegation and no attachments returns only the title race; win/draw/loss positions with ties.
+
+## Delivery evidence
+
+### Files
+
+`internal/competition/outlook.go` (pure: `finishRange`, `raceStatus`, `buildRace`, `leagueRaces`, `pickStakes`, `guaranteedAtLeast`, `swingPositions`), `outlook_load.go` (`ClubOutlook`, `attachmentRaces`), `internal/httpapi/competition_handlers.go` (`handleMyLeagueOutlook`), `router.go`, openapi (`LeagueOutlook`, `OutlookRace`, `OutlookCup`). Tests: `outlook_test.go` (clinch guards incl. one-point lead and level-on-points, season-over tiebreak, relegation clinched/safe, rules-free league, band [3,6] alive while 2nd possible, guaranteed floor and coverage gap, stakes order, swing moves the opponent), `outlook_integration_test.go`, `httpapi/calendar_integration_test.go` (404 unemployed / unknown league, 200 employed).
+
+### Verification (2026-10-09, embedded Postgres 16 on :55432)
+
+gofmt clean; `go build ./...`, `go vet ./...`, `go vet -tags integration ./internal/... ./pkg/...`, `go test ./...` pass; `TestDocsCoverRouter`/`TestDocsOpenAPIValid` pass. golangci-lint not installed locally (not run).
+Integration, serial (`-p 1`), packages competition, match, scout, httpapi, pkg/matchsim, compared with a clean HEAD worktree on the same DB: match, httpapi, matchsim pass on both; competition and scout fail on both with the same existing failures (detail/scheduling/cup fixtures, `TestNextFixtureScout`). The only extra branch failure, `TestListClubFixtures`, is flaky on HEAD too (2 of 4 HEAD runs fail): it picks the first club by name, which is sometimes in a league with no started season.

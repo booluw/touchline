@@ -548,35 +548,64 @@ paths:
         One club's fixtures ordered by kickoff time, earliest first. World-scoped
         exactly like the other club reads (IM03): fixtures only ever belong to
         the caller's own world.
+
+        With `upcoming=true` (IM59) only scheduled/postponed fixtures are
+        returned, across all competitions, and each carries a `difficulty`
+        rated for the club in the path: opponent best-available XI vs ours on
+        that matchday, venue, and the opponent's recent form. Without query
+        parameters the response is unchanged (up to 30 fixtures, past and future).
       parameters:
         - $ref: "#/components/parameters/ClubID"
+        - name: upcoming
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Only scheduled fixtures, each with a difficulty rating.
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 30, default: 30 }
+          description: Maximum fixtures returned when upcoming=true.
       responses:
         "200":
           description: The club's fixture list.
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/Fixture" }
+                type: object
+                properties:
+                  fixtures:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Fixture"
+                        - type: object
+                          properties:
+                            difficulty: { $ref: "#/components/schemas/FixtureDifficulty" }
               examples:
                 sample:
                   value:
-                    - id: 00000000-0000-4000-8000-000000000007
-                      world_id: 00000000-0000-4000-8000-000000000001
-                      competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
-                      home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
-                      away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
-                      matchday: 1
-                      scheduled_at: "2026-06-02T15:00:00Z"
-                      status: scheduled
-                    - id: 00000000-0000-4000-8000-000000000008
-                      world_id: 00000000-0000-4000-8000-000000000001
-                      competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
-                      home_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
-                      away_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
-                      matchday: 2
-                      scheduled_at: "2026-06-04T18:00:00Z"
-                      status: scheduled
+                    fixtures:
+                      - id: 00000000-0000-4000-8000-000000000007
+                        world_id: 00000000-0000-4000-8000-000000000001
+                        competition: { id: 00000000-0000-4000-8000-00000000000a, name: Premier League }
+                        home_club: { id: 00000000-0000-4000-8000-000000000005, name: Northgate Rovers, short: NGR }
+                        away_club: { id: 00000000-0000-4000-8000-000000000014, name: Highfield United, short: HFU }
+                        matchday: 1
+                        scheduled_at: "2026-06-02T15:00:00Z"
+                        status: scheduled
+                        difficulty:
+                          level: 4
+                          label: Hard
+                          factors:
+                            - { label: Strength gap, delta: 3, detail: "Their best XI 73 vs ours 70" }
+                            - { label: Venue, delta: -2, detail: Home }
+                            - { label: Opponent form, delta: 2, detail: WWWDW }
+        "400":
+          description: limit outside 1..30.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "404":
           description: Club not found, or not in the caller's world.
           content:
@@ -2150,6 +2179,67 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AbsenceSummary" }
+  /api/managers/me/competitions/{id}/standings:
+    get:
+      tags: [competition]
+      summary: League table around my club
+      operationId: myStandingsWindow
+      description: |
+        The active-season table (same shape and ordering as getStandings)
+        cut to the three positions above and below the caller's club (IM60).
+        At the table edges the window shifts so it still holds seven rows;
+        a league with seven or fewer clubs returns every row. 404 when the
+        caller has no club or the club is not in this competition's table.
+      parameters:
+        - $ref: "#/components/parameters/CompetitionID"
+      responses:
+        "200":
+          description: Seven-row (or full, if smaller) table slice.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Standings" }
+        "404":
+          description: No season, or the caller's club is not in this table.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/managers/me/competitions/{id}/outlook:
+    get:
+      tags: [competition]
+      summary: League outlook for my club
+      operationId: myLeagueOutlook
+      description: |
+        What is at stake for the caller's club in a league (IM56) and its
+        projected finish (IM57). Pure read.
+
+        `finish` is the guaranteed best/worst final position. A rival that
+        can still reach our points counts as able to finish above us (goal
+        difference can still change), so `clinched` is only ever reported
+        when mathematically certain; once every league game is played the
+        final table decides. Each race (title, promotion, relegation, and
+        every cup the league feeds via cup_qualification, any scope) carries
+        `clinched | alive | eliminated` (for relegation, eliminated = safe).
+        `stakes` picks title, then promotion, then relegation, then the
+        nearest live cup band. Leagues without promotion or relegation omit
+        those races.
+
+        `next_match` re-sorts the table after a 1-0 win, 0-0 draw or 0-1 loss
+        in our next league fixture, everyone else unchanged. `projection` is
+        a seeded 1000-run Monte Carlo of the remaining fixtures (same answer
+        all matchday) with the factors behind it.
+      parameters:
+        - $ref: "#/components/parameters/CompetitionID"
+      responses:
+        "200":
+          description: The outlook.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LeagueOutlook" }
+        "404":
+          description: No club, no active season, or the club is not in this league.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/managers/me/competitions:
     get:
       tags: [competition]
@@ -4701,6 +4791,7 @@ components:
                   points: { type: integer }
                   played: { type: integer }
                   season_label: { type: string }
+                  competition_name: { type: string, description: "The league's name; the standings item title reads \"<club> sit 3rd in the <competition_name>\"." }
     Status:
       type: object
       properties:
@@ -5575,6 +5666,7 @@ components:
         substitutions: { type: integer }
         penalties_awarded: { type: integer }
         injuries: { type: integer }
+        xg: { type: number, nullable: true, description: "Expected goals (IM58), stamped at full time. Null while live and for matches played before xG was recorded." }
     Bid:
       type: object
       properties:
@@ -6305,9 +6397,84 @@ components:
         rows:
           type: array
           items: { $ref: "#/components/schemas/StandingRow" }
+    LeagueOutlook:
+      type: object
+      properties:
+        season: { $ref: "#/components/schemas/NestedSeason" }
+        club: { $ref: "#/components/schemas/NestedClub" }
+        position: { type: integer }
+        points: { type: integer }
+        games_left: { type: integer }
+        finish:
+          type: object
+          properties:
+            best: { type: integer }
+            worst: { type: integer }
+        stakes:
+          allOf: [{ $ref: "#/components/schemas/OutlookRace" }]
+          nullable: true
+        races: { type: array, items: { $ref: "#/components/schemas/OutlookRace" } }
+        attachments: { type: array, items: { $ref: "#/components/schemas/OutlookRace" } }
+        guaranteed_at_least:
+          allOf: [{ $ref: "#/components/schemas/OutlookCup" }]
+          nullable: true
+          description: The cup our worst possible finish qualifies for, set only when every still-possible finish qualifies for some cup.
+        next_match:
+          type: object
+          nullable: true
+          properties:
+            fixture: { $ref: "#/components/schemas/Fixture" }
+            if_win: { type: integer }
+            if_draw: { type: integer }
+            if_loss: { type: integer }
+        projection:
+          type: object
+          properties:
+            position: { type: integer, description: Median projected finish. }
+            range: { type: array, items: { type: integer }, minItems: 2, maxItems: 2, description: "10th-90th percentile finish." }
+            runs: { type: integer, description: "Simulations run (0 once the season is over)." }
+            factors:
+              type: array
+              items:
+                type: object
+                properties:
+                  label: { type: string }
+                  delta: { type: integer, description: Positive helps our finish. }
+                  detail: { type: string }
+    OutlookCup:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        scope: { type: string, description: "competition_type: domestic_cup, regional, continental, international, ..." }
+    OutlookRace:
+      type: object
+      properties:
+        kind: { type: string, enum: [title, promotion, relegation, qualification] }
+        cup: { $ref: "#/components/schemas/OutlookCup" }
+        from_position: { type: integer }
+        to_position: { type: integer }
+        status: { type: string, enum: [clinched, alive, eliminated] }
+        inside: { type: boolean }
+        gap: { type: integer, description: "Points to the band edge nearest us: behind it when below; cushion when inside (relegation: points to safety) or above." }
+    FixtureDifficulty:
+      type: object
+      description: "How hard an upcoming fixture is for the requesting club (IM59). Level 1 = very easy, 5 = very hard; positive factor deltas make it harder."
+      properties:
+        level: { type: integer, minimum: 1, maximum: 5 }
+        label: { type: string, enum: [Very easy, Easy, Even, Hard, Very hard] }
+        factors:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              delta: { type: integer }
+              detail: { type: string }
     StandingRow:
       type: object
       properties:
+        position: { type: integer, description: "1-based table position (IM60); matches the full table even in a window slice." }
         club: { $ref: "#/components/schemas/NestedClub" }
         played: { type: integer }
         won: { type: integer }
@@ -6316,6 +6483,10 @@ components:
         goals_for: { type: integer }
         goals_against: { type: integer }
         points: { type: integer }
+        form:
+          type: array
+          description: "Last up to 5 league results this season, newest first (IM55). Empty before the first result."
+          items: { type: string, enum: [W, D, L] }
     ClubCompetitionItem:
       type: object
       description: "One of the manager's club's competitions (competition.club_competitions membership), as returned by /managers/me/competitions. Exactly one of league | cup is set, discriminated by competition_type."
