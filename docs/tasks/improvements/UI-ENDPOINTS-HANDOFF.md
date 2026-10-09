@@ -75,7 +75,8 @@ each milestone.
 
 ## Next action
 
-Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OPD-63; Book §6.8–6.9, §15.5). Verification in each IM's Delivery evidence. Follow-ups: (a) `stakes.go` relegation safety counts only rivals that strictly overtake (ties ignored), looser than the outlook's rule; align if six-pointer/dead-rubber labels should match; (b) `TestListClubFixtures` is flaky (picks a club by name); (c) golangci-lint not run locally; (d) frontend wiring not started.
+Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OPD-63; Book §6.8–6.9, §15.5). Verification in each IM's Delivery evidence. Follow-ups: (a) `stakes.go` relegation safety counts only rivals that strictly overtake (ties ignored), looser than the outlook's rule; align if six-pointer/dead-rubber labels should match; (b) `TestListClubFixtures` is flaky (picks a club by name); (c) golangci-lint not run locally; (d) frontend wiring in progress (user's uncommitted `RaceCard.vue`, 2026-10-09).
+- [x] Race card (2026-10-09): `types/manager/competition.ts` outlook types aligned to `LeagueOutlook`; `RaceCard.vue` renders stakes headline, races + attachments with status, guaranteed cup, W/D/L swing, finish range, projection why. `nuxi typecheck`: 0 errors in touched files (8 pre-existing elsewhere). Not viewed in browser; layout not checked against the design.
 
 
 Product owner: answer the open questions in IM38–IM48, pick which deferred task (IM49–IM54) to plan first. Frontend wiring of the new fields is out of scope until asked.

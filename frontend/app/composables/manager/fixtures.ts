@@ -20,7 +20,7 @@ export function useClubFixtures() {
 
   async function getNUpcomingFixtures(n: number) {
     try {
-      return await $api.get<{ fixture: ManagerFixture[] }>(`${apiBase}/api/clubs/${clubId}/fixtures?upcoming=true&limit=${n}`)
+      return await $api.get<{ fixtures: ManagerFixture[] }>(`${apiBase}/api/clubs/${clubId}/fixtures?upcoming=true&limit=${n}`)
     } catch (error) {
       console.error(error)
       toast.apiError(error)

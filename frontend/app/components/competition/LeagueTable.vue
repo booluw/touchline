@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
 
 const { getLeagueTable } = useManagerCompetition()
 const clubstore = useClubStore()
+const { $viewport } = useNuxtApp()
 
 const status = ref<LoadingStatus>("loading")
 const data = ref<CompetitionStanding>()
@@ -60,7 +61,7 @@ onMounted(() => load())
     </template>
     <template v-else-if="status === 'loaded' && data">
       <UiCard flush class="overflow-x-auto">
-        <UiDataTable :columns :rows="data.rows" :row-key="r => r.club.id" :density="full ? 'standard' : 'simple'"
+        <UiDataTable :columns :rows="data.rows" :row-key="r => r.club.id" :density="$viewport.matches('mobile') ? 'simple' : full ? 'standard' : 'simple'"
           :selected-key="clubId">
           <template #cell-position="{ row }">
             <div :class="`absolute border h-8 -translate-x-3 -translate-y-2 hidden`" />
@@ -68,7 +69,7 @@ onMounted(() => load())
           </template>
           <template #cell-club="{ row }">
             <div class="flex gap-2">
-              <nuxt-link to="">{{ row.club.name }}</nuxt-link>
+              <nuxt-link :to="`/play/clubs/${row.club.id}`" class="hover:underline">{{ row.club.name }}</nuxt-link>
             </div>
           </template>
           <template #cell-lost="{ row }">

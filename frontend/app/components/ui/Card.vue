@@ -6,7 +6,7 @@ withDefaults(defineProps<{ as?: string, flush?: boolean, dashed?: boolean }>(), 
 <template>
   <component
     :is="as"
-    :class="cn('font-geist rounded-card border border-line bg-s1 text-body text-t1', !flush && 'p-3.5', dashed && 'border-dashed border-line2 bg-transparent')"
+    :class="cn('font-geist rounded-card border border-line bg-s1 text-body text-t1', !flush && 'p-3.5', dashed && 'border-dashed border-line2 bg-transparent', $attrs.class)"
   >
     <slot />
   </component>

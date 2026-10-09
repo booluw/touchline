@@ -1,4 +1,5 @@
 import type { CompetitionStanding } from "~/types"
+import type { ManagerClubOutlook } from "~/types/manager"
 
 export function useManagerCompetition() {
   const { public: { apiBase } } = useRuntimeConfig()
@@ -25,9 +26,17 @@ export function useManagerCompetition() {
     }
   }
 
+  async function getCompetitionOutlook(id: string) {
+    try {
+      return await $api.get<ManagerClubOutlook>(`${apiBase}/api/managers/me/competitions/${id}/outlook`)
+    } catch (error) {
+      toast.apiError(error)
+    }
+  }
 
   return {
     getLeagueTable,
-    getCompetitions
+    getCompetitions,
+    getCompetitionOutlook
   }
 }
