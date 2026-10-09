@@ -53,6 +53,12 @@ each milestone.
 | IM48 | Onboarding club choice | no API change (needs preference model) |
 | IM49–IM53 | Scouting, shortlist, social, auth extras, preferences | deferred |
 | IM54 | Career/world/landing/press (new endpoints) | deferred, confirm scope |
+| IM55 | Standings last-5 form | planned |
+| IM56 | League outlook: stakes + next-match swing | planned |
+| IM57 | Projected finish + Why factors | planned |
+| IM58 | Match engine xG | planned |
+| IM59 | Next 5 fixtures + difficulty | planned |
+| IM60 | Standings window ±3 around own club | planned |
 
 ## Status
 
@@ -68,5 +74,8 @@ each milestone.
 - Not committed (per workflow).
 
 ## Next action
+
+Competitions screen (2026-10-09): IM55–IM58 planned, not implemented. Build order IM55 → IM60 → IM59 → IM58 → IM56 → IM57. Decisions: no play-offs, no manager on table, GD + xG trends both ship.
+
 
 Product owner: answer the open questions in IM38–IM48, pick which deferred task (IM49–IM54) to plan first. Frontend wiring of the new fields is out of scope until asked.

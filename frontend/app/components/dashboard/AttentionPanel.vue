@@ -78,7 +78,7 @@ onMounted(load)
         <h1 class="text-page">What needs your attention</h1>
         <p class="text-t2">
           {{ data?.counts.urgent }} urgent, {{ data?.counts.important }} important,
-          {{ data?.counts.interesting }} intresting since your last visit.
+          {{ data?.counts.interesting }} interesting since your last visit.
         </p>
       </div>
       <slot />
