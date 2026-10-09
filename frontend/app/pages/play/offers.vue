@@ -1,16 +1,16 @@
 <script lang="ts" setup>
 import { useToast } from '~/components/old-ui/Toast';
 import { useManagerOffer } from '~/composables/manager/offer';
-import type { Offer } from '~/types';
+import type { ManagerOffer } from '~/types/manager';
 
 const store = useAuthStore()
 const router = useRouter()
 const { getOffers } = useManagerOffer()
 const { notify } = useToast()
 
-const offers = ref<Offer[]>([])
+const offers = ref<ManagerOffer[]>([])
 const takenClubs = ref<{ id: string, name: string }[]>([])
-const offerToView = ref<Offer>()
+const offerToView = ref<ManagerOffer>()
 const loading = ref("loading")
 
 async function getManagerOffers() {

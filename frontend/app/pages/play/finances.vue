@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<!-- <script setup lang="ts">
 import { useFinanceStore } from '~/stores/finance'
 const store = useFinanceStore()
 const { getFinance } = useClub()
@@ -144,4 +144,7 @@ onMounted(async () => {
       </template>
     </div>
   </main>
+</template> -->
+<template>
+  Finances
 </template>

@@ -52,7 +52,7 @@ onMounted(() => load())
   <section class="space-y-5 ms:space-y-10">
     <template v-if="status === 'loading'">
       <UiCard flush class="overflow-x-auto py-2">
-        <div v-for="key in 20" class="grid gap-3 grid-cols-10 m-1">
+        <div v-for="key in 20" :key class="grid gap-3 grid-cols-10 m-1">
           <UiLoader class="w-5 h-4" />
           <UiLoader class="w-full h-4 col-span-3" />
           <UiLoader class="" v-for="i in 6" :key="i" />

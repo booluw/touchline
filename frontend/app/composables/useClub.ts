@@ -1,5 +1,5 @@
 import { useToast } from "~/components/old-ui/Toast"
-import type { ContractView, LedgerEntry, NextFixture } from "~/types"
+import type { NextFixture } from "~/types"
 
 
 export function useClub() {
@@ -14,15 +14,17 @@ export function useClub() {
 
   async function getFinance(): Promise<void> {
     try {
-      const [ledger, contract] = await Promise.all([
-        // $api.get<FinanceSummary>(`${apiBase}/api/clubs/${clubId}/finances`),
-        $api.get<LedgerEntry[]>(`${apiBase}/api/clubs/${clubId}/ledger`),
-        $api.get<ContractView[]>(`${apiBase}/api/clubs/${clubId}/contracts`)
-      ])
+      // const [ledger, contract] = await Promise.all([
+      //   // $api.get<FinanceSummary>(`${apiBase}/api/clubs/${clubId}/finances`),
+      //   $api.get<LedgerEntry[]>(`${apiBase}/api/clubs/${clubId}/ledger`),
+      //   $api.get<ContractView[]>(`${apiBase}/api/clubs/${clubId}/contracts`)
+      // ])
 
-      store.setContracts(contract)
-      store.setLedger(ledger)
+      // store.setContracts(contract)
+      // store.setLedger(ledger)
       // store.setSummary(summary)
+
+      console.log(store)
     } catch (error) {
       console.error(error)
       notify({

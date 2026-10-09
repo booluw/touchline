@@ -15,8 +15,8 @@ async function load() {
   status.value = "loading"
 
   try {
-    const { fixtures } = await getNUpcomingFixtures(10)
-    data.value = fixtures
+    const resp = await getNUpcomingFixtures(10)
+    data.value = resp!.fixtures
     status.value = "loaded"
   } catch {
     status.value = "error"

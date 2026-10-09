@@ -36,11 +36,11 @@ function raceLine(r: OutlookRace) {
   return r.inside ? `In the ${bandName(r)} places · ${pts} cushion` : `${pts} off ${bandName(r)}`
 }
 
-function tone(r: OutlookRace): 'pos' | 'neg' | 'muted' {
-  if (r.status === 'eliminated') return r.kind === 'relegation' ? 'pos' : 'muted'
-  const good = r.kind !== 'relegation'
-  return r.inside === good ? 'pos' : 'neg'
-}
+// function tone(r: OutlookRace): 'pos' | 'neg' | 'muted' {
+//   if (r.status === 'eliminated') return r.kind === 'relegation' ? 'pos' : 'muted'
+//   const good = r.kind !== 'relegation'
+//   return r.inside === good ? 'pos' : 'neg'
+// }
 </script>
 
 <template>

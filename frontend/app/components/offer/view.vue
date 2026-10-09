@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import type { Offer } from '~/types';
 import { formatMoneyCompact } from '../../utils/helpers';
 import { useManagerOffer } from '~/composables/manager/offer';
 import { useToast } from '../old-ui/Toast';
+import type { ManagerOffer } from '~/types/manager';
 
-const props = defineProps<{ offer: Offer }>()
+const props = defineProps<{ offer: ManagerOffer }>()
 const emit = defineEmits(["close", "done"])
 
 const { acceptOffer, rejectOffer } = useManagerOffer()
