@@ -6,8 +6,8 @@ import IllustrationsBalancedTactics from '~/components/illustrations/balanced-ta
 import IllustrationsGengenpressTactics from '~/components/illustrations/gengenpress-tactics.vue';
 import IllustrationsLowblockTactics from '~/components/illustrations/lowblock-tactics.vue';
 import IllustrationsPosessionTactics from '~/components/illustrations/posession-tactics.vue';
+import type { ManagerPlayerSlot, ManagerSquadPlayer } from '~/types/manager';
 
-import type { SquadPlayer, Slot } from '~/types';
 
 const { getTactics, saveTactics, saveLineup } = useClub()
 const { notify } = useToast()
@@ -16,10 +16,10 @@ const loading = ref<"loading" | "loaded" | "error">("loading")
 const saving = ref(false)
 
 const tactics = ref<{ style: string, formation: string, allowed_formations: string[] }>()
-const squad = ref<SquadPlayer[]>([])
-const lineup = ref<{ formation: string, slots: Slot[] }>()
+const squad = ref<ManagerSquadPlayer[]>([])
+const lineup = ref<{ formation: string, slots: ManagerPlayerSlot[] }>()
 
-const slots = ref<Slot[]>([])
+const slots = ref<ManagerPlayerSlot[]>([])
 const selectedSlot = ref<number | null>(null)
 const slot = computed(() => lineup.value?.slots.find((s) => s.slot === selectedSlot.value))
 const playersBySelectedSlotPosition = computed(() => {
@@ -47,8 +47,8 @@ async function init() {
 
     state.value.style = res.tactics.style
     state.value.formation = res.lineup.formation
-    slots.value = res.lineup.slots.map((s: Slot) => {
-      const player = res.squad.players.find((p: SquadPlayer) => p?.player?.id === s.player?.id)
+    slots.value = res.lineup.slots.map((s: ManagerPlayerSlot) => {
+      const player = res.squad.players.find((p: ManagerSquadPlayer) => p?.player?.id === s.player?.id)
 
       return {
         ...s,

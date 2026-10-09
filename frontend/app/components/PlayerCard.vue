@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import type { Player } from '~/types/_player';
+import type { Player } from '~/types/player';
 
 const props = defineProps<{
   playerId: string
@@ -43,7 +43,7 @@ onMounted(async () => {
             </div>
             <div class="flex items-center">
               <nuxt-link :to="`/clubs/${player?.club.id}`" class="underline text-cyan-500">{{ player?.club.name
-                }}</nuxt-link>
+              }}</nuxt-link>
 
               <svg class="w-10 fill-void-500" viewBox="0 0 256 256">
                 <path d="M128,96a32,32,0,1,0,32,32A32,32,0,0,0,128,96Zm0,48a16,16,0,1,1,16-16A16,16,0,0,1,128,144Z">
@@ -84,7 +84,7 @@ onMounted(async () => {
         <div class="" v-if="player.dossier.private.contracts.length !== 0">
           <h3 class="heading heading--small">wsalary</h3>
           <h2 class="heading text-lg">{{ formatMoneyCompact(player.dossier.private.contracts[0]?.weekly_wage as number)
-            }}</h2>
+          }}</h2>
         </div>
 
         <div class="" v-if="player.dossier.private.contracts.length !== 0">

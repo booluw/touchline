@@ -69,7 +69,9 @@
 </template>
 
 <script setup lang="ts">
-const { authedFetch } = useAuth()
+const { $api } = useNuxtApp()
+const { public: { apiBase } } = useRuntimeConfig()
+
 const realtime = useRealtimeStore()
 const socket = useSocket()
 
@@ -132,31 +134,11 @@ async function load() {
   clubDetail.value = null
 
   try {
-    const res = await authedFetch('/api/clubs')
-    if (res.status === 401) {
-      status.value = 'signed-out'
-      return
-    }
-    if (res.status === 403) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string }
-      status.value = 'error'
-      errorMessage.value = body.error ?? 'Your session has no world context — contact support.'
-      return
-    }
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string }
-      status.value = 'error'
-      errorMessage.value = body.error ?? 'Could not load your world. Try again.'
-      return
-    }
+    const clubs = await $api.get(`${apiBase}/api/clubs`)
 
-    const { clubs } = (await res.json()) as { clubs: { id: string; name: string }[] }
     clubList.value = clubs ?? []
     if (clubs.length > 0) {
-      const detail = await authedFetch(`/api/clubs/${clubs[0]!.id}`)
-      if (detail.ok) {
-        clubDetail.value = (await detail.json()) as typeof clubDetail.value
-      }
+      clubDetail.value = await $api.get(`${apiBase}/api/clubs/${clubs[0]!.id}`)
     }
     status.value = 'connected'
     realtime.connect()

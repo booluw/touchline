@@ -1,8 +1,5 @@
-interface FixtureClub {
-  id: string
-  name: string
-  short: string
-}
+import type { CommonClub, CommonCountry } from "../common"
+import type { PlayerPosition } from "../player"
 
 interface FixtureCompetition {
   id: string
@@ -13,18 +10,12 @@ interface FixtureGame {
   id: string
   world_id: string
   competition: FixtureCompetition
-  home_club: FixtureClub
-  away_club: FixtureClub
+  home_club: CommonClub
+  away_club: CommonClub
   matchday: number
   gameweek: number
   scheduled_at: string
   status: "scheduled" | "completed"
-}
-
-interface FixtureCountry {
-  id: string
-  name: string
-  code: string
 }
 
 interface FixtureManager {
@@ -43,13 +34,13 @@ interface FixturePlayer {
   first_name: string
   last_name: string
   display_name: string
-  primary_position: "GK" | "CB" | "RB" | "LB" | "DM" | "CM" | "LM" | "RM" | "AM" | "RW" | "LW" | "ST"
+  primary_position: PlayerPosition
   rating: number
 }
 
-export interface FixtureDossier {
-  club: FixtureClub
-  country: FixtureCountry
+export interface ManagerFixtureDossier {
+  club: CommonClub
+  country: CommonCountry
   is_ai_controlled: boolean
   manager?: FixtureManager
   reputation: number
@@ -67,6 +58,6 @@ export interface ManagerNextFixture {
   derby: boolean
   golden_goal: boolean
   /** The manager's own club, same shape as the opponent. */
-  club: FixtureDossier
-  opponent: FixtureDossier
+  club: ManagerFixtureDossier
+  opponent: ManagerFixtureDossier
 }

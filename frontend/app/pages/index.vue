@@ -8,7 +8,6 @@
       <button class="button">Okay</button>
     </div>
   </div>
-  <NuxtPage />
 </template>
 
 <script setup lang="ts">

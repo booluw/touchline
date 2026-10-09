@@ -5,7 +5,7 @@ type ISODateString = string;
 // Core enums / unions
 // ─────────────────────────────────────────────
 
-type PlayerPosition =
+export type PlayerPosition =
   | "GK"
   | "CB"
   | "LB"
@@ -22,26 +22,26 @@ type PlayerPosition =
   | "ST"
   | "CF";
 
-type PlayerStatus = "active" | "inactive" | "retired";
+export type PlayerStatus = "active" | "inactive" | "retired";
 
-type PlayerOrigin =
+export type PlayerOrigin =
   | "generated"
   | "academy"
   | "transferred"
   | "real";
 
-type ContractStatus =
+export type ContractStatus =
   | "active"
   | "expired"
   | "terminated"
   | "pending";
 
-type ContractType =
+export type ContractType =
   | "senior"
   | "youth"
   | "short_term";
 
-type SquadRole =
+export type SquadRole =
   | "key_player"
   | "first_team"
   | "rotation"

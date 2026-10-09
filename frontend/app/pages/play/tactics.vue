@@ -31,9 +31,10 @@ const styles = [
 const allowedFormations = computed(() => allowedByStyle[style.value] ?? ['4-3-3'])
 
 async function init() {
-  const { authedFetch } = useAuth()
-  const r = await authedFetch('/api/clubs')
-  const clubs = await r.json()
+  const { public: { apiBase } } = useRuntimeConfig()
+  const { $api } = useNuxtApp()
+
+  const clubs = await $api.get(`${apiBase}/api/clubs`)
   clubId.value = clubs[0]?.id ?? ''
   if (!clubId.value) return
   await store.load(clubId.value)

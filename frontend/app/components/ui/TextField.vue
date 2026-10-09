@@ -27,7 +27,7 @@ const model = defineModel<string>({ default: '' })
       :autocomplete="autocomplete"
       :class="cn(
         'min-h-11 rounded-nested border border-line2 bg-s1 px-3 text-t1 placeholder:text-t3 outline-none transition-colors',
-        'focus:border-t2 data-[invalid]:border-neg disabled:opacity-40',
+        'focus:border-t2 data-invalid:border-neg disabled:opacity-40',
         mono ? 'num text-[14px]' : 'text-body',
       )"
     />

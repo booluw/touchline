@@ -67,23 +67,18 @@ export const useMatchStore = defineStore('match', {
     // load() fetches the persistent feed: header then the full event list. It
     // is the quick-result path and the live screen's catch-up before ticks.
     async load(fixtureId: string) {
-      const { authedFetch } = useAuth()
+      const { public: { apiBase } } = useRuntimeConfig()
+      const { $api } = useNuxtApp()
       this.error = ''
 
-      const headerRes = await authedFetch(`/api/fixtures/${fixtureId}`)
-      if (!headerRes.ok) {
-        this.error = headerRes.status === 404 ? 'Fixture not found.' : 'Could not load this match right now.'
-        return
-      }
-      const view = await headerRes.json() as { fixture: FixtureHeader; match?: MatchHeader }
+      const view = await $api.get(`${apiBase}/api/fixtures/${fixtureId}`)
+      
       this.fixture = view.fixture
       this.match = view.match ?? null
       this.events = []
 
       if (!view.match) return
-      const eventsRes = await authedFetch(`/api/matches/${view.match.id}/events`)
-      if (!eventsRes.ok) return
-      const body = await eventsRes.json() as { events: MatchEvent[] }
+      const body = await $api.get(`${apiBase}/api/matches/${view.match.id}/events`)
       this.events = body.events ?? []
     },
 

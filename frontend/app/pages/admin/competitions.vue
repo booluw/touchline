@@ -6,9 +6,8 @@ import { ref, computed } from 'vue'
 
 import type { Country, League, SeedResult, ClubNamePools, Cup, CupCampaign } from '~/composables/useCompetition'
 import { useCompetition } from '~/composables/useCompetition'
-import { useAuth } from '~/composables/useAuth'
 
-const { user } = useAuth()
+const store = useAuthStore()
 const comp = useCompetition()
 
 // Club-name pools, scoped per country ('' = global fallback): AI clubs for a
@@ -21,6 +20,7 @@ const poolsError = ref('')
 const poolsBusy = ref(false)
 
 const effectivePoolScope = computed(() => (poolScope.value === '__custom__' ? poolCustomCode.value.trim().toLowerCase() : poolScope.value))
+const user = computed(() => store.user)
 
 async function loadPools() {
   pools.value = await comp.listClubNameParts(effectivePoolScope.value)

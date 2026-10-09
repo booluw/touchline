@@ -41,7 +41,9 @@ export const emptyDashboard = (): DashboardData => ({
 })
 
 export function useDashboard() {
-  const { authedFetch } = useAuth()
+  const { public: { apiBase } } = useRuntimeConfig()
+  const { $api } = useNuxtApp()
+  
   const socket = useSocket()
 
   const data = ref<DashboardData>(emptyDashboard())
@@ -61,11 +63,8 @@ export function useDashboard() {
   async function fetchDashboard(): Promise<DashboardData> {
     loading.value = true
     try {
-      const res = await authedFetch('/api/dashboard')
-      if (res.ok) {
-        data.value = (await res.json()) as DashboardData
-        loaded.value = true
-      }
+      data.value = await $api.get(`${apiBase}/api/dashboard`)
+      loaded.value = true
     } finally {
       loading.value = false
     }
