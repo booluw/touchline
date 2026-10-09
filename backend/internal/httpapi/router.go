@@ -107,6 +107,8 @@ func (s *server) router() *gin.Engine {
 			manager.DELETE("/me/absence", s.handleClearAway)
 			manager.GET("/me/absence-summary", s.handleGetAbsenceSummary)
 			manager.GET("/me/competitions", s.handleMyClubCompetitions)
+			manager.GET("/me/competitions/:id/standings", s.handleMyStandingsWindow)
+			manager.GET("/me/competitions/:id/outlook", s.handleMyLeagueOutlook)
 		}
 
 		// Social messaging (S06-04b): the manager's inbox and sending.

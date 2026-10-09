@@ -149,20 +149,77 @@ Derived labels used by other systems:
 | Route | Returns |
 | --- | --- |
 | `GET /api/competitions` | declared competitions (world-scoped) |
-| `GET /api/competitions/:id/standings` | table (with `season_id/label/number`) |
+| `GET /api/competitions/:id/standings` | table (with `season_id/label/number`); each row has `position` and `form` (last ≤5 league results this season, newest first — IM55) |
+| `GET /api/managers/me/competitions/:id/standings` | the same table cut to 3 above / 3 below the caller's club; shifts at the edges to keep 7 rows (IM60) |
+| `GET /api/managers/me/competitions/:id/outlook` | what is at stake + projected finish (§6.8, IM56/IM57) |
 | `GET /api/competitions/:id/fixtures` | fixtures |
 | `GET /api/competitions/:id/calendar` | active season grouped by game-week (`week = game_day ÷ days_per_week`) — league-shaped |
-| `GET /api/clubs/:id/fixtures` | one club's fixtures across all competitions |
+| `GET /api/clubs/:id/fixtures` | one club's fixtures across all competitions; `?upcoming=true&limit=N` returns only scheduled ones, each with a `difficulty` (§6.9, IM59) |
 | `GET /api/clubs/:id/next-fixture` | next match + opponent dossier ([Ch. 26](26-dashboard-news-scouting-realtime.md)) |
 | `GET /api/admin/competitions/:id/detail` | admin dossier: history, past winners, top scorers (IM15) |
+
+## 6.8 League outlook: stakes, clinching and projection (IM56/IM57)
+
+`GET /api/managers/me/competitions/:id/outlook` is a pure read for the
+caller's club. It never claims what the maths has not proven.
+
+**Finish range.** With `max = points + 3 × league games left`:
+- `best  = 1 + clubs whose points already exceed our max`;
+- `worst = 1 + clubs whose max reaches our current points`. **Equal points
+  count against us** — goal difference can still change, so a one-point lead
+  over a club that can still win is never "champions".
+- Once every league game is played the final table (with tiebreaks) decides.
+
+**Races.** Title `[1,1]`; promotion `[1, promotions]` and relegation
+`[N−relegations+1, N]` only when the league has those slots; every
+`cup_qualification` band on the league (any scope — domestic, regional,
+continental, international) as a qualification race. A race is `clinched`
+when the whole finish range sits inside it, `eliminated` when none of it can
+(for relegation that means safe), otherwise `alive`. Copy follows the status:
+clinched → "Champions / Promoted / Relegated / Qualified for X"; alive →
+"on course for". `guaranteed_at_least` names the cup of our worst finish when
+every still-possible finish qualifies for some cup ("qualified for at least
+the Regional Cup"). Qualification here is the league position only; actual
+entry still runs through cup qualification and double-booking (Ch. 8).
+
+**Stakes card.** The first race not settled against us, in the order title →
+promotion → relegation → nearest cup band. Early in a season the title race
+is mathematically alive for most clubs, so most clubs see it; `races` lists
+every race for clients that want a different emphasis.
+
+**Next match.** Positions after a 1-0 win, 0-0 draw or 0-1 loss in our next
+league fixture; the opponent's points move too, every other club stands still.
+
+**Projection.** 1000 seeded runs of the remaining league fixtures. Each result
+is drawn from the home side's home points-per-game against the away side's
+away points-per-game, both shrunk toward the league average by 3 games, with a
+fixed 26% draw rate. Seed = season id + completed fixtures, so the answer is
+stable for a matchday. Returns the median finish and the 10th–90th
+percentile range. No cache: one run is milliseconds.
+
+**Why factors** (positive helps us): remaining games vs the current top 6
+against an even schedule; home points vs the league home average; best-XI
+players unavailable for the next match; goal-difference trend (last 5 vs
+season pace); chance-quality trend (xG difference, last 5 vs season — from
+IM58, omitted until our matches carry xG).
+
+## 6.9 Fixture difficulty (IM59)
+
+`?upcoming=true` rates each fixture for the club in the path on one scale of
+overall-rating points: **strength gap** (opponent's best available XI mean
+overall minus ours, on that matchday — injuries and suspensions count),
+**venue** (+2 away, −2 home; fixtures carry no neutral venue), and **opponent
+form** (their last-5 points above a neutral 7, × 0.5, all competitions).
+Score buckets: ≤ −8 Very easy, ≤ −3 Easy, ≤ 2 Even, ≤ 7 Hard, else Very hard.
+Ratings, not league positions, so cup ties across divisions compare fairly.
 
 ## Connections
 
 - Season creation and rollover: [Chapter 7](07-seasons-and-rollover.md).
 - Cups reuse memberships, pacing and the bracket machinery: [Chapter 8](08-cups.md).
 - Kickoff timing is on the world clock: [Chapter 4](04-world-clock-and-time.md).
-- Code: `internal/competition/{seeding,pacing,calendar,weekdays,scheduling,standings,membership}.go`.
-- Source: `docs/how-to/seasons.md`, `docs/how-to/cadences-and-time.md` §8, OPD-20, OPD-22, OPD-33, OPD-48, IM03, IM05, IM22.
+- Code: `internal/competition/{seeding,pacing,calendar,weekdays,scheduling,standings,membership,outlook,outlook_load,difficulty}.go`.
+- Source: `docs/how-to/seasons.md`, `docs/how-to/cadences-and-time.md` §8, OPD-20, OPD-22, OPD-33, OPD-48, OPD-63, IM03, IM05, IM22, IM55–IM60.
 
 ---
 [← Worlds](05-worlds-and-setup.md) · [Contents](the-touchline-book.md) · [Next: Seasons →](07-seasons-and-rollover.md)

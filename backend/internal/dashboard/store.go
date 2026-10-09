@@ -367,12 +367,13 @@ func (s *Store) UnhappyPlayers(ctx context.Context, clubIDs []uuid.UUID, thresho
 
 // standingsSpot is a managed club's active domestic-league position.
 type standingsSpot struct {
-	ClubID      uuid.UUID
-	ClubName    string
-	Position    int
-	Points      int
-	Played      int
-	SeasonLabel string
+	ClubID          uuid.UUID
+	ClubName        string
+	Position        int
+	Points          int
+	Played          int
+	SeasonLabel     string
+	CompetitionName string
 }
 
 // StandingsPositions resolves each given club's position in its active
@@ -383,7 +384,7 @@ func (s *Store) StandingsPositions(ctx context.Context, clubIDs []uuid.UUID) ([]
 	}
 	rows, err := s.pool.Query(ctx, `
 		WITH club_active_league AS (
-			SELECT DISTINCT ON (ce.club_id) ce.club_id, s.id AS season_id, s.season_label
+			SELECT DISTINCT ON (ce.club_id) ce.club_id, s.id AS season_id, s.season_label, c.name AS competition_name
 			FROM competition.competition_entries ce
 			JOIN competition.seasons s ON s.id = ce.season_id
 			JOIN competition.competitions c ON c.id = s.competition_id
@@ -402,7 +403,7 @@ func (s *Store) StandingsPositions(ctx context.Context, clubIDs []uuid.UUID) ([]
 			JOIN competition.seasons s ON s.id = st.season_id AND s.status <> 'completed'
 			JOIN club.clubs cl ON cl.id = st.club_id
 		)
-		SELECT cal.club_id, cc.name, r.position, r.points, r.played, cal.season_label
+		SELECT cal.club_id, cc.name, r.position, r.points, r.played, cal.season_label, cal.competition_name
 		FROM club_active_league cal
 		JOIN ranked r ON r.club_id = cal.club_id AND r.season_id = cal.season_id
 		JOIN club.clubs cc ON cc.id = cal.club_id
@@ -414,7 +415,7 @@ func (s *Store) StandingsPositions(ctx context.Context, clubIDs []uuid.UUID) ([]
 	var out []standingsSpot
 	for rows.Next() {
 		var st standingsSpot
-		if err := rows.Scan(&st.ClubID, &st.ClubName, &st.Position, &st.Points, &st.Played, &st.SeasonLabel); err != nil {
+		if err := rows.Scan(&st.ClubID, &st.ClubName, &st.Position, &st.Points, &st.Played, &st.SeasonLabel, &st.CompetitionName); err != nil {
 			return nil, fmt.Errorf("scan standings spot: %w", err)
 		}
 		out = append(out, st)

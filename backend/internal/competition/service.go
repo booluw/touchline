@@ -182,6 +182,7 @@ type Fixture struct {
 
 // StandingRow is one club's league-table line (nested club identity).
 type StandingRow struct {
+	Position     int            `json:"position"`
 	Club         apiref.ClubRef `json:"club"`
 	Played       int            `json:"played"`
 	Won          int            `json:"won"`
@@ -190,6 +191,9 @@ type StandingRow struct {
 	GoalsFor     int            `json:"goals_for"`
 	GoalsAgainst int            `json:"goals_against"`
 	Points       int            `json:"points"`
+	// Form is the club's last (up to) 5 league results this season, newest
+	// first ("W"/"D"/"L"); empty before its first result (IM55).
+	Form []string `json:"form"`
 }
 
 // StandingRowSet is a competition standings view for its active season.

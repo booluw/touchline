@@ -46,10 +46,11 @@ func loadFixture(ctx context.Context, tx pgx.Tx, id uuid.UUID, forUpdate bool) (
 func loadExisting(ctx context.Context, tx pgx.Tx, fixtureID uuid.UUID) (*MatchResult, error) {
 	m := &Match{}
 	err := tx.QueryRow(ctx, `
-		SELECT id, fixture_id, world_id, seed, engine_version, home_score, away_score, status, ended_at
+		SELECT id, fixture_id, world_id, seed, engine_version, home_score, away_score,
+		       home_xg::float8, away_xg::float8, status, ended_at
 		FROM match.matches WHERE fixture_id = $1`, fixtureID).
 		Scan(&m.ID, &m.FixtureID, &m.WorldID, &m.Seed, &m.EngineVersion,
-			&m.HomeGoals, &m.AwayGoals, &m.Status, &m.EndedAt)
+			&m.HomeGoals, &m.AwayGoals, &m.HomeXG, &m.AwayXG, &m.Status, &m.EndedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -65,10 +66,11 @@ func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, 
 	var now time.Time
 	err := tx.QueryRow(ctx, `
 		INSERT INTO match.matches
-			(fixture_id, world_id, seed, engine_version, home_score, away_score, status, started_at, ended_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, $7)
+			(fixture_id, world_id, seed, engine_version, home_score, away_score, home_xg, away_xg, status, started_at, ended_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $8, $9, 'completed', $7, $7)
 		RETURNING id, ended_at`,
-		fixtureID, worldID, seed, matchsim.EngineVersion, res.HomeGoals, res.AwayGoals, time.Now().UTC()).
+		fixtureID, worldID, seed, matchsim.EngineVersion, res.HomeGoals, res.AwayGoals, time.Now().UTC(),
+		res.HomeXG, res.AwayXG).
 		Scan(&id, &now)
 	return id, now, err
 }

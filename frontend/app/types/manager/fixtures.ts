@@ -61,3 +61,21 @@ export interface ManagerNextFixture {
   club: ManagerFixtureDossier
   opponent: ManagerFixtureDossier
 }
+
+export interface ManagerFixture {
+  away_club: CommonClub
+  home_club: CommonClub
+  away_score: number
+  gameweek: number
+  id: string
+  match_id: string
+  matchday: number
+  scheduled_at: string
+  status: "scheduled" | "running" | "finished"
+  world_id: string
+  competition: { id: string, name: string }
+  difficulty: {
+    factors: { delta: number, detail: string, label: string }[]
+    label: "Very easy" | "Easy" | "Even" | "Hard" | "Very hard"
+  }
+}

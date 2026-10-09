@@ -142,6 +142,8 @@ func Simulate(opts Options) MatchResult {
 		// its arrival rate (gegenpress +25%, low-block −30%, …).
 		if r.nextFloat() < tuning.ChancesPerMatchMin/90*att.style.ChanceVolume {
 			gw := goalWeight(att.a, def.d, tuning) * att.style.GoalConversion * def.style.ConcededConversion
+			// xG is the chance's exact goal probability: no extra draw (IM58).
+			addXG(&res, att.isHome, chanceGoalProb(tuning, gw))
 			switch resolveChance(r, tuning, gw) {
 			case outcomeGoal:
 				if att.isHome {
@@ -177,6 +179,7 @@ func Simulate(opts Options) MatchResult {
 							fmt.Sprintf("PENALTY to %s!", att.team.ClubName),
 							"A marginal in-box call given by the referee.")
 						conv := penaltyConversionRate(att.team, tuning)
+						addXG(&res, att.isHome, conv)
 						if r.nextFloat() < conv {
 							if att.isHome {
 								res.HomeGoals++
@@ -264,7 +267,18 @@ func Simulate(opts Options) MatchResult {
 	// derive per-side ratings. Strictly post-canonical draws, so the v1.5 draw
 	// order above is never perturbed; skipped entirely for lineup-less callers.
 	attributeMatch(opts, tuning, liveInputs, &res)
+	res.HomeXG = math.Round(res.HomeXG*100) / 100
+	res.AwayXG = math.Round(res.AwayXG*100) / 100
 	return res
+}
+
+// addXG credits one shot's goal probability to the attacking side.
+func addXG(res *MatchResult, home bool, p float64) {
+	if home {
+		res.HomeXG += p
+	} else {
+		res.AwayXG += p
+	}
 }
 
 // side holds a team's live effective Attack/Defense, its active style, and its
@@ -475,12 +489,25 @@ func GoalWeight(attA, defD float64, tuning Tuning) float64 {
 	return goalWeight(attA, defD, tuning)
 }
 
+// chanceWeights is the goal weight and total outcome weight resolveChance
+// draws against; goalW/total is the chance's goal probability.
+func chanceWeights(tuning Tuning, goalWeight float64) (goalW, total float64) {
+	w := tuning.OutcomeWeights
+	goalW = math.Max(w.Goal*goalWeight, 0.05)
+	return goalW, goalW + w.OnTarget + w.OffTarget + w.Blocked + w.Foul
+}
+
+// chanceGoalProb is a chance's expected-goals value (IM58).
+func chanceGoalProb(tuning Tuning, goalWeight float64) float64 {
+	goalW, total := chanceWeights(tuning, goalWeight)
+	return goalW / total
+}
+
 // resolveChance walks the cumulative chance table with an ability-scaled goal
 // weight and returns the outcome.
 func resolveChance(r *splitMix64, tuning Tuning, goalWeight float64) string {
 	w := tuning.OutcomeWeights
-	goalW := math.Max(w.Goal*goalWeight, 0.05)
-	total := goalW + w.OnTarget + w.OffTarget + w.Blocked + w.Foul
+	goalW, total := chanceWeights(tuning, goalWeight)
 	u := r.nextFloat() * total
 
 	switch {

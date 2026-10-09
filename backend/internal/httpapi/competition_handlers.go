@@ -388,6 +388,82 @@ func (s *server) handleMyClubCompetitions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"competitions": competitions})
 }
 
+// handleMyStandingsWindow returns the active-season table cut to the three
+// positions above and below the caller's club (IM60), same shape as
+// handleGetStandings. 404 when the caller's club is not in that table.
+func (s *server) handleMyStandingsWindow(c *gin.Context) {
+	leagueID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid_competition_id", "invalid competition id")
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
+		return
+	}
+	clubID, err := s.callerClubID(c)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	if clubID == nil {
+		respondErr(c, http.StatusNotFound, internalcompetition.ErrClubNotFound)
+		return
+	}
+	standings, err := s.compSvc.GetStandings(c.Request.Context(), leagueID, worldID)
+	if errors.Is(err, internalcompetition.ErrNoSeason) {
+		respondErr(c, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	rows, ok := internalcompetition.StandingsWindow(standings.Rows, *clubID, 3)
+	if !ok {
+		respondErr(c, http.StatusNotFound, internalcompetition.ErrClubNotFound)
+		return
+	}
+	standings.Rows = rows
+	c.JSON(http.StatusOK, standings)
+}
+
+// handleMyLeagueOutlook returns what is at stake for the caller's club in a
+// league and its projected finish (IM56/IM57). 404 when the caller has no
+// club, the league has no active season, or the club is not in its table.
+func (s *server) handleMyLeagueOutlook(c *gin.Context) {
+	leagueID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid_competition_id", "invalid competition id")
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
+		return
+	}
+	clubID, err := s.callerClubID(c)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	if clubID == nil {
+		respondErr(c, http.StatusNotFound, internalcompetition.ErrClubNotFound)
+		return
+	}
+	outlook, err := s.compSvc.ClubOutlook(c.Request.Context(), worldID, leagueID, *clubID)
+	switch {
+	case errors.Is(err, internalcompetition.ErrNoSeason), errors.Is(err, internalcompetition.ErrClubNotFound):
+		respondErr(c, http.StatusNotFound, err)
+		return
+	case err != nil:
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, outlook)
+}
+
 func (s *server) handleGetCompetition(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

@@ -168,6 +168,8 @@ type LeagueSummary struct {
 	Points      int    `json:"points"`
 	Played      int    `json:"played"`
 	SeasonLabel string `json:"season_label"`
+	// CompetitionName is the league's name, e.g. "Second Division North".
+	CompetitionName string `json:"competition_name"`
 }
 
 // DashboardUpdatePayload is the server-pushed realtime envelope

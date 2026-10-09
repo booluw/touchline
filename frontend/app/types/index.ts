@@ -1,8 +1,9 @@
+export * from "./competition"
 export * from "./user"
 export * from "./api"
 export * from "./auth"
 export * from "./_admin"
-export * from "./_manager"
+// export * from "./_manager"
 export * from "./common"
 
 // admin and manager both declare these; pick the side each consumer of "~/types" uses.

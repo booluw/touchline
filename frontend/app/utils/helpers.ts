@@ -1,3 +1,5 @@
+import type { WhyFactor } from "~/types/ui/design";
+
 /**
  * Formats an integer amount of cents as a USD currency string.
  * Cents, not dollars, because that's how money should be stored/passed
@@ -117,3 +119,7 @@ export function ordinal(n: number): string {
   const suffix = suffixes[(mod100 - 20) % 10] ?? suffixes[mod100] ?? suffixes[0];
   return `${n}${suffix}`;
 }
+
+export /** Explanation factors ({label, delta}) → WhyBreakdown factors. */
+  const toWhy = (exp?: { factors: { label: string, delta: number }[] }): WhyFactor[] =>
+    (exp?.factors ?? []).map(f => ({ label: f.label.charAt(0).toUpperCase() + f.label.slice(1), value: f.delta }))

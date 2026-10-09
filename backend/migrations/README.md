@@ -135,6 +135,7 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0058 | `manager` | One pending job offer per club: unique partial index `uq_job_offer_pending_club` on `manager.job_offers(club_id) WHERE status = 'proposed'` — onboarding/re-offers pick a random league club with no pending offer |
 | 0059 | `manager` | `manager.job_offers.offered_on` (world calendar date at offer time, backfilled to today's world date): the daily world tick expires offers unanswered for 7 in-game days |
 | 0060 | `manager` | `uq_managers_world_policy_bot` narrowed to `status = 'unemployed'`: a club bot displaced by a human is `retired` (keeps its row), so only the world's absence bot is guarded |
+| 0061 | `match` | `match.matches.home_xg`/`away_xg` NUMERIC(4,2), nullable: expected goals per side (IM58); NULL for matches played before the engine computed xG, never backfilled |
 
 ### River migrations (0016–0022)
 

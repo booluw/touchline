@@ -1,6 +1,6 @@
 # IM55 — Standings: last-5 form per club
 
-**Status:** Planned
+**Status:** Implemented
 **Owner:** Claude Code
 **Sprint:** Improvements (UI redesign endpoints)
 **Source:** New UI design (claude.ai/design project 244e00dd…, `Touchline Screens.dc.html` competitions screen), product-owner review 2026-10-09. See `UI-ENDPOINTS-HANDOFF.md`.
@@ -20,3 +20,18 @@
 ## Tests
 
 Integration: a club with >5 results returns exactly 5, newest first; a club with none returns `[]` (not null).
+
+## Delivery evidence
+
+### Files
+
+`internal/competition/service.go` (StandingRow.position, .form), `standings.go` (`attachForm`: one windowed query, season start-scoped), `detail.go` (admin detail rows get position + form too), `apidocs/openapi.yaml` (StandingRow). Test: `outlook_integration_test.go` (`TestCompetitionScreenReads`: positions 1..N, one result each, leader `[W]`).
+
+### Verification (2026-10-09, embedded Postgres 16 on :55432)
+
+gofmt clean; `go build ./...`, `go vet ./...`, `go vet -tags integration ./internal/... ./pkg/...`, `go test ./...` pass; `TestDocsCoverRouter`/`TestDocsOpenAPIValid` pass. golangci-lint not installed locally (not run).
+Integration, serial (`-p 1`), packages competition, match, scout, httpapi, pkg/matchsim, compared with a clean HEAD worktree on the same DB: match, httpapi, matchsim pass on both; competition and scout fail on both with the same existing failures (detail/scheduling/cup fixtures, `TestNextFixtureScout`). The only extra branch failure, `TestListClubFixtures`, is flaky on HEAD too (2 of 4 HEAD runs fail): it picks the first club by name, which is sometimes in a league with no started season.
+
+### Notes
+
+Every caller of `GetStandings` (public table, club overview, scout, outlook) now carries form.

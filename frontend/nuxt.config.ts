@@ -4,12 +4,7 @@ export default defineNuxtConfig({
   compatibilityDate: "2024-04-03",
   devtools: { enabled: true },
 
-  modules: [
-    "@vite-pwa/nuxt",
-    "@pinia/nuxt",
-    "reka-ui/nuxt",
-    "pinia-plugin-persistedstate/nuxt",
-  ],
+  modules: ["@vite-pwa/nuxt", "@pinia/nuxt", "reka-ui/nuxt", "pinia-plugin-persistedstate/nuxt", "nuxt-viewport"],
   piniaPluginPersistedstate: {
     storage: "cookies",
     cookieOptions: {

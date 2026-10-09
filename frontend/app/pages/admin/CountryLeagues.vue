@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import { useToast } from '~/components/old-ui/Toast';
 import { useAdminOverview } from '~/composables/admin/overview';
-import { useAuth } from '~/composables/useAuth';
 import type { ClubRow, Country, CountryClubs, CountryStats, World, CountryMarketData } from '~/types';
 import { formatMoney, formatMoneyCompact } from '../../utils/helpers';
 
@@ -85,7 +84,7 @@ async function submitRename() {
   renameBusy.value = true
   renameError.value = ''
   try {
-    const res = await $api.patch(`${apiBase}/api/admin/worlds/${worldId.value}/countries/${countryId.value}/clubs/${club.id}`,
+    await $api.patch(`${apiBase}/api/admin/worlds/${worldId.value}/countries/${countryId.value}/clubs/${club.id}`,
       {
           name: renameForm.name,
           short_name: renameForm.short_name,

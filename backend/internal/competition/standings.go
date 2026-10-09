@@ -61,13 +61,14 @@ func scanFixtures(rows pgx.Rows) ([]Fixture, error) {
 // Tie-breakers are points, goal difference, goals scored, then club name.
 func (s *Service) GetStandings(ctx context.Context, leagueID uuid.UUID, worldID uuid.UUID) (*StandingRowSet, error) {
 	var sr apiref.SeasonRef
+	var start time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, season_label, season_number, status
+		SELECT id, season_label, season_number, status, start_date
 		FROM competition.seasons
 		WHERE competition_id = $1 AND world_id = $2 AND status <> 'completed'
 		ORDER BY season_number DESC
 		LIMIT 1`, leagueID, worldID).
-		Scan(&sr.ID, &sr.Label, &sr.Number, &sr.Status)
+		Scan(&sr.ID, &sr.Label, &sr.Number, &sr.Status, &start)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNoSeason
 	}
@@ -97,9 +98,90 @@ func (s *Service) GetStandings(ctx context.Context, leagueID uuid.UUID, worldID 
 			&r.GoalsFor, &r.GoalsAgainst, &r.Points); err != nil {
 			return nil, fmt.Errorf("scan standing: %w", err)
 		}
+		r.Position = len(out.Rows) + 1
+		r.Form = []string{}
 		out.Rows = append(out.Rows, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := s.attachForm(ctx, leagueID, worldID, start, out.Rows); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// attachForm fills each row's Form with its club's last five completed league
+// results since the season start, newest first, in one query (IM55).
+func (s *Service) attachForm(ctx context.Context, leagueID, worldID uuid.UUID, start time.Time, rows []StandingRow) error {
+	q, err := s.pool.Query(ctx, `
+		SELECT club_id, outcome FROM (
+			SELECT x.club_id, x.outcome,
+			       ROW_NUMBER() OVER (PARTITION BY x.club_id ORDER BY x.at DESC, x.id DESC) AS rn
+			FROM (
+				SELECT f.id, f.home_club_id AS club_id, COALESCE(f.completed_at, f.scheduled_at) AS at,
+				       CASE WHEN f.ht_score > f.at_score THEN 'W' WHEN f.ht_score = f.at_score THEN 'D' ELSE 'L' END AS outcome
+				FROM match.fixtures f
+				WHERE f.competition_id = $1 AND f.world_id = $2 AND f.status = 'completed'
+				  AND f.scheduled_at >= $3 AND f.ht_score IS NOT NULL AND f.at_score IS NOT NULL
+				UNION ALL
+				SELECT f.id, f.away_club_id, COALESCE(f.completed_at, f.scheduled_at),
+				       CASE WHEN f.at_score > f.ht_score THEN 'W' WHEN f.at_score = f.ht_score THEN 'D' ELSE 'L' END
+				FROM match.fixtures f
+				WHERE f.competition_id = $1 AND f.world_id = $2 AND f.status = 'completed'
+				  AND f.scheduled_at >= $3 AND f.ht_score IS NOT NULL AND f.at_score IS NOT NULL
+			) x
+		) r
+		WHERE rn <= 5
+		ORDER BY club_id, rn`, leagueID, worldID, start)
+	if err != nil {
+		return fmt.Errorf("standings form: %w", err)
+	}
+	defer q.Close()
+	idx := make(map[uuid.UUID]int, len(rows))
+	for i, r := range rows {
+		idx[r.Club.ID] = i
+	}
+	for q.Next() {
+		var club uuid.UUID
+		var outcome string
+		if err := q.Scan(&club, &outcome); err != nil {
+			return fmt.Errorf("scan standings form: %w", err)
+		}
+		if i, ok := idx[club]; ok {
+			rows[i].Form = append(rows[i].Form, outcome)
+		}
+	}
+	return q.Err()
+}
+
+// StandingsWindow cuts rows to the `radius` positions above and below the
+// club, shifting at the table edges so the slice keeps 2·radius+1 rows when
+// the league has that many (IM60). ok is false when the club is not in rows.
+func StandingsWindow(rows []StandingRow, clubID uuid.UUID, radius int) (out []StandingRow, ok bool) {
+	at := -1
+	for i, r := range rows {
+		if r.Club.ID == clubID {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return nil, false
+	}
+	size := 2*radius + 1
+	if size >= len(rows) {
+		return rows, true
+	}
+	lo := at - radius
+	if lo < 0 {
+		lo = 0
+	}
+	if lo+size > len(rows) {
+		lo = len(rows) - size
+	}
+	return rows[lo : lo+size], true
 }
 
 // ApplyResult records a completed match and rolls the competition forward.

@@ -1,4 +1,4 @@
-import type { ManagerNextFixture } from "~/types/manager"
+import type { ManagerFixture, ManagerNextFixture } from "~/types/manager"
 
 export function useClubFixtures() {
   const { public: { apiBase } } = useRuntimeConfig()
@@ -14,11 +14,21 @@ export function useClubFixtures() {
       clubstore.setNextFixture(next_fixture)
     } catch (error) {
       console.error(error)
-      toast.error("Error")
+      toast.apiError(error)
+    }
+  }
+
+  async function getNUpcomingFixtures(n: number) {
+    try {
+      return await $api.get<{ fixtures: ManagerFixture[] }>(`${apiBase}/api/clubs/${clubId}/fixtures?upcoming=true&limit=${n}`)
+    } catch (error) {
+      console.error(error)
+      toast.apiError(error)
     }
   }
 
   return {
-    getNextFixture
+    getNextFixture,
+    getNUpcomingFixtures
   }
 }

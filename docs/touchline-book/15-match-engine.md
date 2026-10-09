@@ -129,6 +129,16 @@ stored as a **template with placeholders** (`{player}`, `{assist}`, `{sub}`) so
 replays are byte-identical; the API resolves names at read time
 ([Ch. 16](16-matchday-and-live-matches.md) §16.5).
 
+**Expected goals (IM58).** Every chance adds its exact goal probability —
+the `goalW / total` weight `resolveChance` draws against — to the attacking
+side's xG; an awarded penalty adds its conversion rate. No extra draw is
+taken, so the golden replay digest is unchanged and a replayed match gives the
+same xG. `MatchResult.home_xg/away_xg` (2 dp) are stored on `match.matches`
+(migration 0061) by both the instant and the live finalize paths and served
+as `stats.home.xg/away.xg` on the match events read. Matches played before
+IM58 carry `null`; they are never backfilled. Calibration check: over 4000
+seeds mean xG ≈ mean goals (1.39 vs 1.36).
+
 ## 15.6 Tuning block
 
 All numbers live in `pkg/matchsim/tuning.go` (`ProposedTuning`,

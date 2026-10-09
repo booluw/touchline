@@ -53,12 +53,12 @@ each milestone.
 | IM48 | Onboarding club choice | no API change (needs preference model) |
 | IM49–IM53 | Scouting, shortlist, social, auth extras, preferences | deferred |
 | IM54 | Career/world/landing/press (new endpoints) | deferred, confirm scope |
-| IM55 | Standings last-5 form | planned |
-| IM56 | League outlook: stakes + next-match swing | planned |
-| IM57 | Projected finish + Why factors | planned |
-| IM58 | Match engine xG | planned |
-| IM59 | Next 5 fixtures + difficulty | planned |
-| IM60 | Standings window ±3 around own club | planned |
+| IM55 | Standings last-5 form | implemented 2026-10-09 |
+| IM56 | League outlook: stakes + next-match swing | implemented 2026-10-09 |
+| IM57 | Projected finish + Why factors | implemented 2026-10-09 |
+| IM58 | Match engine xG | implemented 2026-10-09 |
+| IM59 | Next 5 fixtures + difficulty | implemented 2026-10-09 |
+| IM60 | Standings window ±3 around own club | implemented 2026-10-09 |
 
 ## Status
 
@@ -75,7 +75,8 @@ each milestone.
 
 ## Next action
 
-Competitions screen (2026-10-09): IM55–IM58 planned, not implemented. Build order IM55 → IM60 → IM59 → IM58 → IM56 → IM57. Decisions: no play-offs, no manager on table, GD + xG trends both ship.
+Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OPD-63; Book §6.8–6.9, §15.5). Verification in each IM's Delivery evidence. Follow-ups: (a) `stakes.go` relegation safety counts only rivals that strictly overtake (ties ignored), looser than the outlook's rule; align if six-pointer/dead-rubber labels should match; (b) `TestListClubFixtures` is flaky (picks a club by name); (c) golangci-lint not run locally; (d) frontend wiring in progress (user's uncommitted `RaceCard.vue`, 2026-10-09).
+- [x] Race card (2026-10-09): `types/manager/competition.ts` outlook types aligned to `LeagueOutlook`; `RaceCard.vue` renders stakes headline, races + attachments with status, guaranteed cup, W/D/L swing, finish range, projection why. `nuxi typecheck`: 0 errors in touched files (8 pre-existing elsewhere). Not viewed in browser; layout not checked against the design.
 
 
 Product owner: answer the open questions in IM38–IM48, pick which deferred task (IM49–IM54) to plan first. Frontend wiring of the new fields is out of scope until asked.
