@@ -217,6 +217,35 @@ func squadHiddenAttributes(ctx context.Context, q dbtx, ids []uuid.UUID) (map[uu
 	return out, rows.Err()
 }
 
+// squadRecentRatings returns each player's last five rated appearances
+// (1–10), oldest first, for the roster's Form column (IM63). Unrated matches
+// are skipped; a player with none maps to nothing.
+func squadRecentRatings(ctx context.Context, q dbtx, ids []uuid.UUID) (map[uuid.UUID][]int, error) {
+	rows, err := q.Query(ctx, `
+		SELECT player_id, rating FROM (
+			SELECT a.player_id, a.rating, m.ended_at,
+			       row_number() OVER (PARTITION BY a.player_id ORDER BY m.ended_at DESC NULLS LAST) AS rn
+			FROM player.player_appearances a
+			JOIN match.matches m ON m.id = a.match_id
+			WHERE a.player_id = ANY($1) AND a.rating IS NOT NULL
+		) r WHERE rn <= 5
+		ORDER BY player_id, ended_at ASC NULLS FIRST`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID][]int, len(ids))
+	for rows.Next() {
+		var pid uuid.UUID
+		var rating int
+		if err := rows.Scan(&pid, &rating); err != nil {
+			return nil, err
+		}
+		out[pid] = append(out[pid], rating)
+	}
+	return out, rows.Err()
+}
+
 // squadAttributeMeans rolls the club's active-roster attribute EAV up into the
 // per-player six category means (integer mean, round-half-up — the same
 // arithmetic as internal/squad.attachAttributes) that back the roster's

@@ -61,6 +61,9 @@ each milestone.
 | IM60 | Standings window ±3 around own club | implemented 2026-10-09 |
 | IM61 | Team instructions + assistant tactical advice + tactics page | implemented 2026-10-10 |
 | IM62 | Lineup picker (select/swap, desktop + mobile) + roster fitness/availability | implemented 2026-10-10, browser check pending |
+| IM63 | Squad page + roster `recent_ratings` | implemented 2026-10-10, browser check pending |
+| IM64 | Signed morale factors | implemented 2026-10-10, browser check pending |
+| IM65 | Transfer-request preview + asking price + reassure route | implemented 2026-10-10, browser check pending |
 
 ## Status
 
@@ -76,6 +79,8 @@ each milestone.
 - Not committed (per workflow).
 
 ## Next action
+
+Squad screen (2026-10-10): IM63 **implemented, not committed** (OPD-65; Book §10 Squad screen). IM64/IM65 implemented, not committed. Gates 2026-10-10: backend gofmt/build/vet/`go test ./...` pass, integration PlayerSquad/Preview/Docs/Roster pass; frontend `nuxi typecheck` + eslint pass. Squad page layout: on desktop the page no longer scrolls, and the table and panel scroll independently (`pages/play/squad.vue`, eslint pass). The player header card (and the tabs on mobile) stays fixed while the cards below it scroll (`components/squad/PlayerPanel.vue`; typecheck + eslint pass). Table header now stays fixed while the rows scroll (`components/ui/DataTable.vue`: the table scrolls itself when its parent limits the height; squad table fills its column). Scrollbars app-wide (`assets/css/main.css`): faint and theme-aware (`--color-line2`, darkening to `--color-t3` when the bar is hovered), shown only while the scroll container is hovered. New tasks: (b) `promise-playing-time` route still leaves a request pending — decide whether to keep it or restrict it to players without an open request. Follow-ups: browser check of `/play/squad` and the mobile `/play/players/:id`; 6 existing `internal/player` integration failures (listed in IM63 evidence).
 
 Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OPD-63; Book §6.8–6.9, §15.5). Verification in each IM's Delivery evidence. Follow-ups: (a) `stakes.go` relegation safety counts only rivals that strictly overtake (ties ignored), looser than the outlook's rule; align if six-pointer/dead-rubber labels should match; (b) `TestListClubFixtures` is flaky (picks a club by name); (c) golangci-lint not run locally; (d) frontend wiring in progress (user's uncommitted `RaceCard.vue`, 2026-10-09).
 - [x] Race card (2026-10-09): `types/manager/competition.ts` outlook types aligned to `LeagueOutlook`; `RaceCard.vue` renders stakes headline, races + attachments with status, guaranteed cup, W/D/L swing, finish range, projection why. `nuxi typecheck`: 0 errors in touched files (8 pre-existing elsewhere). Not viewed in browser; layout not checked against the design.

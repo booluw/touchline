@@ -293,24 +293,34 @@ html {
     font-feature-settings: "tnum" 1;
   }
 
-  /* Square, thin, on-brand scrollbar — one rule, fits the aesthetic. */
+  /* Faint, theme-aware scrollbar, visible only while the scroll container is
+     hovered. The gutter keeps its width so content never shifts. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--color-cyan-700) var(--color-void-900);
+    scrollbar-color: transparent transparent;
+  }
+  *:hover {
+    scrollbar-color: var(--color-line2) transparent;
   }
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
-  *::-webkit-scrollbar-track {
-    background: var(--color-void-900);
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: var(--color-cyan-700);
-    border: 2px solid var(--color-void-900); /* square corners, no border-radius */
+    background: transparent;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background-color: var(--color-line2);
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: var(--color-cyan-500);
+    background-color: var(--color-t3);
   }
 
   ::selection {

@@ -2560,7 +2560,7 @@ paths:
       tags: [player]
       summary: Approve a transfer request
       operationId: approveTransferRequest
-      description: "Honors the player's open transfer request: it closes as approved and the player is listed on the market at market value (open to offers). The approval is recorded as a world event and on the player-manager relationship history."
+      description: "Honors the player's open transfer request: it closes as approved and the player is listed on the market at market value × the chosen asking-price preset (open to offers; IM65). The approval is recorded as a world event and on the player-manager relationship history."
       parameters:
         - name: id
           in: path
@@ -2570,7 +2570,20 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                price_preset: { type: string, enum: [quick_sale, valuation, hold_out], default: valuation, description: "0.8 / 1.0 / 1.25 × market value." }
       responses:
+        "400":
+          description: Unknown price_preset or malformed body.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "200":
           description: The approved request and the created listing.
           content:
@@ -2631,6 +2644,76 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "409":
           description: Request already resolved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/transfer-request/reassure:
+    post:
+      tags: [player]
+      summary: Reassure a player with a playing-time promise
+      operationId: reassureTransferRequest
+      description: "IM65. Answers the open request with a promise: the request pauses (status reassured) for 28 days, the player cools down for the same window, and a playing-time promise is judged after 4 weeks (kept +10, broken -30 relationship)."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The reassured request.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: "#/components/schemas/TransferRequest" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No open transfer request for this player.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Request already resolved.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/players/{playerID}/transfer-request/preview:
+    get:
+      tags: [player]
+      summary: Preview the consequences of answering a transfer request
+      operationId: previewTransferRequest
+      description: "IM65. Read-only. The immediate effects of approve / reassure / deny are the constants those actions apply (morale points, relationship memory); notes list follow-ups. Asking-price presets are 0.8 / 1.0 / 1.25 x market value; buyer interest by price is not modelled."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030a" }
+        - name: playerID
+          in: path
+          required: true
+          schema: { type: string, format: uuid, example: "00000000-0000-4000-8000-00000000030b" }
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferRequestPreview" }
+        "403":
+          description: Not the caller's player, or no world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No open transfer request for this player.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -4942,6 +5025,10 @@ components:
         fitness: { type: number, minimum: 0, maximum: 1, description: "IM62. player_condition fitness; 1 when no condition row." }
         available: { type: boolean, description: "IM62. Passes the same gate PUT /lineup enforces (no open injury, active status + contract, street players 18+)." }
         unavailable_reason: { type: string, enum: [injured, ineligible], description: "IM62. Set only when available is false." }
+        recent_ratings:
+          type: array
+          description: "IM63. Last five rated appearances (1-10), oldest first; empty when none."
+          items: { type: integer, minimum: 1, maximum: 10 }
     PlayerDetail:
       type: object
       description: >-
@@ -5000,6 +5087,7 @@ components:
         explanation:
           type: object
           additionalProperties: true
+          description: "Includes `why` (IM64): an Explanation of the morale target, 0-100 relative to neutral 50, whose factor deltas sum to its score."
         transfer_request: { $ref: "#/components/schemas/TransferRequest" }
         relationship_history:
           type: array
@@ -5007,6 +5095,33 @@ components:
           items: { $ref: "#/components/schemas/RelationshipEvent" }
         hidden_attributes: { $ref: "#/components/schemas/HiddenAttributes" }
         dossier: { $ref: "#/components/schemas/PlayerDossier" }
+    TransferRequestPreview:
+      type: object
+      properties:
+        market_value: { type: integer, format: int64 }
+        prices:
+          type: array
+          items:
+            type: object
+            properties:
+              preset: { type: string, enum: [quick_sale, valuation, hold_out] }
+              label: { type: string }
+              multiplier: { type: number }
+              asking_price: { type: integer, format: int64 }
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              action: { type: string, enum: [approve, reassure, deny] }
+              effects:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    label: { type: string }
+                    delta: { type: integer }
+              notes: { type: array, items: { type: string } }
     MoraleExpectation:
       type: object
       description: The agreed role vs the whole-season share and the resulting satisfaction status.

@@ -35,10 +35,11 @@ const cellValue = (row: Row, key: K) => (row as Record<string, unknown>)[key] as
 </script>
 
 <template>
-  <div class="font-geist overflow-x-auto rounded-card border border-line bg-s1 text-[12.5px] tabular-nums">
+  <!-- Scrolls itself when its parent bounds the height; the header stays pinned. -->
+  <div class="font-geist overflow-auto rounded-card border border-line bg-s1 text-[12.5px] tabular-nums">
     <table class="w-full" role="grid">
       <caption v-if="caption" class="sr-only">{{ caption }}</caption>
-      <thead>
+      <thead class="sticky top-0 z-[1] bg-s1">
         <tr class="grid gap-2 border-b border-line px-3 py-2" :style="{ gridTemplateColumns: template }">
           <th
             v-for="column in visible" :key="column.key" scope="col" :aria-sort="ariaSort(column)"

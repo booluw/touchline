@@ -234,9 +234,27 @@ func (s *server) handleApproveTransferRequest(c *gin.Context) {
 		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
+	// IM65: optional {"price_preset": quick_sale|valuation|hold_out}; default valuation.
+	var body struct {
+		PricePreset string `json:"price_preset"`
+	}
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&body); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid_body", "invalid request body")
+			return
+		}
+	}
+	if body.PricePreset == "" {
+		body.PricePreset = "valuation"
+	}
+	multiplier, ok := internalplayer.AskingPricePresets[body.PricePreset]
+	if !ok {
+		respondError(c, http.StatusBadRequest, "invalid_price_preset", "price_preset must be quick_sale, valuation or hold_out")
+		return
+	}
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
 	_ = clubID
-	view, err := s.playerSvc.ApprovePlayerRequest(c.Request.Context(), worldID, ident.ManagerID, playerID)
+	view, err := s.playerSvc.ApprovePlayerRequest(c.Request.Context(), worldID, ident.ManagerID, playerID, multiplier)
 	if err != nil {
 		playerStatus(c, err)
 		return
@@ -264,6 +282,55 @@ func (s *server) handleDenyTransferRequest(c *gin.Context) {
 	ident := c.MustGet(identityKey).(*pkgjwt.ManagerIdentity)
 	_ = clubID
 	req, err := s.playerSvc.DenyPlayerRequest(c.Request.Context(), worldID, ident.ManagerID, playerID)
+	if err != nil {
+		playerStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"request": req})
+}
+
+// playerAction parses the club/player/world/identity every per-player action
+// shares; false means a response was already written.
+func (s *server) playerAction(c *gin.Context) (worldID, managerID, playerID uuid.UUID, ok bool) {
+	if _, ok = clubParam(c); !ok {
+		return
+	}
+	playerID, err := uuid.Parse(c.Param("playerID"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid_player_id", "invalid player id")
+		return worldID, managerID, playerID, false
+	}
+	worldID, err = s.callerWorld(c)
+	if err != nil {
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
+		return worldID, managerID, playerID, false
+	}
+	return worldID, c.MustGet(identityKey).(*pkgjwt.ManagerIdentity).ManagerID, playerID, true
+}
+
+// handleTransferRequestPreview returns the consequences of each answer to the
+// player's open request (IM65; GET .../transfer-request/preview).
+func (s *server) handleTransferRequestPreview(c *gin.Context) {
+	worldID, managerID, playerID, ok := s.playerAction(c)
+	if !ok {
+		return
+	}
+	p, err := s.playerSvc.TransferRequestPreview(c.Request.Context(), worldID, managerID, playerID)
+	if err != nil {
+		playerStatus(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}
+
+// handleReassureTransferRequest pauses the player's open request with a
+// playing-time promise (IM65; POST .../transfer-request/reassure).
+func (s *server) handleReassureTransferRequest(c *gin.Context) {
+	worldID, managerID, playerID, ok := s.playerAction(c)
+	if !ok {
+		return
+	}
+	req, err := s.playerSvc.ReassurePlayerRequest(c.Request.Context(), worldID, managerID, playerID)
 	if err != nil {
 		playerStatus(c, err)
 		return

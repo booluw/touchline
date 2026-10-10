@@ -192,3 +192,47 @@ func TestRosterAvailabilityAndFitness(t *testing.T) {
 		t.Fatal("every other contracted player should be available")
 	}
 }
+
+// TestRosterRecentRatings covers IM63: the roster carries the last five rated
+// appearances oldest first, skipping unrated matches.
+func TestRosterRecentRatings(t *testing.T) {
+	svc, _, pool, tw := newPlayerFixture(t, "roster-form")
+	ctx := context.Background()
+	pid := pickPlayer(t, pool, tw.HumanClub)
+
+	// Ratings 1..7 played on days -10..-4; an unrated match is the newest.
+	for i := 1; i <= 8; i++ {
+		matchID := seedCompletedMatch(t, pool, tw.WorldID, tw.HumanClub)
+		if _, err := pool.Exec(ctx, `UPDATE match.matches SET ended_at = now() - make_interval(days => $2) WHERE id = $1`,
+			matchID, 11-i); err != nil {
+			t.Fatalf("date match: %v", err)
+		}
+		var rating *int
+		if i <= 7 {
+			r := i
+			rating = &r
+		}
+		insertAppearance(t, pool, pid, matchID, 90, rating, 0, 0)
+	}
+
+	rows, err := svc.ListSquadMorale(ctx, tw.WorldID, tw.HumanMgr)
+	if err != nil {
+		t.Fatalf("list squad: %v", err)
+	}
+	for _, r := range rows {
+		switch {
+		case r.Player.ID == pid:
+			want := []int{3, 4, 5, 6, 7}
+			if len(r.RecentRatings) != len(want) {
+				t.Fatalf("recent_ratings = %v, want %v", r.RecentRatings, want)
+			}
+			for i := range want {
+				if r.RecentRatings[i] != want[i] {
+					t.Fatalf("recent_ratings = %v, want %v", r.RecentRatings, want)
+				}
+			}
+		case r.RecentRatings == nil:
+			t.Fatalf("player %s recent_ratings is nil, want empty slice", r.Player.ID)
+		}
+	}
+}

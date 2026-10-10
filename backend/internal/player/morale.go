@@ -83,6 +83,10 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 	if err != nil {
 		return nil, err
 	}
+	ratings, err := squadRecentRatings(ctx, s.pool, ids)
+	if err != nil {
+		return nil, err
+	}
 	// Same eligibility gate (and date) as tactics.SetLineup.
 	loaded, err := squad.NewStore(s.pool).LoadSquad(ctx, clubID, time.Now())
 	if err != nil {
@@ -105,6 +109,10 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 		}
 		rows[i].Hidden = hidden[rows[i].Player.ID]
 		rows[i].Dossier = dossiers[rows[i].Player.ID]
+		rows[i].RecentRatings = ratings[rows[i].Player.ID]
+		if rows[i].RecentRatings == nil {
+			rows[i].RecentRatings = []int{}
+		}
 		rows[i].Available, rows[i].UnavailableReason = availability(eligibility[rows[i].Player.ID])
 		att := attrs[rows[i].Player.ID]
 		rows[i].Attributes = att
@@ -167,6 +175,8 @@ func (s *Service) GetPlayerMoraleDetail(ctx context.Context, worldID, managerID,
 			"satisfaction_status": status,
 			"morale_target":       moraleTarget(vars.Share, expected, vars.personality()),
 			"swing_alpha":         swingAlpha(vars.personality()),
+			// IM64: signed terms of morale_target, 0–100 relative to neutral 50.
+			"why": moraleTargetExplanation(vars.Share, expected, vars.personality()),
 		},
 	}
 	req, err := latestTransferRequest(ctx, s.pool, playerID)
