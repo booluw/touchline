@@ -95,5 +95,5 @@ Tactics (2026-10-10): IM61 **implemented, not committed** (OPD-64; Book §12.9; 
 
 Fixtures screen (2026-10-10): IM66 + IM67 **implemented, not committed** (OPD-66; Book §16.9, §6.7). Migration 0063. Gates: backend gofmt/build/vet/vet-integration/`go test ./...` pass; integration (embedded PG at 127.0.0.1:55432, db `touchline_test`) match + httpapi Calendar/Docs/Fixture/MatchFeed/Live + competition Upcoming/Difficulty pass; frontend typecheck 0 errors, eslint clean. Next: browser check of `/play/fixtures`; IM68 ticket revenue (open decisions in the file).
 - [x] IM67 follow-up (2026-10-10): season list now runs to the next league season's start, so cup ties after the last league matchday are included (`season_fixtures.go`); attendance shows from kickoff on mobile cards and the live-match panel (`pages/play/fixtures.vue`). Gates: build/vet, PositionsAfter unit, httpapi Calendar/Docs integration pass; typecheck 0 errors, eslint clean.
-- [ ] New: integration case for a cup tie after the last league matchday (none in the test world yet).
-- [ ] New: Book §16.8 still says xG is not emitted (stale since IM58).
+- [x] Integration case for a cup tie after the last league matchday: `TestHTTPSeasonCalendarAndClubFixtures` inserts one 7 days after the last league fixture and asserts it is the 7th season row (pass, embedded PG).
+- [x] Book §16.8: now documents per-side `xg` (IM58); only possession and shots are not emitted.

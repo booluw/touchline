@@ -129,7 +129,7 @@ After commit, best-effort pushes: `relationship_change`, dashboard updates.
 
 ## 16.8 Match stats (IM45, OPD-61)
 
-`GET /api/matches/:id/events` also returns `stats.home`/`stats.away`: goals (the score line: stamped when completed, else counted from goal/penalty events), chances created, yellow and red cards, substitutions, penalties awarded and injuries. Events persist minute by minute, so a live match counts only played minutes. Possession, shots and xG are not emitted.
+`GET /api/matches/:id/events` also returns `stats.home`/`stats.away`: goals (the score line: stamped when completed, else counted from goal/penalty events), chances created, yellow and red cards, substitutions, penalties awarded and injuries. Events persist minute by minute, so a live match counts only played minutes. Possession and shots are not emitted. Each side also carries `xg` (expected goals), stamped when the match completes (IM58); null while live and for matches played before IM58.
 
 ## 16.9 Crowd attendance (IM66, OPD-66)
 
