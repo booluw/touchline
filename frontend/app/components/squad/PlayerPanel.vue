@@ -128,7 +128,7 @@ const contract = computed(() => {
       <span v-if="ovr" class="num text-[28px] font-semibold leading-none">{{ ovr }}</span>
     </UiCard>
 
-    <UiSegmentedControl v-if="tabbed" v-model="tab" label="Player sections" :options="tabs" class="grid grid-cols-4" />
+    <UiSegmentedControl v-if="tabbed" v-model="tab" label="Player sections" :options="tabs" fill />
 
     <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
 

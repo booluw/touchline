@@ -157,7 +157,7 @@ watch(clubId, id => id && load(id), { immediate: true })
           <span class="text-label label-caps text-t3">Team instructions</span>
           <div v-for="d in dials" :key="d.key" class="flex flex-col gap-1.5">
             <span class="text-meta text-t2">{{ d.label }}</span>
-            <UiSegmentedControl v-model="instructions[d.key]" :label="d.label" :options="d.options" class="grid grid-cols-3" />
+            <UiSegmentedControl v-model="instructions[d.key]" :label="d.label" :options="d.options" fill />
           </div>
         </UiCard>
       </div>
@@ -198,8 +198,7 @@ watch(clubId, id => id && load(id), { immediate: true })
           <span class="text-label label-caps text-t3">Team instructions</span>
           <div v-for="d in dials" :key="d.key" class="flex flex-col gap-1.5">
             <span class="text-meta text-t2">{{ d.label }}</span>
-            <UiSegmentedControl v-model="instructions[d.key]" :label="d.label" :options="d.options"
-              class="grid grid-cols-3" />
+            <UiSegmentedControl v-model="instructions[d.key]" :label="d.label" :options="d.options" fill />
           </div>
         </UiCard>
       </aside>

@@ -71,9 +71,10 @@ onMounted(init)
 </script>
 
 <template>
-  <main v-if="own" class="space-y-4 pt-5">
+  <!-- Fills the shell so the panel's header + tabs stay put and its cards scroll. -->
+  <main v-if="own" class="flex h-full flex-col gap-4 pt-5">
     <NuxtLink to="/play/squad" class="text-meta text-t2 hover:text-t1">&lsaquo; Squad</NuxtLink>
-    <SquadPlayerPanel :detail="own.detail" :row="own.row" :dynamics="own.dynamics" :busy="busy" tabbed @respond="onRespond" />
+    <SquadPlayerPanel class="min-h-0 flex-1 pb-3.5" :detail="own.detail" :row="own.row" :dynamics="own.dynamics" :busy="busy" tabbed @respond="onRespond" />
   </main>
   <main v-else class="h-full text-slate-200 font-mono space-y-5">
     <div class="flex items-center gap-4">
