@@ -28,7 +28,7 @@ const emit = defineEmits<{ openInbox: [] }>()
         :loading
         @open-inbox="emit('openInbox')"
       />
-      <main class="min-h-0 flex-1 overflow-y-auto p-3.5 md:p-5"><slot /></main>
+      <main class="min-h-0 flex-1 overflow-y-auto p-3.5 pt-0 md:p-5 md:pt-0"><slot /></main>
       <UiBottomNav :items="items" />
     </div>
   </div>

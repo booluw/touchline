@@ -146,7 +146,7 @@ func squadRows(ctx context.Context, q dbtx, clubID uuid.UUID) ([]PlayerMoraleRow
 		       COALESCE(c.morale, 0.5), COALESCE(c.playing_time_pct, 0),
 		       pe.nationality_code, COALESCE(n.name, ''), pe.date_of_birth::text,
 		       date_part('year', age(world.world_date(p.world_id), pe.date_of_birth))::int,
-		       cr.weekly_wage::bigint, cr.end_date::text
+		       cr.weekly_wage::bigint, cr.end_date::text, COALESCE(c.fitness, 1)::float8
 		FROM player.players p
 		JOIN person.people pe ON pe.id = p.person_id
 		LEFT JOIN ref.nationalities n ON n.code = pe.nationality_code
@@ -174,7 +174,7 @@ func squadRows(ctx context.Context, q dbtx, clubID uuid.UUID) ([]PlayerMoraleRow
 		)
 		if err := rows.Scan(&r.Player.ID, &r.FirstName, &r.LastName, &r.Player.Name,
 			&r.Position, &r.SquadNumber, &r.SquadRole, &r.Morale, &r.PlayingTimePct,
-			&natCode, &natName, &r.DateOfBirth, &r.Age, &wage, &endDate); err != nil {
+			&natCode, &natName, &r.DateOfBirth, &r.Age, &wage, &endDate, &r.Fitness); err != nil {
 			return nil, err
 		}
 		r.Nationality = &apiref.CountryRef{Code: natCode, Name: natName}

@@ -11,6 +11,7 @@ import (
 	"github.com/touchline/backend/internal/tactics"
 	"github.com/touchline/backend/internal/training"
 	pkgjwt "github.com/touchline/backend/pkg/jwt"
+	"github.com/touchline/backend/pkg/matchsim"
 )
 
 func (s *server) commandActor(c *gin.Context) (tactics.Actor, error) {
@@ -42,7 +43,7 @@ func tacticStatus(c *gin.Context, err error) {
 		respondError(c, http.StatusForbidden, "forbidden", "forbidden")
 	case errors.Is(err, tactics.ErrFixtureLive):
 		respondErr(c, http.StatusConflict, err)
-	case errors.Is(err, tactics.ErrInvalidStyle) || errors.Is(err, tactics.ErrInvalidFormation) || errors.Is(err, tactics.ErrInvalidLineup):
+	case errors.Is(err, tactics.ErrInvalidStyle) || errors.Is(err, tactics.ErrInvalidFormation) || errors.Is(err, tactics.ErrInvalidLineup) || errors.Is(err, tactics.ErrInvalidInstruction):
 		respondErr(c, http.StatusBadRequest, err)
 	case errors.Is(err, tactics.ErrPlayerUnavailable):
 		respondErr(c, http.StatusUnprocessableEntity, err)
@@ -104,19 +105,30 @@ func (s *server) handleSetTactics(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Style     string `json:"style"`
-		Formation string `json:"formation"`
+		Style        string                    `json:"style"`
+		Formation    string                    `json:"formation"`
+		Instructions *tactics.InstructionsView `json:"instructions"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		respondError(c, 400, "invalid_tactics", "invalid tactics")
 		return
+	}
+	// IM61: instructions are optional; omitted keeps the saved dials.
+	var instr *matchsim.Instructions
+	if req.Instructions != nil {
+		in, err := tactics.ParseInstructions(*req.Instructions)
+		if err != nil {
+			tacticStatus(c, err)
+			return
+		}
+		instr = &in
 	}
 	a, err := s.commandActor(c)
 	if err != nil {
 		respondError(c, 401, "unauthenticated", "unauthenticated")
 		return
 	}
-	if err = s.tacticsSvc.SetTactics(c.Request.Context(), a, id, req.Style, req.Formation); err != nil {
+	if err = s.tacticsSvc.SetTactics(c.Request.Context(), a, id, req.Style, req.Formation, instr); err != nil {
 		tacticStatus(c, err)
 		return
 	}

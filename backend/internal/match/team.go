@@ -121,7 +121,7 @@ func (s *Service) buildTeam(ctx context.Context, f *Fixture, club squad.ClubRow,
 		Aggression:            50, // generated clubs have no DNA aggression column (engine normalises 0 the same)
 		RivalryIntensity:      fc.DerbyIntensity,
 		PenaltyConversionRate: takerRate,
-		Tactics:               matchsim.Tactics{Style: style},
+		Tactics:               matchsim.Tactics{Style: style, Instructions: tactics.Instructions},
 		Fitness:               squad.XIFitness(conds, xi),
 	}
 	return p, nil

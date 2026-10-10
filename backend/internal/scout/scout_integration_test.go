@@ -184,3 +184,62 @@ func TestNextFixtureScout(t *testing.T) {
 }
 
 func newInt(v int) *int { return &v }
+
+// IM61: the assistant reads the opponent's saved style and its completed
+// matches (xG when present) for the next fixture, and scores the club's dials.
+func TestTacticalBriefReadsOpponentEvidence(t *testing.T) {
+	pool, svc, worldID, premierID := seedScoutWorld(t)
+	ctx := context.Background()
+	sc := NewService(pool, svc)
+
+	var clubID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT club_id FROM competition.club_competitions
+		WHERE competition_id = $1 AND role = 'league' ORDER BY club_id LIMIT 1`, premierID).
+		Scan(&clubID); err != nil {
+		t.Fatalf("pick premier member: %v", err)
+	}
+	if b, err := sc.TacticalBrief(ctx, worldID, clubID); err != nil || b != nil {
+		t.Fatalf("off-season brief = %+v, %v; want nil, nil", b, err)
+	}
+	if _, err := svc.StartSeason(ctx, worldID, premierID); err != nil {
+		t.Fatalf("start season: %v", err)
+	}
+	next, err := sc.NextFixture(ctx, worldID, clubID)
+	if err != nil || next == nil {
+		t.Fatalf("next fixture: %+v, %v", next, err)
+	}
+	oppID := next.Opponent.Club.ID
+
+	// Opponent plays a low block and has one completed (leaky) match with xG.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO club.club_tactics (club_id, style, formation) VALUES ($1, 'low_block', '5-4-1')`, oppID); err != nil {
+		t.Fatalf("seed opponent tactics: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO match.matches (fixture_id, world_id, seed, engine_version, status, home_score, away_score, home_xg, away_xg, ended_at)
+		SELECT f.id, f.world_id, 1, 'test', 'completed',
+		       CASE WHEN f.home_club_id = $1 THEN 0 ELSE 3 END, CASE WHEN f.home_club_id = $1 THEN 3 ELSE 0 END,
+		       CASE WHEN f.home_club_id = $1 THEN 0.6 ELSE 2.4 END, CASE WHEN f.home_club_id = $1 THEN 2.4 ELSE 0.6 END,
+		       now()
+		FROM match.fixtures f
+		WHERE (f.home_club_id = $1 OR f.away_club_id = $1) AND f.id <> $2
+		ORDER BY f.scheduled_at LIMIT 1`, oppID, next.Fixture.ID); err != nil {
+		t.Fatalf("seed opponent match: %v", err)
+	}
+
+	b, err := sc.TacticalBrief(ctx, worldID, clubID)
+	if err != nil || b == nil {
+		t.Fatalf("brief: %+v, %v", b, err)
+	}
+	p := b.Profile
+	if p.Style != "low_block" || p.Matches != 1 || p.GoalsAgainst != 3 || p.XGAgainst == nil || *p.XGAgainst != 2.4 {
+		t.Fatalf("profile = %+v", p)
+	}
+	if b.Suggested.Mentality != "positive" || b.Suggested.Width != "wide" {
+		t.Fatalf("suggested = %+v, want positive + wide", b.Suggested)
+	}
+	if b.Current.Mentality != "balanced" || b.Fit.Score >= 50 || len(b.Fit.Factors) != 2 {
+		t.Fatalf("neutral club should fit poorly: current %+v fit %+v", b.Current, b.Fit)
+	}
+}

@@ -7,7 +7,7 @@ const league = computed(() => clubstore.competitions.find((c) => c.competition_t
 </script>
 
 <template>
-  <main class="space-y-5">
+  <main class="space-y-5 pt-3.5">
     <div class="flex flex-col gap-1">
       <h2 class="text-page">Competitions</h2>
       <p class="text-t2 capitalize">

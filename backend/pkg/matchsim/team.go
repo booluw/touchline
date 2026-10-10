@@ -66,9 +66,11 @@ type Team struct {
 
 // Tactics is the per-team tactical setup consumed by the engine (v1.5). Style
 // must be one of the S05-01 keys (StyleBalanced etc.); anything else falls back
-// through Tuning.DefaultStyle to the identity block.
+// through Tuning.DefaultStyle to the identity block. Instructions (IM61)
+// refine the style block; the zero value is neutral.
 type Tactics struct {
-	Style string
+	Style        string
+	Instructions Instructions
 }
 
 // PlayerRef is one lineup member the attribution pass can cast a token to. ID

@@ -112,10 +112,10 @@ func Simulate(opts Options) MatchResult {
 		// A live tactic_change input applies the side's new style for the
 		// remainder of the match from this minute (v1.5; no RNG consumed).
 		if in := liveInputs.tacticAt(minute, hs.team.ID); in != nil {
-			hs.style = tuning.styleSpec(in.TacticStyle())
+			hs.style = withInstructions(tuning.styleSpec(in.TacticStyle()), hs.team.Tactics.Instructions)
 		}
 		if in := liveInputs.tacticAt(minute, as.team.ID); in != nil {
-			as.style = tuning.styleSpec(in.TacticStyle())
+			as.style = withInstructions(tuning.styleSpec(in.TacticStyle()), as.team.Tactics.Instructions)
 		}
 
 		// Draw 1: possession. Both sides' styles shift the tuned share
@@ -312,7 +312,7 @@ func (s *side) reset(t Team, variance float64, tuning Tuning) {
 	}
 	s.baseA, s.baseD = s.a, s.d
 	s.eff = 1
-	s.style = tuning.styleSpec(t.Tactics.Style)
+	s.style = withInstructions(tuning.styleSpec(t.Tactics.Style), t.Tactics.Instructions)
 	s.stamina = clampFitness(t.Fitness)
 }
 

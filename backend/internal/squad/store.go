@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/touchline/backend/pkg/matchsim"
 )
 
 // LoadedPlayer is the persisted view team selection reasons about before a
@@ -45,6 +47,9 @@ type LoadedPlayer struct {
 	// expected_recovery_date still covers the matchday, an active contract,
 	// and — for street-origin players — the 18+ age floor (A07).
 	Available bool
+	// Injured reports an open injury covering the matchday (one reason
+	// Available can be false; the roster labels it, IM62).
+	Injured bool
 
 	Leadership int
 	Hidden     PlayerHiddenTraitsSnapshot
@@ -198,6 +203,7 @@ func (s *Store) loadPlayerRows(ctx context.Context, clubID uuid.UUID, onDate tim
 			return nil, fmt.Errorf("scan player: %w", err)
 		}
 		p.HasActiveContract = hasContract
+		p.Injured = open
 		p.Available = MatchEligible(p.Status, p.Origin, hasContract, open, p.ComputedAge)
 		p.Leadership = lead
 		p.Hidden = PlayerHiddenTraitsSnapshot{
@@ -400,9 +406,10 @@ func (s *Store) LoadLineup(ctx context.Context, clubID uuid.UUID) (map[int]uuid.
 // playable style key and slot order with balanced/4-3-3 defaults. UpdatedAt is
 // the last write time, nil when never written.
 type TacticsRow struct {
-	Style     string
-	Formation string
-	UpdatedAt *time.Time
+	Style        string
+	Formation    string
+	Instructions matchsim.Instructions
+	UpdatedAt    *time.Time
 }
 
 // LoadTactics reads a club's saved tactics row (if any). A missing row is not
@@ -411,8 +418,10 @@ func (s *Store) LoadTactics(ctx context.Context, clubID uuid.UUID) (TacticsRow, 
 	var t TacticsRow
 	var updatedAt *time.Time
 	err := s.pool.QueryRow(ctx,
-		`SELECT style, formation, updated_at FROM club.club_tactics WHERE club_id = $1`, clubID).
-		Scan(&t.Style, &t.Formation, &updatedAt)
+		`SELECT style, formation, mentality, pressing, width, tempo, updated_at
+		 FROM club.club_tactics WHERE club_id = $1`, clubID).
+		Scan(&t.Style, &t.Formation, &t.Instructions.Mentality, &t.Instructions.Pressing,
+			&t.Instructions.Width, &t.Instructions.Tempo, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TacticsRow{}, nil
 	}

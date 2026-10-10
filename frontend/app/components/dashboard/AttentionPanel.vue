@@ -29,14 +29,13 @@ async function load() {
 function onAction(item: ManagerDashboardItem<"urgent" | "important" | "interesting">) {
   switch (item.action.kind) {
     case "set_lineup":
-      // Router user to Squad Page
-      navigateTo(`/play/squad?referralId=${item.id}`)
+      navigateTo(`/play/tactics?referralId=${item.id}`)
       return;
     case "view_fixture":
       navigateTo(``)
       return
     case "view_standings":
-      navigateTo("/play/competitions")
+      navigateTo(`/play/competitions?referralId=${item.id}`)
       return
   }
 }

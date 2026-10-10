@@ -39,3 +39,30 @@ func (s *server) handleNextClubFixture(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"next_fixture": view})
 }
+
+// handleTacticalAdvice returns the assistant manager's plan for the club's
+// next fixture (IM61). Scoped like next-fixture; off-season yields a null
+// advice payload.
+func (s *server) handleTacticalAdvice(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid_club_id", "invalid club id")
+		return
+	}
+	worldID, err := s.callerWorld(c)
+	if err != nil {
+		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
+		return
+	}
+	brief, err := s.scoutSvc.TacticalBrief(c.Request.Context(), worldID, id)
+	switch {
+	case errors.Is(err, internalcompetition.ErrClubNotFound),
+		errors.Is(err, internalcompetition.ErrClubWorldMismatch):
+		respondErr(c, http.StatusNotFound, err)
+		return
+	case err != nil:
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"advice": brief})
+}
