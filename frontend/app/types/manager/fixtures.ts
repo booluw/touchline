@@ -76,6 +76,42 @@ export interface ManagerFixture {
   competition: { id: string, name: string }
   difficulty: {
     factors: { delta: number, detail: string, label: string }[]
+    level: 1 | 2 | 3 | 4 | 5
     label: "Very easy" | "Easy" | "Even" | "Hard" | "Very hard"
   }
+}
+/** One row of GET /clubs/:id/fixtures?season=current (IM67). */
+export interface SeasonFixture {
+  id: string
+  world_id: string
+  competition: { id: string, name: string }
+  home_club: CommonClub
+  away_club: CommonClub
+  /** League matchday, or the cup round. */
+  matchday: number
+  scheduled_at: string
+  status: "scheduled" | "live" | "completed" | "postponed"
+  home_score?: number
+  away_score?: number
+  match_id?: string
+  /** Crowd (IM66); null until kickoff and for matches played before crowds were modelled. */
+  attendance: number | null
+  /** League position once this matchday is in; league matches only. */
+  position_after: number | null
+  /** Unplayed fixtures only. */
+  last_meeting: { home_club: CommonClub, away_club: CommonClub, home_score?: number, away_score?: number, scheduled_at: string } | null
+  difficulty: ManagerFixture["difficulty"] | null
+}
+
+export interface MatchSideStats {
+  goals: number
+  chances_created: number
+  yellow_cards: number
+  red_cards: number
+  xg: number | null
+}
+
+export interface MatchSummary {
+  events: { minute: number, type: string, club?: { id: string }, player?: { id: string, name?: string } }[]
+  stats: { home: MatchSideStats, away: MatchSideStats }
 }

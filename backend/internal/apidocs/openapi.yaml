@@ -554,8 +554,20 @@ paths:
         rated for the club in the path: opponent best-available XI vs ours on
         that matchday, venue, and the opponent's recent form. Without query
         parameters the response is unchanged (up to 30 fixtures, past and future).
+
+        With `season=current` (IM67) every fixture of the club's current league
+        season window is returned (all competitions, no cap). Each row adds
+        `attendance` (IM66 crowd; null until kickoff), `position_after` (league
+        position once that matchday is in; league matches only), and on unplayed
+        fixtures `difficulty` and `last_meeting` (most recent completed meeting,
+        any competition, or null). `season` takes precedence over `upcoming`.
       parameters:
         - $ref: "#/components/parameters/ClubID"
+        - name: season
+          in: query
+          required: false
+          schema: { type: string, enum: [current] }
+          description: Full current-season list with attendance, position after, last meeting and difficulty.
         - name: upcoming
           in: query
           required: false
@@ -582,6 +594,13 @@ paths:
                         - type: object
                           properties:
                             difficulty: { $ref: "#/components/schemas/FixtureDifficulty" }
+                            attendance: { type: integer, nullable: true, description: "season=current only" }
+                            position_after: { type: integer, nullable: true, description: "season=current only" }
+                            last_meeting:
+                              nullable: true
+                              description: season=current only
+                              allOf:
+                                - $ref: "#/components/schemas/Fixture"
               examples:
                 sample:
                   value:

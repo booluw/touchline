@@ -171,6 +171,26 @@ func TestHTTPSeasonCalendarAndClubFixtures(t *testing.T) {
 		t.Fatalf("upcoming limit=0 = %d, want 400", resp.StatusCode)
 	}
 
+	// IM67: season=current returns the whole season; unplayed rows carry a
+	// difficulty, and attendance/position stay null before kickoff.
+	resp = get(t, ts, client, "/api/clubs/"+clubID+"/fixtures?season=current", plainCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("season fixtures = %d, want 200", resp.StatusCode)
+	}
+	season := decodeMap(t, resp)["fixtures"].([]any)
+	if len(season) != 6 {
+		t.Fatalf("season fixtures = %d, want 6", len(season))
+	}
+	for _, f := range season {
+		row := f.(map[string]any)
+		if row["difficulty"] == nil || row["attendance"] != nil || row["position_after"] != nil {
+			t.Fatalf("unplayed season row: want difficulty and null attendance/position, got %v", row)
+		}
+	}
+	if resp := get(t, ts, client, "/api/clubs/"+clubID+"/fixtures?season=last", plainCookies); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("season=last = %d, want 400", resp.StatusCode)
+	}
+
 	// IM60 + IM56: a manager without a club gets 404; once employed, the
 	// window and the outlook are served for their club.
 	if _, err := pool.Exec(context.Background(),

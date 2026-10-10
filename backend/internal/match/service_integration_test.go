@@ -183,6 +183,19 @@ func TestPlayFixtureIntegration(t *testing.T) {
 	if version == "" {
 		t.Fatalf("engine version missing")
 	}
+
+	// IM66: the crowd is stored, and the home club got a stadium capacity
+	// that bounds it.
+	var attendance, capacity int
+	if err := pool.QueryRow(ctx, `
+		SELECT m.attendance, c.stadium_capacity FROM match.matches m
+		JOIN club.clubs c ON c.id = $2
+		WHERE m.fixture_id = $1`, fixtureID, homeID).Scan(&attendance, &capacity); err != nil {
+		t.Fatalf("read attendance/capacity: %v", err)
+	}
+	if capacity <= 0 || attendance <= 0 || attendance > capacity {
+		t.Fatalf("attendance %d / capacity %d out of range", attendance, capacity)
+	}
 	if seed != fixtureSeed(fixtureID) {
 		t.Fatalf("persisted seed %d != fixture seed %d", seed, fixtureSeed(fixtureID))
 	}

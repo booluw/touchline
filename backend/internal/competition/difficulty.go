@@ -155,7 +155,11 @@ func (s *Service) UpcomingClubFixtures(ctx context.Context, worldID, clubID uuid
 	if err != nil {
 		return nil, err
 	}
+	return s.rateUpcoming(ctx, clubID, fixtures)
+}
 
+// rateUpcoming attaches a difficulty, relative to clubID, to each fixture.
+func (s *Service) rateUpcoming(ctx context.Context, clubID uuid.UUID, fixtures []Fixture) ([]UpcomingFixture, error) {
 	opps := make([]uuid.UUID, 0, len(fixtures))
 	for _, f := range fixtures {
 		opps = append(opps, opponentOf(f, clubID))

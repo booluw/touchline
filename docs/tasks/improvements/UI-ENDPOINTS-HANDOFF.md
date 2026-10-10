@@ -11,7 +11,7 @@ each milestone.
   `Touchline.dc.html` (shell + Home), `Touchline Squad.dc.html`,
   `Touchline Transfers.dc.html`, `Touchline Matchday.dc.html`,
   `Touchline Finances Board.dc.html`, `Touchline Landing Auth.dc.html`,
-  `Touchline Screens.dc.html` (tactics, training, scouting, academy, club,
+  `Touchline Fixtures.dc.html`, `Touchline Screens.dc.html` (tactics, training, scouting, academy, club,
   competitions, world, career, social).
 - Data in the designs lives in the `<script type="text/x-dc">` block of each file.
 
@@ -64,6 +64,9 @@ each milestone.
 | IM63 | Squad page + roster `recent_ratings` | implemented 2026-10-10, browser check pending |
 | IM64 | Signed morale factors | implemented 2026-10-10, browser check pending |
 | IM65 | Transfer-request preview + asking price + reassure route | implemented 2026-10-10, browser check pending |
+| IM66 | Crowd attendance per match | implemented 2026-10-10 |
+| IM67 | Fixtures & results page (season endpoint + `/play/fixtures`) | implemented 2026-10-10, browser check pending |
+| IM68 | Ticket revenue from attendance | planned |
 
 ## Status
 
@@ -89,3 +92,8 @@ Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OP
 Product owner: answer the open questions in IM38–IM48, pick which deferred task (IM49–IM54) to plan first. Frontend wiring of the new fields is out of scope until asked.
 
 Tactics (2026-10-10): IM61 **implemented, not committed** (OPD-64; Book §12.9; migration 0062). Next: browser check of `/play/tactics`; open question on crosses/familiarity data; pitch/lineup editor from the design not yet built.
+
+Fixtures screen (2026-10-10): IM66 + IM67 **implemented, not committed** (OPD-66; Book §16.9, §6.7). Migration 0063. Gates: backend gofmt/build/vet/vet-integration/`go test ./...` pass; integration (embedded PG at 127.0.0.1:55432, db `touchline_test`) match + httpapi Calendar/Docs/Fixture/MatchFeed/Live + competition Upcoming/Difficulty pass; frontend typecheck 0 errors, eslint clean. Next: browser check of `/play/fixtures`; IM68 ticket revenue (open decisions in the file).
+- [x] IM67 follow-up (2026-10-10): season list now runs to the next league season's start, so cup ties after the last league matchday are included (`season_fixtures.go`); attendance shows from kickoff on mobile cards and the live-match panel (`pages/play/fixtures.vue`). Gates: build/vet, PositionsAfter unit, httpapi Calendar/Docs integration pass; typecheck 0 errors, eslint clean.
+- [ ] New: integration case for a cup tie after the last league matchday (none in the test world yet).
+- [ ] New: Book §16.8 still says xG is not emitted (stale since IM58).

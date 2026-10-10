@@ -1,5 +1,5 @@
 import {
-  PhArrowsLeftRight, PhBarbell, PhBinoculars, PhBriefcase, PhChatsCircle, PhCoins, PhGlobeHemisphereWest,
+  PhArrowsLeftRight, PhBarbell, PhBinoculars, PhBriefcase, PhCalendarBlank, PhChatsCircle, PhCoins, PhGlobeHemisphereWest,
   PhHouse, PhShieldStar, PhStrategy, PhStudent, PhTrophy, PhUsersThree,
 } from '@phosphor-icons/vue'
 import type { ShellNavItem } from '~/types/ui/design'
@@ -73,6 +73,7 @@ export const GAME_NAV: ShellNavItem[] = [
   { label: 'Finances', to: '/play/finances', icon: PhCoins },
   { label: 'Club', to: '/play/club', icon: PhShieldStar },
   { label: 'Competitions', to: '/play/competitions', icon: PhTrophy },
+  { label: 'Fixtures', to: '/play/fixtures', icon: PhCalendarBlank },
   { label: 'World', to: '/play/world', icon: PhGlobeHemisphereWest },
   { label: 'Career', to: '/play/career', icon: PhBriefcase },
   { label: 'Social', to: '/play/social', icon: PhChatsCircle },

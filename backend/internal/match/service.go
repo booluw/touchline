@@ -184,7 +184,11 @@ func (s *Service) PlayFixture(ctx context.Context, fixtureID uuid.UUID) (*MatchR
 		GoldenGoal: fc.GoldenGoal,
 	})
 
-	matchID, now, err := persistMatch(ctx, tx, fixtureID, f.WorldID, seed, res)
+	attendance, err := fixtureAttendance(ctx, tx, f, fc, seed)
+	if err != nil {
+		return nil, fmt.Errorf("play fixture: %w", err)
+	}
+	matchID, now, err := persistMatch(ctx, tx, fixtureID, f.WorldID, seed, res, attendance)
 	if err != nil {
 		return nil, fmt.Errorf("play fixture: %w", err)
 	}

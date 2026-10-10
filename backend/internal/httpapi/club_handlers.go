@@ -74,6 +74,24 @@ func (s *server) handleListClubFixtures(c *gin.Context) {
 		respondError(c, http.StatusForbidden, "no_world_context", "no world context")
 		return
 	}
+	if season := c.Query("season"); season != "" {
+		if season != "current" {
+			respondError(c, http.StatusBadRequest, "invalid_season", "season must be \"current\"")
+			return
+		}
+		fixtures, err := s.compSvc.ClubSeasonFixtures(c.Request.Context(), worldID, id)
+		switch {
+		case errors.Is(err, internalcompetition.ErrClubNotFound),
+			errors.Is(err, internalcompetition.ErrClubWorldMismatch):
+			respondErr(c, http.StatusNotFound, err)
+			return
+		case err != nil:
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"fixtures": fixtures})
+		return
+	}
 	if c.Query("upcoming") == "true" {
 		limit := 30
 		if q := c.Query("limit"); q != "" {

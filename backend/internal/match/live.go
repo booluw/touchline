@@ -296,14 +296,19 @@ func (s *Service) kickoffFixture(ctx context.Context, fixtureID uuid.UUID) (*Liv
 		return nil, fmt.Errorf("kickoff fixture: marshal snapshot: %w", err)
 	}
 
+	attendance, err := fixtureAttendance(ctx, tx, f, fc, seed)
+	if err != nil {
+		return nil, fmt.Errorf("kickoff fixture: %w", err)
+	}
+
 	var matchID uuid.UUID
 	startedAt := time.Now().UTC()
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO match.matches
-			(fixture_id, world_id, seed, engine_version, status, started_at, sim_inputs, pacing_millis)
-		VALUES ($1, $2, $3, $4, 'in_progress', $5, $6, $7)
+			(fixture_id, world_id, seed, engine_version, status, started_at, sim_inputs, pacing_millis, attendance)
+		VALUES ($1, $2, $3, $4, 'in_progress', $5, $6, $7, $8)
 		RETURNING id`,
-		fixtureID, f.WorldID, seed, matchsim.EngineVersion, startedAt, raw, int(pacing.Milliseconds()),
+		fixtureID, f.WorldID, seed, matchsim.EngineVersion, startedAt, raw, int(pacing.Milliseconds()), attendance,
 	).Scan(&matchID); err != nil {
 		return nil, fmt.Errorf("kickoff fixture: insert match: %w", err)
 	}
