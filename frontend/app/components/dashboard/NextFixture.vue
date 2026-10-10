@@ -42,7 +42,14 @@ const next_fixture = computed(() => ({
         </nuxt-link>
       </div>
       <div class="flex gap-3">
-        <UiButton variant="primary" size="md" class="w-full">Set lineup</UiButton>
+        <UiButton
+          variant="primary"
+          size="md"
+          class="w-full"
+          @click="$router.push('/play/squad')"
+        >
+          Set lineup
+        </UiButton>
         <UiButton variant="secondary" size="md" class="w-full">Opponent report</UiButton>
       </div>
     </template>

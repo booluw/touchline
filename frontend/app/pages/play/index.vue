@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import type { ManagerDashboardSummary } from '~/types/manager';
+const viewport = useViewport()
 
 const summary = ref<ManagerDashboardSummary[]>()
 </script>
@@ -8,10 +9,10 @@ const summary = ref<ManagerDashboardSummary[]>()
   <section class="grid gap-10 md:grid-cols-3">
     <div class="md:col-span-2">
       <DashboardAttentionPanel @summary="(e) => summary = e">
-        <DashboardCardCluster class="md:hidden" :summary />
+        <DashboardCardCluster v-if="viewport.isLessThan('tablet')" :summary />
       </DashboardAttentionPanel>
     </div>
-    <div class="hidden md:flex flex-col gap-5">
+    <div v-if="!viewport.isLessThan('tablet')" class="flex flex-col gap-5">
       <DashboardNextFixture />
       <DashboardCardCluster :summary />
       <DashboardFinancialCard />

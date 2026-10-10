@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { $viewport } = useNuxtApp()
+const viewport = useViewport()
 const clubstore = useClubStore()
 
 const mode = ref<'fixtures'|'table'>("table")
@@ -14,7 +14,15 @@ const league = computed(() => clubstore.competitions.find((c) => c.competition_t
         {{ league?.name }} · {{ league?.team_count }} Clubs · {{ league?.promotions ? `top ${league.promotions} promoted, ` : '' }} {{ league?.relegations ? `bottom ${league.relegations} relegated` : '' }}
       </p>
     </div>
-    <section v-if="!$viewport.matches('mobile')" class="md:grid gap-5 md:grid-cols-12">
+    <section v-if="viewport.isLessThan('tablet')" class="space-y-5">
+      <UiSegmentedControl v-model="mode" label="Tabs" class="w-full self-start"
+        :options="[{ value: 'table', label: 'Table' }, { value: 'fixtures', label: 'Fixtures' }]" />
+      <div class="h-[68dvh] overflow-auto">
+        <CompetitionLeagueTable v-if="mode === 'table'" :leagueId="league?.id" :full="false" />
+        <CompetitionNextFiveFixtures v-else-if="mode === 'fixtures'" />
+      </div>
+    </section>
+    <section v-else class="md:grid gap-5 md:grid-cols-12">
       <div class="md:col-span-5 space-y-3">
         <CompetitionLeagueTable :leagueId="league?.id" />
       </div>
@@ -24,14 +32,6 @@ const league = computed(() => clubstore.competitions.find((c) => c.competition_t
       <div class="col-span-4">
         <CompetitionRaceCard :leagueId="league?.id" />
       </div>
-    </section>
-    <section v-else class="space-y-5">
-      <UiSegmentedControl v-model="mode" label="Tabs" class="w-full self-start"
-        :options="[{ value: 'table', label: 'Table' }, { value: 'fixtures', label: 'Fixtures' }]" />
-        <div class="h-[68dvh] overflow-auto">
-          <CompetitionLeagueTable v-if="mode === 'table'" :leagueId="league?.id" :full="false" />
-          <CompetitionNextFiveFixtures v-else-if="mode === 'fixtures'" />
-        </div>
     </section>
   </main>
 </template>
