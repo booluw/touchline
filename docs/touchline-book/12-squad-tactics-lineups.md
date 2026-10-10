@@ -123,6 +123,30 @@ calls the same cores: `tactics.SetLineupForClub`, `SetTacticsForClub`).
 
 Each filled slot of `GET /api/clubs/:id/lineup` carries `player_position` (primary) and `fit`, the selection engine's own `positionFit`: 1.0 natural, 0.75 same unit, 0.3 cross-unit, 0.05 keeper mismatch. Units are defence (GK, CB, LB, RB), midfield (DM, CM, AM, LM, RM), attack (ST, LW, RW). Because GK counts as defence, a keeper in a defender slot scores 0.75. Secondary positions are not considered.
 
+## 12.9 Team instructions and the assistant manager (IM61, OPD-64)
+
+Four three-way dials refine the style: **Mentality** cautious/balanced/positive, **Pressing** low/mid/high, **Width** narrow/normal/wide, **Tempo** patient/normal/direct. Stored as -1/0/+1 on `club.club_tactics` (migration 0062) and frozen into `sim_inputs` with the style. The middle option is neutral, so a club that never sets them plays exactly as before. `POST /api/clubs/:id/tactics` takes an optional `instructions` object (omitted keeps the saved dials; the policy bot never changes them) and `GET` returns them.
+
+Engine effect at +1 (−1 mirrors: multipliers inverted, shifts negated), applied on top of the style block and kept across live style changes:
+
+| Dial (+1) | Possession | Chance volume | Own conversion | Conceded conversion | Card rate | Stamina decay |
+| --- | --- | --- | --- | --- | --- | --- |
+| Positive mentality | — | ×1.12 | — | ×1.15 | — | — |
+| High press | +0.04 | ×1.05 | — | ×1.06 | ×1.15 | ×1.15 |
+| Wide | — | ×1.07 | — | ×1.05 | — | ×1.03 |
+| Direct tempo | −0.04 | ×1.08 | ×0.92 | — | — | ×1.04 |
+
+`GET /api/clubs/:id/tactics/advice` is the assistant manager's brief for the next fixture (`internal/scout/brief.go`). It reads only stored data: the opponent's saved style and its last 5 completed matches (xG per game when recorded, else goals). Rules, each tied to a real engine lever:
+
+- Opponent concedes ≥0.3 more than it creates (xG, else goals) → **positive** mentality; creates ≥0.3 more → **cautious**. Weight = gap × 10, max 10.
+- Low block → **wide** (weight 6). Gegenpress → **direct** tempo (6) and **low** press (4). Possession → **high** press (6).
+
+The headline is the strongest reason. The "Why?" fit score is `50 + 2 × Σ(±weight)` (clamped 0–100) for the club's **saved** dials: + when a dial matches advice, − when not. No evidence → no advice and no score. "Apply suggested plan" saves the suggested dials.
+
+## 12.10 Lineup picker inputs (IM62)
+
+Roster rows carry `fitness` (player_condition, 1 when absent), `available` (the same gate `SetLineup` enforces, evaluated today) and `unavailable_reason` (`injured` | `ineligible`). The tactics page shows each pitch token as `round(overall × fit)`.
+
 ## Connections
 
 - How the XI becomes engine ratings: [Chapter 16](16-matchday-and-live-matches.md).

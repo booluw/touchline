@@ -14,6 +14,7 @@ import (
 	"github.com/touchline/backend/internal/squad"
 	"github.com/touchline/backend/internal/testdb"
 	internalworld "github.com/touchline/backend/internal/world"
+	"github.com/touchline/backend/pkg/matchsim"
 )
 
 // tacticsWorld builds an active world with one user-managed club (full squad,
@@ -78,7 +79,7 @@ func TestSetTacticsRoundTripsAndEvents(t *testing.T) {
 	ctx := context.Background()
 	actor := Actor{ManagerID: managerID}
 
-	if err := svc.SetTactics(ctx, actor, clubID, "possession", "3-2-4-1"); err != nil {
+	if err := svc.SetTactics(ctx, actor, clubID, "possession", "3-2-4-1", nil); err != nil {
 		t.Fatalf("set tactics: %v", err)
 	}
 	view, err := svc.GetTactics(ctx, clubID)
@@ -116,14 +117,14 @@ func TestSetTacticsValidation(t *testing.T) {
 	ctx := context.Background()
 	actor := Actor{ManagerID: managerID}
 
-	if err := svc.SetTactics(ctx, actor, clubID, "park_the_bus", ""); err != ErrInvalidStyle {
+	if err := svc.SetTactics(ctx, actor, clubID, "park_the_bus", "", nil); err != ErrInvalidStyle {
 		t.Fatalf("invalid style err = %v, want ErrInvalidStyle", err)
 	}
-	if err := svc.SetTactics(ctx, actor, clubID, "possession", "4-4-2"); err != ErrInvalidFormation {
+	if err := svc.SetTactics(ctx, actor, clubID, "possession", "4-4-2", nil); err != ErrInvalidFormation {
 		t.Fatalf("formation outside style err = %v, want ErrInvalidFormation", err)
 	}
 	// style-only set resolves to the style's default formation.
-	if err := svc.SetTactics(ctx, actor, clubID, "low_block", ""); err != nil {
+	if err := svc.SetTactics(ctx, actor, clubID, "low_block", "", nil); err != nil {
 		t.Fatalf("style-only set: %v", err)
 	}
 	view, err := svc.GetTactics(ctx, clubID)
@@ -141,7 +142,7 @@ func TestSetTacticsOwnershipAndWorld(t *testing.T) {
 	ctx := context.Background()
 
 	// A manager who owns a different club cannot set tactics.
-	if err := svc.SetTactics(ctx, Actor{ManagerID: uuid.New()}, clubID, "balanced", ""); err != ErrNotOwned {
+	if err := svc.SetTactics(ctx, Actor{ManagerID: uuid.New()}, clubID, "balanced", "", nil); err != ErrNotOwned {
 		t.Fatalf("ownership err = %v, want ErrNotOwned", err)
 	}
 
@@ -154,7 +155,7 @@ func TestSetTacticsOwnershipAndWorld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load manager: %v", err)
 	}
-	if err := svc.SetTactics(ctx, Actor{ManagerID: view}, clubID, "balanced", ""); err != ErrWorldNotActive {
+	if err := svc.SetTactics(ctx, Actor{ManagerID: view}, clubID, "balanced", "", nil); err != ErrWorldNotActive {
 		t.Fatalf("paused world err = %v, want ErrWorldNotActive", err)
 	}
 }
@@ -165,7 +166,7 @@ func TestSetTacticsDeadlineWhenFixtureLive(t *testing.T) {
 	ctx := context.Background()
 
 	insertFixture(t, pool, ctx, worldID, clubID, "live")
-	if err := svc.SetTactics(ctx, Actor{ManagerID: managerID}, clubID, "gegenpress", ""); err != ErrFixtureLive {
+	if err := svc.SetTactics(ctx, Actor{ManagerID: managerID}, clubID, "gegenpress", "", nil); err != ErrFixtureLive {
 		t.Fatalf("deadline err = %v, want ErrFixtureLive", err)
 	}
 }
@@ -269,4 +270,29 @@ func testdbAuthManagerID(t *testing.T, pool *pgxpool.Pool, clubID uuid.UUID) (uu
 	err := pool.QueryRow(context.Background(),
 		`SELECT id FROM manager.managers WHERE current_club_id = $1 AND status = 'active' LIMIT 1`, clubID).Scan(&id)
 	return id, err
+}
+
+// IM61: instructions persist, read back as labels, and survive a save that
+// omits them (the policy bot path) instead of resetting to neutral.
+func TestSetTacticsInstructionsPersistAndSurviveOmission(t *testing.T) {
+	pool, _, clubID, managerID := tacticsWorld(t)
+	svc := NewService(pool, nil, squad.NewStore(pool))
+	ctx := context.Background()
+	actor := Actor{ManagerID: managerID}
+
+	in := matchsim.Instructions{Mentality: 1, Pressing: -1, Width: 1, Tempo: -1}
+	if err := svc.SetTactics(ctx, actor, clubID, "balanced", "", &in); err != nil {
+		t.Fatalf("set tactics: %v", err)
+	}
+	want := InstructionsView{"positive", "low", "wide", "patient"}
+	if v, err := svc.GetTactics(ctx, clubID); err != nil || v.Instructions != want {
+		t.Fatalf("instructions = %+v (%v), want %+v", v.Instructions, err, want)
+	}
+	if err := svc.SetTacticsForClub(ctx, Actor{ManagerID: managerID, IsPolicyBot: true}, clubID, "direct", ""); err != nil {
+		t.Fatalf("bot set tactics: %v", err)
+	}
+	row, err := squad.NewStore(pool).LoadTactics(ctx, clubID)
+	if err != nil || row.Instructions != in || row.Style != "direct" {
+		t.Fatalf("after bot save: %+v (%v), want instructions %+v kept", row, err, in)
+	}
 }

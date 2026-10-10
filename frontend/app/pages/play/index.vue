@@ -6,7 +6,7 @@ const summary = ref<ManagerDashboardSummary[]>()
 </script>
 
 <template>
-  <section class="grid gap-10 md:grid-cols-3">
+  <section class="grid gap-10 md:grid-cols-3 pt-3.5">
     <div class="md:col-span-2">
       <DashboardAttentionPanel @summary="(e) => summary = e">
         <DashboardCardCluster v-if="viewport.isLessThan('tablet')" :summary />

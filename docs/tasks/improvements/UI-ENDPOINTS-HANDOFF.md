@@ -59,6 +59,8 @@ each milestone.
 | IM58 | Match engine xG | implemented 2026-10-09 |
 | IM59 | Next 5 fixtures + difficulty | implemented 2026-10-09 |
 | IM60 | Standings window ±3 around own club | implemented 2026-10-09 |
+| IM61 | Team instructions + assistant tactical advice + tactics page | implemented 2026-10-10 |
+| IM62 | Lineup picker (select/swap, desktop + mobile) + roster fitness/availability | implemented 2026-10-10, browser check pending |
 
 ## Status
 
@@ -80,3 +82,5 @@ Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OP
 
 
 Product owner: answer the open questions in IM38–IM48, pick which deferred task (IM49–IM54) to plan first. Frontend wiring of the new fields is out of scope until asked.
+
+Tactics (2026-10-10): IM61 **implemented, not committed** (OPD-64; Book §12.9; migration 0062). Next: browser check of `/play/tactics`; open question on crosses/familiarity data; pitch/lineup editor from the design not yet built.

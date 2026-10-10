@@ -156,6 +156,8 @@ cash and every derived metric is `SUM(entries)` computed at read time.
 | Term | Definition / derivation | Source |
 | --- | --- | --- |
 | **Style** | Five Simple-Mode styles: `balanced`, `possession`, `gegenpress`, `low_block`, `direct`; each has allowed formations and an engine block (possession shift, chance volume, own/conceded conversion, card rate, stamina decay). |
+| **Team instructions** | Mentality (cautious/balanced/positive), pressing (low/mid/high), width (narrow/normal/wide), tempo (patient/normal/direct); middle option neutral; refine the style block (IM61). |
+| **Tactical advice** | Assistant brief for the next fixture from the opponent's style + last-5 xG/goals, with a 0–100 fit score for the saved dials (IM61). |
 | **Formations** | 9 slot orders (11 roster slots), e.g. `4-3-3` (default), `4-2-3-1`, `3-2-4-1`, `5-4-1`…; filled via position-family matching. |
 | **Style efficacy** | `clamp(0.75 + 0.5 × tactical_familiarity, 0.75, 1.25)` scales the style block at kickoff. |
 | **Training archetypes** | `technical`, `physical`, `defensive`, `attacking`, `recovery` — weekly per-player attribute deltas (e.g. attacking: `finishing +0.4`, `off_the_ball +0.3`, `pace +0.2`, `anticipation +0.2`, decay `marking −0.1`, `positioning −0.1`) with fatigue step, injury multiplier, and sharpness bonuses. |

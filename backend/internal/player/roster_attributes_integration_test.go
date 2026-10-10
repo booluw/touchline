@@ -152,3 +152,43 @@ func TestRosterOverallCapsAt99(t *testing.T) {
 	}
 	t.Fatalf("player %s not in roster read", pid)
 }
+
+// IM62: the roster carries the lineup gate (injured players unavailable, with
+// the reason) and condition fitness.
+func TestRosterAvailabilityAndFitness(t *testing.T) {
+	svc, _, pool, tw := newPlayerFixture(t, "roster-avail")
+	ctx := context.Background()
+	pid := pickPlayer(t, pool, tw.HumanClub)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO player.injuries
+			(player_id, injury_type, severity, expected_recovery_date, recurrence_risk, occurred_at)
+		VALUES ($1, 'muscle', 3, now() + interval '30 days', 0.3, now())`, pid); err != nil {
+		t.Fatalf("insert open injury: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO player.player_condition (player_id, fitness) VALUES ($1, 0.8)
+		ON CONFLICT (player_id) DO UPDATE SET fitness = 0.8`, pid); err != nil {
+		t.Fatalf("set fitness: %v", err)
+	}
+
+	rows, err := svc.ListSquadMorale(ctx, tw.WorldID, tw.HumanMgr)
+	if err != nil {
+		t.Fatalf("list squad: %v", err)
+	}
+	available := 0
+	for _, r := range rows {
+		if r.Player.ID == pid {
+			if r.Available || r.UnavailableReason != "injured" || r.Fitness != 0.8 {
+				t.Fatalf("injured row = available %v reason %q fitness %v", r.Available, r.UnavailableReason, r.Fitness)
+			}
+			continue
+		}
+		if r.Available {
+			available++
+		}
+	}
+	if available == 0 {
+		t.Fatal("every other contracted player should be available")
+	}
+}

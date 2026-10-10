@@ -33,14 +33,15 @@ const (
 
 // Sentinel errors surfaced to HTTP handlers (409 on deadline hits).
 var (
-	ErrClubNotFound      = errors.New("club not found")
-	ErrNotOwned          = errors.New("manager does not control this club")
-	ErrWorldNotActive    = errors.New("world is not accepting gameplay operations")
-	ErrFixtureLive       = errors.New("club has a live fixture; the change applies from the next fixture")
-	ErrInvalidStyle      = errors.New("style must be one of the approved five")
-	ErrInvalidFormation  = errors.New("formation is not allowed for this style")
-	ErrInvalidLineup     = errors.New("lineup must name eleven distinct squad players, one per slot")
-	ErrPlayerUnavailable = errors.New("lineup includes a player unavailable for selection")
+	ErrClubNotFound       = errors.New("club not found")
+	ErrNotOwned           = errors.New("manager does not control this club")
+	ErrWorldNotActive     = errors.New("world is not accepting gameplay operations")
+	ErrFixtureLive        = errors.New("club has a live fixture; the change applies from the next fixture")
+	ErrInvalidStyle       = errors.New("style must be one of the approved five")
+	ErrInvalidFormation   = errors.New("formation is not allowed for this style")
+	ErrInvalidInstruction = errors.New("team instructions must name one option per dial")
+	ErrInvalidLineup      = errors.New("lineup must name eleven distinct squad players, one per slot")
+	ErrPlayerUnavailable  = errors.New("lineup includes a player unavailable for selection")
 )
 
 // Publishable is the event sink (may be nil in the API process; the
@@ -103,7 +104,9 @@ type TacticsView struct {
 	Style     string          `json:"style"`
 	Formation string          `json:"formation"`
 	Allowed   []string        `json:"allowed_formations"`
-	UpdatedAt *time.Time      `json:"updated_at,omitempty"`
+	// IM61: the four team-instruction dials (neutral when never set).
+	Instructions InstructionsView `json:"instructions"`
+	UpdatedAt    *time.Time       `json:"updated_at,omitempty"`
 }
 
 // LineupView is the read shape returned by GetLineup. Formation/positions are
@@ -345,24 +348,26 @@ func (s *Service) decorateLineupPlayers(ctx context.Context, slots []SlotView) e
 // SetTactics stores a club's Simple-Mode style and optional formation
 // (design §3: style in the approved five; formation in the style's allowed
 // set, default first when unset). Same ownership/deadline rules as SetLineup.
-func (s *Service) SetTactics(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string) error {
+// A nil instr keeps the club's saved team instructions (IM61).
+func (s *Service) SetTactics(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string, instr *matchsim.Instructions) error {
 	if err := s.requireOwnership(ctx, actor.ManagerID, clubID); err != nil {
 		return err
 	}
-	return s.setTactics(ctx, actor, clubID, style, formation)
+	return s.setTactics(ctx, actor, clubID, style, formation, instr)
 }
 
 // SetTacticsForClub writes a club's style/formation on behalf of a delegated
 // actor (the absence policy bot). Same validation and transactional rules as
 // SetTactics without the ownership gate — the caller (policy engine) has
 // already established delegated authorisation.
+// The bot never touches team instructions (nil keeps them).
 func (s *Service) SetTacticsForClub(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string) error {
-	return s.setTactics(ctx, actor, clubID, style, formation)
+	return s.setTactics(ctx, actor, clubID, style, formation, nil)
 }
 
 // setTactics is the shared style/formation write core: style validation,
 // formation normalisation, club check, transactional upsert + event.
-func (s *Service) setTactics(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string) error {
+func (s *Service) setTactics(ctx context.Context, actor Actor, clubID uuid.UUID, style, formation string, instr *matchsim.Instructions) error {
 	if !matchsim.IsStyle(style) {
 		return ErrInvalidStyle
 	}
@@ -386,6 +391,13 @@ func (s *Service) setTactics(ctx context.Context, actor Actor, clubID uuid.UUID,
 	if err != nil {
 		return err
 	}
+	if instr == nil {
+		saved, err := s.squad.LoadTactics(ctx, clubID)
+		if err != nil {
+			return err
+		}
+		instr = &saved.Instructions
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -399,15 +411,21 @@ func (s *Service) setTactics(ctx context.Context, actor Actor, clubID uuid.UUID,
 
 	actorType, actorID := actor.actorTypeAndID()
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO club.club_tactics (club_id, style, formation, updated_by_actor_type, updated_by_actor_id, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now())
+		INSERT INTO club.club_tactics (club_id, style, formation, updated_by_actor_type, updated_by_actor_id, updated_at,
+			mentality, pressing, width, tempo)
+		VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8, $9)
 		ON CONFLICT (club_id) DO UPDATE SET
 			style = EXCLUDED.style,
 			formation = EXCLUDED.formation,
+			mentality = EXCLUDED.mentality,
+			pressing = EXCLUDED.pressing,
+			width = EXCLUDED.width,
+			tempo = EXCLUDED.tempo,
 			updated_by_actor_type = EXCLUDED.updated_by_actor_type,
 			updated_by_actor_id = EXCLUDED.updated_by_actor_id,
 			updated_at = now()`,
-		clubID, style, formation, actorType, actorID); err != nil {
+		clubID, style, formation, actorType, actorID,
+		instr.Mentality, instr.Pressing, instr.Width, instr.Tempo); err != nil {
 		return fmt.Errorf("tactics: upsert: %w", err)
 	}
 	payload, _ := json.Marshal(map[string]string{
@@ -439,6 +457,8 @@ func (s *Service) GetTactics(ctx context.Context, clubID uuid.UUID) (TacticsView
 		Style:     style,
 		Formation: formationName(order),
 		Allowed:   squad.AllowedFormations(style),
+
+		Instructions: ViewInstructions(t.Instructions),
 	}
 	if t.UpdatedAt != nil {
 		view.UpdatedAt = t.UpdatedAt

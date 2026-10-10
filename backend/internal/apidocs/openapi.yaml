@@ -741,6 +741,34 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /api/clubs/{id}/tactics/advice:
+    get:
+      tags: [clubs]
+      summary: Assistant manager's tactical advice for the next fixture
+      operationId: getTacticalAdvice
+      parameters:
+        - $ref: "#/components/parameters/ClubID"
+      responses:
+        "200":
+          description: Advice for the next fixture; `advice` is null when the club has no upcoming fixture.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  advice:
+                    nullable: true
+                    allOf: [{ $ref: "#/components/schemas/TacticalAdvice" }]
+        "403":
+          description: No world context.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Club not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/clubs/{id}/tactics:
     get:
       tags: [clubs]
@@ -780,8 +808,11 @@ paths:
               type: object
               required: [style, formation]
               properties:
-                style: { type: string, enum: [balanced, counter, attacking, defensive, press, possession], example: balanced }
+                style: { type: string, enum: [balanced, possession, gegenpress, low_block, direct], example: balanced }
                 formation: { type: string, example: "4-3-3" }
+                instructions:
+                  description: Optional team instructions (IM61); omitted keeps the saved dials. All four fields required when sent.
+                  allOf: [{ $ref: "#/components/schemas/TeamInstructions" }]
       responses:
         "204":
           description: Tactics saved.
@@ -4908,6 +4939,9 @@ components:
           properties:
             weekly_wage: { type: integer, format: int64 }
             end_date: { type: string, format: date }
+        fitness: { type: number, minimum: 0, maximum: 1, description: "IM62. player_condition fitness; 1 when no condition row." }
+        available: { type: boolean, description: "IM62. Passes the same gate PUT /lineup enforces (no open injury, active status + contract, street players 18+)." }
+        unavailable_reason: { type: string, enum: [injured, ineligible], description: "IM62. Set only when available is false." }
     PlayerDetail:
       type: object
       description: >-
@@ -5153,7 +5187,48 @@ components:
         style: { type: string }
         formation: { type: string }
         allowed_formations: { type: array, items: { type: string } }
+        instructions: { $ref: "#/components/schemas/TeamInstructions" }
         updated_at: { type: string, format: date-time, nullable: true }
+    TeamInstructions:
+      type: object
+      required: [mentality, pressing, width, tempo]
+      properties:
+        mentality: { type: string, enum: [cautious, balanced, positive] }
+        pressing: { type: string, enum: [low, mid, high] }
+        width: { type: string, enum: [narrow, normal, wide] }
+        tempo: { type: string, enum: [patient, normal, direct] }
+    TacticalAdvice:
+      type: object
+      description: Assistant manager's plan for the next fixture (IM61), derived from the opponent's saved style and its latest 5 completed matches.
+      properties:
+        fixture_id: { type: string, format: uuid }
+        scheduled_at: { type: string, format: date-time }
+        home_or_away: { type: string, enum: [home, away] }
+        opponent: { $ref: "#/components/schemas/ClubRef" }
+        profile:
+          type: object
+          properties:
+            style: { type: string }
+            matches: { type: integer }
+            goals_for: { type: number, description: Per game. }
+            goals_against: { type: number, description: Per game. }
+            xg_for: { type: number, nullable: true, description: Per game; absent when no sampled match carried xG. }
+            xg_against: { type: number, nullable: true }
+        headline: { type: string }
+        summary: { type: string }
+        suggested: { $ref: "#/components/schemas/TeamInstructions" }
+        current: { $ref: "#/components/schemas/TeamInstructions" }
+        fit:
+          type: object
+          properties:
+            score: { type: integer, minimum: 0, maximum: 100 }
+            factors:
+              type: array
+              items:
+                type: object
+                properties:
+                  label: { type: string }
+                  delta: { type: integer }
     TrainingPlan:
       type: object
       properties:

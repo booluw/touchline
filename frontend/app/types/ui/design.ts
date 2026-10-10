@@ -33,6 +33,11 @@ export interface LineupSlot {
   rating: number
   fit: PositionFit
   label?: string
+  /** Visible short name under the token; the slot role (e.g. "CB") shows under it. */
+  name?: string
+  role?: string
+  /** Empty slot: no player, dashed token. */
+  empty?: boolean
 }
 
 export type SortDirection = 'asc' | 'desc'

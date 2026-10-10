@@ -102,6 +102,7 @@ var sentinelCodes = []struct {
 	{internalsocial.ErrSelfMessage, "self_message"},
 	{tactics.ErrFixtureLive, "fixture_live"},
 	{tactics.ErrInvalidFormation, "invalid_formation"},
+	{tactics.ErrInvalidInstruction, "invalid_instruction"},
 	{tactics.ErrInvalidLineup, "invalid_lineup"},
 	{tactics.ErrInvalidStyle, "invalid_style"},
 	{tactics.ErrPlayerUnavailable, "player_unavailable"},

@@ -162,6 +162,12 @@ type PlayerMoraleRow struct {
 	DateOfBirth string             `json:"date_of_birth"`
 	Age         int                `json:"age"`
 	Contract    *RosterContract    `json:"contract"`
+	// IM62: lineup-picker columns. Fitness is player_condition.fitness in
+	// [0,1] (1 when no row). Available is the same gate SetLineup enforces;
+	// UnavailableReason is "injured" or "ineligible" (status, contract, age).
+	Fitness           float64 `json:"fitness"`
+	Available         bool    `json:"available"`
+	UnavailableReason string  `json:"unavailable_reason,omitempty"`
 }
 
 // RosterContract is the active contract summary on a roster row (IM40). The

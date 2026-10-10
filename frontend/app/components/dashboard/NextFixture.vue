@@ -46,7 +46,7 @@ const next_fixture = computed(() => ({
           variant="primary"
           size="md"
           class="w-full"
-          @click="$router.push('/play/squad')"
+          @click="$router.push('/play/tactics')"
         >
           Set lineup
         </UiButton>

@@ -19,4 +19,9 @@ export interface ManagerSquadPlayer {
   overall?: number
   attributes: Record<'goalkeeping' | 'physical' | 'mental' | 'tactical' | 'technical', number>
   player: { id: string, name: string }
+  morale?: number
+  /** IM62: condition fitness 0–1, the lineup gate and why it failed. */
+  fitness?: number
+  available?: boolean
+  unavailable_reason?: "injured" | "ineligible"
 }

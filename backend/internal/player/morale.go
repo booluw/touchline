@@ -3,6 +3,7 @@ package player
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -82,6 +83,15 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 	if err != nil {
 		return nil, err
 	}
+	// Same eligibility gate (and date) as tactics.SetLineup.
+	loaded, err := squad.NewStore(s.pool).LoadSquad(ctx, clubID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	eligibility := make(map[uuid.UUID]squad.LoadedPlayer, len(loaded))
+	for _, p := range loaded {
+		eligibility[p.PlayerID] = p
+	}
 	var byPlayer map[uuid.UUID]string
 	if len(open) > 0 {
 		byPlayer = make(map[uuid.UUID]string, len(open))
@@ -95,6 +105,7 @@ func (s *Service) ListSquadMorale(ctx context.Context, worldID, managerID uuid.U
 		}
 		rows[i].Hidden = hidden[rows[i].Player.ID]
 		rows[i].Dossier = dossiers[rows[i].Player.ID]
+		rows[i].Available, rows[i].UnavailableReason = availability(eligibility[rows[i].Player.ID])
 		att := attrs[rows[i].Player.ID]
 		rows[i].Attributes = att
 		rows[i].Overall = squad.PositionalOverall(rows[i].Position, squad.AttributeSnapshot{
@@ -227,4 +238,16 @@ func requestExplanation(playerID uuid.UUID, morale, share, expected float64) *ex
 	return explanation.New("player_transfer_request", -int(morale*100)).
 		Add("morale", -int((1-morale)*100)).
 		Add("playing time satisfaction", int(share*100)-int(expected*100))
+}
+
+// availability renders the lineup gate for a roster row.
+func availability(p squad.LoadedPlayer) (bool, string) {
+	switch {
+	case p.Available:
+		return true, ""
+	case p.Injured:
+		return false, "injured"
+	default:
+		return false, "ineligible"
+	}
 }
