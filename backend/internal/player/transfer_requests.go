@@ -165,11 +165,12 @@ func (s *Service) resolveAs(ctx context.Context, worldID, managerID, clubID, req
 }
 
 // ApprovePlayerRequest resolves the latest pending request of a player
-// (HTTP-facing; no requestID needed).
-func (s *Service) ApprovePlayerRequest(ctx context.Context, worldID, managerID, playerID uuid.UUID) (requestView, error) {
+// (HTTP-facing; no requestID needed) and lists him at market value × the
+// asking-price multiplier (IM65; 1 = valuation).
+func (s *Service) ApprovePlayerRequest(ctx context.Context, worldID, managerID, playerID uuid.UUID, multiplier float64) (requestView, error) {
 	return s.resolveByPlayer(ctx, worldID, managerID, playerID, TransferRequestApproved,
 		EventTransferRequestApproved, RelationshipTransferApproved, SentimentTransferApproved,
-		"transfer_request_approved", true)
+		"transfer_request_approved", true, multiplier)
 }
 
 // DenyPlayerRequest resolves the latest pending request of a player
@@ -177,7 +178,7 @@ func (s *Service) ApprovePlayerRequest(ctx context.Context, worldID, managerID, 
 func (s *Service) DenyPlayerRequest(ctx context.Context, worldID, managerID, playerID uuid.UUID) (*TransferRequest, error) {
 	view, err := s.resolveByPlayer(ctx, worldID, managerID, playerID, TransferRequestDenied,
 		EventTransferRequestDenied, RelationshipTransferDenied, SentimentTransferDenied,
-		"transfer_request_denied", false)
+		"transfer_request_denied", false, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +186,7 @@ func (s *Service) DenyPlayerRequest(ctx context.Context, worldID, managerID, pla
 }
 
 func (s *Service) resolveByPlayer(ctx context.Context, worldID, managerID, playerID uuid.UUID,
-	status, eventType, relType string, delta int, subject string, isApprove bool,
+	status, eventType, relType string, delta int, subject string, isApprove bool, multiplier float64,
 ) (requestView, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -267,6 +268,7 @@ func (s *Service) resolveByPlayer(ctx context.Context, worldID, managerID, playe
 		if err != nil {
 			return view, err
 		}
+		val = askingPrice(val, multiplier)
 		listing, lerr := s.transfers.CreateListing(ctx, transfer.Actor{ManagerID: managerID}, worldID,
 			transfer.CreateListingInput{PlayerID: playerID, AskingPrice: &val, ListingType: transfer.ListingOpenToOffers})
 		if lerr != nil {

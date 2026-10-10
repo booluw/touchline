@@ -154,7 +154,7 @@ Derived labels used by other systems:
 | `GET /api/managers/me/competitions/:id/outlook` | what is at stake + projected finish (§6.8, IM56/IM57) |
 | `GET /api/competitions/:id/fixtures` | fixtures |
 | `GET /api/competitions/:id/calendar` | active season grouped by game-week (`week = game_day ÷ days_per_week`) — league-shaped |
-| `GET /api/clubs/:id/fixtures` | one club's fixtures across all competitions; `?upcoming=true&limit=N` returns only scheduled ones, each with a `difficulty` (§6.9, IM59) |
+| `GET /api/clubs/:id/fixtures` | one club's fixtures across all competitions; `?upcoming=true&limit=N` returns only scheduled ones, each with a `difficulty` (§6.9, IM59); `?season=current` returns everything from the current league season's start to the next season's start, cup ties included (no cap) with `attendance` (§16.9), `position_after` (replayed in standings order), and on unplayed rows `difficulty` + `last_meeting` (IM67) — the fixtures screen |
 | `GET /api/clubs/:id/next-fixture` | next match + opponent dossier ([Ch. 26](26-dashboard-news-scouting-realtime.md)) |
 | `GET /api/admin/competitions/:id/detail` | admin dossier: history, past winners, top scorers (IM15) |
 

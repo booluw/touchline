@@ -79,10 +79,13 @@ func seedCompletedMatch(t *testing.T, pool *pgxpool.Pool, worldID, clubID uuid.U
 		VALUES ($1, 'Morale Test League', 'league', 10, 0, 'active') RETURNING id`, worldID).Scan(&competitionID); err != nil {
 		t.Fatalf("insert competition: %v", err)
 	}
+	// fixtures_check forbids home = away, so any other club of the world plays away.
 	var fixtureID uuid.UUID
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO match.fixtures (world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
-		VALUES ($1, $2, $3, $3, 1, now() - interval '2 days', 'completed') RETURNING id`,
+		SELECT $1, $2, $3, c.id, 1, now() - interval '2 days', 'completed'
+		FROM club.clubs c WHERE c.world_id = $1 AND c.id <> $3 LIMIT 1
+		RETURNING id`,
 		worldID, competitionID, clubID).Scan(&fixtureID); err != nil {
 		t.Fatalf("insert fixture: %v", err)
 	}
@@ -255,7 +258,7 @@ func TestApprovePlayerRequestListsPlayer(t *testing.T) {
 		t.Fatalf("weekly tick: %v", err)
 	}
 
-	view, err := svc.ApprovePlayerRequest(ctx, tw.WorldID, tw.HumanMgr, pid)
+	view, err := svc.ApprovePlayerRequest(ctx, tw.WorldID, tw.HumanMgr, pid, 1)
 	if err != nil {
 		t.Fatalf("approve: %v", err)
 	}

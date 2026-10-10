@@ -137,6 +137,7 @@ migration runs). Don't reorder these or run them out of sequence.
 | 0060 | `manager` | `uq_managers_world_policy_bot` narrowed to `status = 'unemployed'`: a club bot displaced by a human is `retired` (keeps its row), so only the world's absence bot is guarded |
 | 0061 | `match` | `match.matches.home_xg`/`away_xg` NUMERIC(4,2), nullable: expected goals per side (IM58); NULL for matches played before the engine computed xG, never backfilled |
 | 0062 | `club` | `club.club_tactics.mentality`/`pressing`/`width`/`tempo` SMALLINT NOT NULL DEFAULT 0, CHECK -1..1: team instructions (IM61); 0 = neutral, existing rows unchanged |
+| 0063 | `match` | `match.matches.attendance` INT NULL CHECK >= 0: crowd per match, set at kickoff (IM66); NULL for matches played before it, never backfilled |
 
 ### River migrations (0016–0022)
 

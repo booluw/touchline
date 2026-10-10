@@ -168,6 +168,8 @@ type PlayerMoraleRow struct {
 	Fitness           float64 `json:"fitness"`
 	Available         bool    `json:"available"`
 	UnavailableReason string  `json:"unavailable_reason,omitempty"`
+	// IM63: the last five rated appearances (1–10), oldest first. Never nil.
+	RecentRatings []int `json:"recent_ratings"`
 }
 
 // RosterContract is the active contract summary on a roster row (IM40). The

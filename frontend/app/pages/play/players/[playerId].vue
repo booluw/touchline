@@ -3,10 +3,18 @@
 // in the match feed or the squad list. Everything on screen is the server's
 // PlayerDetail read — the ability block is the same two numbers the squad roster
 // shows, and the weekly wage is present only when this is the manager's own club.
+// IM63: an own-club player renders the squad's tabbed PlayerPanel instead.
 import { playerAttributeCategories, type PlayerDetail } from '~/composables/usePlayer'
+import { useManagerSquad, type RequestAction } from '~/composables/manager/squad'
+import type { PricePreset } from '~/types/manager'
+import type { ManagerSquadPlayer, PlayerMoraleDetail, SquadDynamics } from '~/types/manager'
 
 const route = useRoute()
 const { getPlayer } = usePlayer()
+const squad = useManagerSquad()
+const clubstore = useClubStore()
+const own = ref<{ detail: PlayerMoraleDetail, row?: ManagerSquadPlayer, dynamics: SquadDynamics | null } | null>(null)
+const busy = ref(false)
 
 const playerId = computed(() => String(route.params.playerId))
 const loading = ref<"loading" | "loaded" | "error">("loading")
@@ -34,6 +42,7 @@ async function init() {
   loading.value = "loading"
   try {
     player.value = await getPlayer(playerId.value)
+    await loadOwn()
     loading.value = "loaded"
   } catch {
     player.value = null
@@ -41,26 +50,50 @@ async function init() {
   }
 }
 
+async function loadOwn() {
+  const clubId = clubstore.club?.id
+  if (!clubId || player.value?.club?.id !== clubId) { own.value = null; return }
+  const [detail, rows, dynamics] = await Promise.all([
+    squad.getPlayer(clubId, playerId.value), squad.getSquad(clubId), squad.getDynamics(clubId),
+  ])
+  own.value = detail ? { detail, row: rows?.find(r => r.player.id === playerId.value), dynamics } : null
+}
+
+async function onRespond(action: RequestAction, preset?: PricePreset) {
+  const clubId = clubstore.club?.id
+  if (!clubId) return
+  busy.value = true
+  if (await squad.respond(clubId, playerId.value, action, preset)) await loadOwn()
+  busy.value = false
+}
+
 onMounted(init)
 </script>
 
 <template>
-  <main class="h-full text-slate-200 font-mono space-y-5">
+  <!-- Fills the shell so the panel's header + tabs stay put and its cards scroll. -->
+  <main v-if="loading === 'loading'" class="flex h-full flex-col gap-4 pt-5">
+    <NuxtLink to="/play/squad" class="text-meta text-t2 hover:text-t1">&lsaquo; Squad</NuxtLink>
+    <SquadPlayerPanelSkeleton class="min-h-0 flex-1 pb-3.5" tabbed />
+  </main>
+  <main v-else-if="own" class="flex h-full flex-col gap-4 pt-5">
+    <NuxtLink to="/play/squad" class="text-meta text-t2 hover:text-t1">&lsaquo; Squad</NuxtLink>
+    <SquadPlayerPanel class="min-h-0 flex-1 pb-3.5" :detail="own.detail" :row="own.row" :dynamics="own.dynamics" :busy="busy" tabbed @respond="onRespond" />
+  </main>
+  <main v-else class="h-full text-slate-200 font-mono space-y-5">
     <div class="flex items-center gap-4">
       <NuxtLink to="/play" class="heading heading--small text-slate-400 hover:text-slate-200">&larr; Back</NuxtLink>
       <h2 class="page__header">Player</h2>
     </div>
 
-    <OldUiLoader v-if="loading === 'loading'" />
-
-    <p v-else-if="loading === 'error'" class="text-red-400">That player could not be loaded. They may not play in your world.</p>
+    <p v-if="loading === 'error'" class="text-red-400">That player could not be loaded. They may not play in your world.</p>
 
     <template v-else-if="player">
       <section class="grid gap-5 grid-cols-3">
         <div class="p-5 border-brutal border-void-700">
           <div class="flex items-start justify-between border-b-brutal pb-5 border-void-800">
             <div>
-              <h3 class="heading">{{ player.display_name }}</h3>
+              <h3 class="heading">{{ [player.first_name, player.last_name].filter(Boolean).join(' ') || player.display_name }}</h3>
               <p class="heading heading--small text-slate-400">
                 {{ player.position }}<span v-if="player.squad_number"> &middot; #{{ player.squad_number }}</span>
                 <span v-if="age !== null"> &middot; {{ age }} yrs</span>

@@ -120,6 +120,11 @@ export function ordinal(n: number): string {
   return `${n}${suffix}`;
 }
 
-export /** Explanation factors ({label, delta}) → WhyBreakdown factors. */
-  const toWhy = (exp?: { factors: { label: string, delta: number }[] }): WhyFactor[] =>
+/** Explanation factors ({label, delta}) → WhyBreakdown factors. */
+export const toWhy = (exp?: { factors: { label: string, delta: number }[] }): WhyFactor[] =>
     (exp?.factors ?? []).map(f => ({ label: f.label.charAt(0).toUpperCase() + f.label.slice(1), value: f.delta }))
+
+/** Squad mood word for a 0–100 morale (design thresholds). */
+export function moodLabel(morale: number): string {
+  return morale < 35 ? 'Furious' : morale < 45 ? 'Unhappy' : morale < 55 ? 'Unsettled' : morale < 75 ? 'Content' : 'Happy'
+}

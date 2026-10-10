@@ -129,7 +129,11 @@ After commit, best-effort pushes: `relationship_change`, dashboard updates.
 
 ## 16.8 Match stats (IM45, OPD-61)
 
-`GET /api/matches/:id/events` also returns `stats.home`/`stats.away`: goals (the score line: stamped when completed, else counted from goal/penalty events), chances created, yellow and red cards, substitutions, penalties awarded and injuries. Events persist minute by minute, so a live match counts only played minutes. Possession, shots and xG are not emitted.
+`GET /api/matches/:id/events` also returns `stats.home`/`stats.away`: goals (the score line: stamped when completed, else counted from goal/penalty events), chances created, yellow and red cards, substitutions, penalties awarded and injuries. Events persist minute by minute, so a live match counts only played minutes. Possession and shots are not emitted. Each side also carries `xg` (expected goals), stamped when the match completes (IM58); null while live and for matches played before IM58.
+
+## 16.9 Crowd attendance (IM66, OPD-66)
+
+Every match row stores `attendance`, decided when the row is created (live kickoff or `PlayFixture`) from the home club's state before the match. Capacity: `club.clubs.stadium_capacity`, filled at the club's first home match from its league's reputation (`3000 + 400 × rep`, ±30% jitter fixed per club). Fill rate: base 0.55, supporter `current_sentiment` (±0.20) and `loyalty` (±0.10), derby +0.15, six-pointer +0.05, dead rubber −0.10, cup tie −0.10, then ±0.05 noise from the fixture seed; clamped to [0.10, 1]. Same fixture, same crowd. Matches played before migration 0063 have `attendance = NULL`. Constants: `internal/match/crowd.go`. Ticket revenue from it is planned (IM68).
 
 ## Connections
 

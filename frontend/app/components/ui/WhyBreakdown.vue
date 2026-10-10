@@ -35,12 +35,13 @@ const toneOf = (v: number) => (v > 0 ? 'text-pos' : v < 0 ? 'text-neg' : 'text-t
     :class="['font-geist flex flex-col gap-2 border border-line p-3 text-meta', standalone ? 'rounded-card bg-s1' : 'rounded-nested bg-s2']"
     :aria-label="`Why? ${subject}`"
   >
-    <header class="flex justify-between gap-2">
-      <span class="whitespace-nowrap font-semibold text-t1">
+    <!-- The summary wraps on narrow screens; net never shrinks out of the card. -->
+    <header class="flex items-start justify-between gap-2">
+      <span class="min-w-0 break-words font-semibold text-t1">
         Why? <span v-if="value !== undefined" class="font-normal text-t3">{{ subject }}: {{ value }}</span>
         <span v-else class="font-normal text-t3">{{ subject }}</span>
       </span>
-      <span :class="['num whitespace-nowrap', toneOf(net)]">net {{ formatSigned(net) }}</span>
+      <span :class="['num shrink-0 whitespace-nowrap', toneOf(net)]">net {{ formatSigned(net) }}</span>
     </header>
     <ul class="flex flex-col gap-2">
       <li v-for="row in rows" :key="row.label" class="grid grid-cols-[minmax(0,1fr)_120px_36px] items-center gap-2.5">

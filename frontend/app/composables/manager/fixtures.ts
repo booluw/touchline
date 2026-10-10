@@ -1,4 +1,4 @@
-import type { ManagerFixture, ManagerNextFixture } from "~/types/manager"
+import type { ManagerFixture, ManagerNextFixture, MatchSummary, SeasonFixture } from "~/types/manager"
 
 export function useClubFixtures() {
   const { public: { apiBase } } = useRuntimeConfig()
@@ -27,8 +27,29 @@ export function useClubFixtures() {
     }
   }
 
+  async function getSeasonFixtures() {
+    try {
+      const { fixtures } = await $api.get<{ fixtures: SeasonFixture[] }>(`${apiBase}/api/clubs/${clubId}/fixtures?season=current`)
+      return fixtures
+    } catch (error) {
+      console.error(error)
+      toast.apiError(error)
+    }
+  }
+
+  async function getMatchSummary(matchId: string) {
+    try {
+      return await $api.get<MatchSummary>(`${apiBase}/api/matches/${matchId}/events`)
+    } catch (error) {
+      console.error(error)
+      toast.apiError(error)
+    }
+  }
+
   return {
     getNextFixture,
-    getNUpcomingFixtures
+    getNUpcomingFixtures,
+    getSeasonFixtures,
+    getMatchSummary,
   }
 }

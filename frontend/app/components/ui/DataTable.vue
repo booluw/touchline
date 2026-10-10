@@ -10,17 +10,21 @@ const props = withDefaults(defineProps<{
   columns: TableColumn<K>[]
   rows: Row[]
   rowKey: (row: Row) => string | number
-  /** 'simple' hides columns marked `advanced`. */
+  /** 'simple' hides columns marked `advanced`. Defaults to simple on mobile, standard otherwise. */
   density?: 'simple' | 'standard'
   selectedKey?: string | number
   caption?: string
-}>(), { density: 'standard' })
+}>(), { density: undefined })
 const sort = defineModel<TableSort<K> | undefined>('sort')
 const emit = defineEmits<{ rowClick: [row: Row] }>()
 defineSlots<{ [name: `cell-${string}`]: (props: { row: Row }) => unknown, empty?: () => unknown }>()
 
-const visible = computed(() => props.columns.filter(c => props.density !== 'simple' || !c.advanced))
-const template = computed(() => visible.value.map(c => c.width ?? '1fr').join(' '))
+const viewport = useViewport()
+const density = computed(() => props.density ?? (viewport.isLessThan('tablet') ? 'simple' : 'standard'))
+const visible = computed(() => props.columns.filter(c => density.value !== 'simple' || !c.advanced))
+// fr tracks get a 6rem floor: long text truncates, and a too-narrow table scrolls inside its card.
+const track = (w = '1fr') => (/^[\d.]+fr$/.test(w) ? `minmax(6rem,${w})` : w)
+const template = computed(() => visible.value.map(c => track(c.width)).join(' '))
 
 function toggleSort(column: TableColumn<K>) {
   if (!column.sortable) return
@@ -35,10 +39,11 @@ const cellValue = (row: Row, key: K) => (row as Record<string, unknown>)[key] as
 </script>
 
 <template>
-  <div class="font-geist overflow-x-auto rounded-card border border-line bg-s1 text-[12.5px] tabular-nums">
+  <!-- Scrolls itself when its parent bounds the height; the header stays pinned. -->
+  <div class="font-geist overflow-auto rounded-card border border-line bg-s1 text-[12.5px] tabular-nums">
     <table class="w-full" role="grid">
       <caption v-if="caption" class="sr-only">{{ caption }}</caption>
-      <thead>
+      <thead class="sticky top-0 z-[1] bg-s1">
         <tr class="grid gap-2 border-b border-line px-3 py-2" :style="{ gridTemplateColumns: template }">
           <th
             v-for="column in visible" :key="column.key" scope="col" :aria-sort="ariaSort(column)"

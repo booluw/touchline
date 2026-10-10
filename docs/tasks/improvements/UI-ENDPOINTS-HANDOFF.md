@@ -11,7 +11,7 @@ each milestone.
   `Touchline.dc.html` (shell + Home), `Touchline Squad.dc.html`,
   `Touchline Transfers.dc.html`, `Touchline Matchday.dc.html`,
   `Touchline Finances Board.dc.html`, `Touchline Landing Auth.dc.html`,
-  `Touchline Screens.dc.html` (tactics, training, scouting, academy, club,
+  `Touchline Fixtures.dc.html`, `Touchline Screens.dc.html` (tactics, training, scouting, academy, club,
   competitions, world, career, social).
 - Data in the designs lives in the `<script type="text/x-dc">` block of each file.
 
@@ -61,6 +61,12 @@ each milestone.
 | IM60 | Standings window ±3 around own club | implemented 2026-10-09 |
 | IM61 | Team instructions + assistant tactical advice + tactics page | implemented 2026-10-10 |
 | IM62 | Lineup picker (select/swap, desktop + mobile) + roster fitness/availability | implemented 2026-10-10, browser check pending |
+| IM63 | Squad page + roster `recent_ratings` | implemented 2026-10-10, browser check pending |
+| IM64 | Signed morale factors | implemented 2026-10-10, browser check pending |
+| IM65 | Transfer-request preview + asking price + reassure route | implemented 2026-10-10, browser check pending |
+| IM66 | Crowd attendance per match | implemented 2026-10-10 |
+| IM67 | Fixtures & results page (season endpoint + `/play/fixtures`) | implemented 2026-10-10, browser check pending |
+| IM68 | Ticket revenue from attendance | planned |
 
 ## Status
 
@@ -77,6 +83,8 @@ each milestone.
 
 ## Next action
 
+Squad screen (2026-10-10): IM63 **implemented, not committed** (OPD-65; Book §10 Squad screen). IM64/IM65 implemented, not committed. Gates 2026-10-10: backend gofmt/build/vet/`go test ./...` pass, integration PlayerSquad/Preview/Docs/Roster pass; frontend `nuxi typecheck` + eslint pass. Squad page layout: on desktop the page no longer scrolls, and the table and panel scroll independently (`pages/play/squad.vue`, eslint pass). The player header card (and the tabs on mobile) stays fixed while the cards below it scroll (`components/squad/PlayerPanel.vue`; typecheck + eslint pass). Table header now stays fixed while the rows scroll (`components/ui/DataTable.vue`: the table scrolls itself when its parent limits the height; squad table fills its column). Scrollbars app-wide (`assets/css/main.css`): faint and theme-aware (`--color-line2`, darkening to `--color-t3` when the bar is hovered), shown only while the scroll container is hovered. `UiWhyBreakdown` header: a long summary wraps instead of pushing "net" out of the card on mobile. Mobile player page: the header card and tabs stay fixed while the cards below scroll. `UiSegmentedControl` gains `fill`: full width, one equal column per option. Callers passed `class="grid grid-cols-N"`, but the root's own `inline-flex` won (computed display `flex`), so the tabs sized to their text and the highlight followed those uneven widths. PlayerPanel tabs and the tactics dials now use `fill`. Verified with headless Chromium on `/ui`: equal cells, highlight offset 0. `UiDataTable`: `fr` columns are `minmax(6rem, Nfr)`, so long text truncates and a too-wide table scrolls inside its card instead of widening the page. Density now defaults to simple below tablet width when no `density` is passed. LeagueTable uses that default, truncates club names, and has a fixed 76px form column with 12px dots. Headless check on `/ui` at 380px: the table scrolls within its card and the name column stays 96px. The competitions page itself was not browser-checked (needs login). Skeletons now match the loaded layouts. Squad desktop and the league table render the real `UiDataTable` (header, widths, density) with placeholder cells shaped like their content. New `components/squad/PlayerPanelSkeleton.vue` is used for the desktop panel and the mobile player page (with tabs). Squad mobile cards are card-shaped. typecheck + eslint pass; not browser-checked (needs login). The player page shows the panel skeleton for any player, including other clubs' players, whose loaded view is the old layout. Squad rows show the full name (first + last, falling back to the display name); search and name sort use it too. The player panel header and the old player view show the full name too. Squad mobile now matches the design: a fixed s1 header block (title + count/wages, position chips, "Sorted by … · Sort · Filter") over a scrolling card list (OVR, name + flag, pos·age·wage·expiry, coloured mood + 40×3 bar). Search, sort and status filters live in a bottom sheet with a Clear button and "Show N players". typecheck + eslint pass; not browser-checked (needs login). Competitions page: the league table's header stays fixed and only its rows scroll. On desktop the page fits the shell with each column scrolling on its own; on mobile the 68dvh box limits the table's height (fixtures still scroll that box). Headless check of the same wrapper chain: the table stays in its box, and after scrolling 60px the header is still at the top. New task: `/ui`'s many-option SegmentedControl overflows the page at 380px. New tasks: (b) `promise-playing-time` route still leaves a request pending — decide whether to keep it or restrict it to players without an open request. Follow-ups: browser check of `/play/squad` and the mobile `/play/players/:id`; 6 existing `internal/player` integration failures (listed in IM63 evidence).
+
 Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OPD-63; Book §6.8–6.9, §15.5). Verification in each IM's Delivery evidence. Follow-ups: (a) `stakes.go` relegation safety counts only rivals that strictly overtake (ties ignored), looser than the outlook's rule; align if six-pointer/dead-rubber labels should match; (b) `TestListClubFixtures` is flaky (picks a club by name); (c) golangci-lint not run locally; (d) frontend wiring in progress (user's uncommitted `RaceCard.vue`, 2026-10-09).
 - [x] Race card (2026-10-09): `types/manager/competition.ts` outlook types aligned to `LeagueOutlook`; `RaceCard.vue` renders stakes headline, races + attachments with status, guaranteed cup, W/D/L swing, finish range, projection why. `nuxi typecheck`: 0 errors in touched files (8 pre-existing elsewhere). Not viewed in browser; layout not checked against the design.
 
@@ -84,3 +92,8 @@ Competitions screen (2026-10-09): IM55–IM60 **implemented, not committed** (OP
 Product owner: answer the open questions in IM38–IM48, pick which deferred task (IM49–IM54) to plan first. Frontend wiring of the new fields is out of scope until asked.
 
 Tactics (2026-10-10): IM61 **implemented, not committed** (OPD-64; Book §12.9; migration 0062). Next: browser check of `/play/tactics`; open question on crosses/familiarity data; pitch/lineup editor from the design not yet built.
+
+Fixtures screen (2026-10-10): IM66 + IM67 **implemented, not committed** (OPD-66; Book §16.9, §6.7). Migration 0063. Gates: backend gofmt/build/vet/vet-integration/`go test ./...` pass; integration (embedded PG at 127.0.0.1:55432, db `touchline_test`) match + httpapi Calendar/Docs/Fixture/MatchFeed/Live + competition Upcoming/Difficulty pass; frontend typecheck 0 errors, eslint clean. Next: browser check of `/play/fixtures`; IM68 ticket revenue (open decisions in the file).
+- [x] IM67 follow-up (2026-10-10): season list now runs to the next league season's start, so cup ties after the last league matchday are included (`season_fixtures.go`); attendance shows from kickoff on mobile cards and the live-match panel (`pages/play/fixtures.vue`). Gates: build/vet, PositionsAfter unit, httpapi Calendar/Docs integration pass; typecheck 0 errors, eslint clean.
+- [x] Integration case for a cup tie after the last league matchday: `TestHTTPSeasonCalendarAndClubFixtures` inserts one 7 days after the last league fixture and asserts it is the 7th season row (pass, embedded PG).
+- [x] Book §16.8: now documents per-side `xg` (IM58); only possession and shots are not emitted.

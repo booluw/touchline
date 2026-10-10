@@ -61,16 +61,16 @@ func loadExisting(ctx context.Context, tx pgx.Tx, fixtureID uuid.UUID) (*MatchRe
 	return &MatchResult{Match: m, Events: evs}, nil
 }
 
-func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, seed int64, res matchsim.MatchResult) (uuid.UUID, time.Time, error) {
+func persistMatch(ctx context.Context, tx pgx.Tx, fixtureID, worldID uuid.UUID, seed int64, res matchsim.MatchResult, attendance int) (uuid.UUID, time.Time, error) {
 	var id uuid.UUID
 	var now time.Time
 	err := tx.QueryRow(ctx, `
 		INSERT INTO match.matches
-			(fixture_id, world_id, seed, engine_version, home_score, away_score, home_xg, away_xg, status, started_at, ended_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $8, $9, 'completed', $7, $7)
+			(fixture_id, world_id, seed, engine_version, home_score, away_score, home_xg, away_xg, status, started_at, ended_at, attendance)
+		VALUES ($1, $2, $3, $4, $5, $6, $8, $9, 'completed', $7, $7, $10)
 		RETURNING id, ended_at`,
 		fixtureID, worldID, seed, matchsim.EngineVersion, res.HomeGoals, res.AwayGoals, time.Now().UTC(),
-		res.HomeXG, res.AwayXG).
+		res.HomeXG, res.AwayXG, attendance).
 		Scan(&id, &now)
 	return id, now, err
 }

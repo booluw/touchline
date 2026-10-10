@@ -148,6 +148,8 @@ func (s *server) router() *gin.Engine {
 		api.POST("/clubs/:id/players/:playerID/promise-playing-time", s.requireAuth, s.handlePromisePlayingTime)
 		api.POST("/clubs/:id/players/:playerID/transfer-request/approve", s.requireAuth, s.handleApproveTransferRequest)
 		api.POST("/clubs/:id/players/:playerID/transfer-request/deny", s.requireAuth, s.handleDenyTransferRequest)
+		api.POST("/clubs/:id/players/:playerID/transfer-request/reassure", s.requireAuth, s.handleReassureTransferRequest)
+		api.GET("/clubs/:id/players/:playerID/transfer-request/preview", s.requireAuth, s.handleTransferRequestPreview)
 
 		// One player's card (IM20), the player detail page's read. Scoped to
 		// the caller's own world — NOT to the caller's club, so a manager can

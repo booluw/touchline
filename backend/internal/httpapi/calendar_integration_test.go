@@ -171,6 +171,42 @@ func TestHTTPSeasonCalendarAndClubFixtures(t *testing.T) {
 		t.Fatalf("upcoming limit=0 = %d, want 400", resp.StatusCode)
 	}
 
+	// IM67: season=current returns the whole season; unplayed rows carry a
+	// difficulty, and attendance/position stay null before kickoff. A cup tie
+	// a week after the last league matchday still belongs to the season.
+	var cupFixtureID string
+	if err := pool.QueryRow(context.Background(), `
+		WITH cup AS (
+			INSERT INTO competition.competitions (world_id, name, competition_type)
+			VALUES ($1, 'Late Cup', 'domestic_cup') RETURNING id)
+		INSERT INTO match.fixtures (world_id, competition_id, home_club_id, away_club_id, matchday, scheduled_at, status)
+		SELECT $1, cup.id, $2,
+		       (SELECT id FROM club.clubs WHERE world_id = $1 AND id <> $2 ORDER BY name LIMIT 1), 1,
+		       (SELECT max(scheduled_at) FROM match.fixtures WHERE world_id = $1) + interval '7 days', 'scheduled'
+		FROM cup RETURNING id`, worldID, clubID).Scan(&cupFixtureID); err != nil {
+		t.Fatalf("insert late cup tie: %v", err)
+	}
+	resp = get(t, ts, client, "/api/clubs/"+clubID+"/fixtures?season=current", plainCookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("season fixtures = %d, want 200", resp.StatusCode)
+	}
+	season := decodeMap(t, resp)["fixtures"].([]any)
+	if len(season) != 7 {
+		t.Fatalf("season fixtures = %d, want 7 (6 league + late cup tie)", len(season))
+	}
+	if last := season[6].(map[string]any); last["id"] != cupFixtureID {
+		t.Fatalf("last season fixture = %v, want the late cup tie %s", last["id"], cupFixtureID)
+	}
+	for _, f := range season {
+		row := f.(map[string]any)
+		if row["difficulty"] == nil || row["attendance"] != nil || row["position_after"] != nil {
+			t.Fatalf("unplayed season row: want difficulty and null attendance/position, got %v", row)
+		}
+	}
+	if resp := get(t, ts, client, "/api/clubs/"+clubID+"/fixtures?season=last", plainCookies); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("season=last = %d, want 400", resp.StatusCode)
+	}
+
 	// IM60 + IM56: a manager without a club gets 404; once employed, the
 	// window and the outlook are served for their club.
 	if _, err := pool.Exec(context.Background(),

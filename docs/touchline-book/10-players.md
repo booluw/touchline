@@ -162,6 +162,12 @@ readable; another world's player is a 404 identical to a non-existent one.
 
 Roster rows (`GET /api/clubs/:id/players`) also carry `nationality` (code + name), `date_of_birth`, `age` (completed years on the world calendar) and `contract` (active weekly wage + end date; null without an active contract). The roster still lists `status = 'active'` players only, so injured or loaned players do not appear in it. Potential stays hidden (OPD-60).
 
+IM63 adds `recent_ratings`: the last five **rated** appearances (1–10), oldest first, empty when none. It backs the Squad screen's Form column (the mean of those ratings plus five bars).
+
+### Squad screen (IM63, OPD-65)
+
+`/play/squad` shows the roster as a sortable table (Simple/Standard density; no Advanced mode because potential stays hidden). Filters: position group, search, and status (Wants out, Unhappy < 55 morale, Expiring ≤ 12 months, Injured). On desktop the selected player opens in a side panel. On mobile a tap opens `/play/players/:id`, which shows the same panel with tabs for the caller's own players. The panel reads `GET /api/clubs/:id/players/:playerID` (morale, role expectation, latest unexpired emotional state, condition, 1–20 attributes = ceil(stored/5), personality, contract with release clause, manager relationship history) plus the player's faction from `/dynamics`. The morale "Why?" lists the exact terms of the morale target (`explanation.why`, IM64). A pending request offers approve (asking price 0.8 / 1.0 / 1.25 × value), reassure (`POST .../transfer-request/reassure`, which pauses the request with a promise) or deny. The confirm step shows `GET .../transfer-request/preview`: the constants each action applies (IM65).
+
 ## Connections
 
 - Lifecycle (intake, ageing, retirement, eligibility): [Chapter 11](11-player-lifecycle-and-academy.md).

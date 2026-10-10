@@ -154,3 +154,78 @@ func TestHTTPPlayerSquadRoundTrip(t *testing.T) {
 		t.Fatalf("deny body = %v, want status denied", denyBody)
 	}
 }
+
+// TestHTTPTransferRequestPreviewReassureApprove covers IM65: the preview,
+// reassure by player, and approve with an asking-price preset.
+func TestHTTPTransferRequestPreviewReassureApprove(t *testing.T) {
+	ts, pool := testHTTPServer(t)
+	client := ts.Client()
+	ctx := context.Background()
+	const email = "request-preview-owner@example.com"
+	tw := transfertest.Provision(t, pool, "request-preview", email)
+	cookies := loginManager(t, ts, pool, email)
+
+	var ids []string
+	rows, err := pool.Query(ctx, `SELECT id::text FROM player.players WHERE club_id = $1 AND status = 'active' ORDER BY id LIMIT 2`, tw.HumanClub)
+	if err != nil {
+		t.Fatalf("pick players: %v", err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) < 2 {
+		t.Fatalf("need 2 players, got %d", len(ids))
+	}
+	for _, id := range ids {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO player.player_transfer_requests (player_id, club_id, manager_id, status, reason, created_at)
+			VALUES ($1, $2, $3, 'pending', 'playing_time', now())`, id, tw.HumanClub, tw.HumanMgr); err != nil {
+			t.Fatalf("seed request: %v", err)
+		}
+	}
+	url := func(id, action string) string {
+		return fmt.Sprintf("/api/clubs/%s/players/%s/transfer-request/%s", tw.HumanClub, id, action)
+	}
+
+	resp := get(t, ts, client, url(ids[0], "preview"), cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("preview = %d, want 200", resp.StatusCode)
+	}
+	preview := decodeTransferBody(t, resp)
+	if opts, _ := preview["options"].([]any); len(opts) != 3 {
+		t.Fatalf("preview options = %v, want 3", preview["options"])
+	}
+
+	resp = post(t, ts, client, url(ids[0], "reassure"), `{}`, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reassure = %d, want 200", resp.StatusCode)
+	}
+	if req, _ := decodeTransferBody(t, resp)["request"].(map[string]any); req == nil || req["status"] != "reassured" {
+		t.Fatalf("reassure body status = %v, want reassured", req)
+	}
+	if resp = get(t, ts, client, url(ids[0], "preview"), cookies); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("preview after reassure = %d, want 404", resp.StatusCode)
+	}
+
+	if resp = post(t, ts, client, url(ids[1], "approve"), `{"price_preset":"bargain"}`, cookies); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("approve bad preset = %d, want 400", resp.StatusCode)
+	}
+	var value int64
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(market_value,0)::bigint FROM player.players WHERE id = $1`, ids[1]).Scan(&value); err != nil {
+		t.Fatalf("market value: %v", err)
+	}
+	resp = post(t, ts, client, url(ids[1], "approve"), `{"price_preset":"hold_out"}`, cookies)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approve hold_out = %d, want 200", resp.StatusCode)
+	}
+	listing, _ := decodeTransferBody(t, resp)["listing"].(map[string]any)
+	want := float64(int64(float64(value)*1.25 + 0.5))
+	if listing == nil || listing["asking_price"] != want {
+		t.Fatalf("listing = %v, want asking_price %v", listing, want)
+	}
+}
