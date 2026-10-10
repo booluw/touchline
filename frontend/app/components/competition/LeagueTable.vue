@@ -43,6 +43,9 @@ const columns: TableColumn<TableHeader>[] = [
   { key: "form", label: "Form", width: "76px" }
 ]
 
+const skeletonRows = Array.from({ length: 20 }, (_, i) => ({ id: i }))
+const numericCols = ['played', 'won', 'drawn', 'lost', 'goal', 'points'] as const
+
 const formatter = new Intl.NumberFormat('en-US', { signDisplay: 'always' });
 
 onMounted(() => load())
@@ -51,12 +54,14 @@ onMounted(() => load())
   <!-- Fills a height-bounded parent: the header stays fixed, the rows scroll. -->
   <section class="flex h-full min-h-0 flex-col gap-5">
     <template v-if="status === 'loading'">
-      <UiCard flush class="overflow-x-auto py-2">
-        <div v-for="key in 20" :key class="grid gap-3 grid-cols-10 m-1">
-          <UiLoader class="w-5 h-4" />
-          <UiLoader class="w-full h-4 col-span-3" />
-          <UiLoader class="" v-for="i in 6" :key="i" />
-        </div>
+      <!-- Same table, header and widths as the loaded state; cells are placeholders. -->
+      <UiCard flush class="flex max-h-full min-h-0 flex-col overflow-hidden" aria-busy="true">
+        <UiDataTable class="min-h-0" :columns :rows="skeletonRows" :row-key="r => r.id" :density="full ? undefined : 'simple'" caption="Loading table">
+          <template #cell-position><UiLoader class="h-3 w-4" /></template>
+          <template #cell-club><UiLoader class="h-3.5 w-28" /></template>
+          <template v-for="k in numericCols" :key="k" #[`cell-${k}`]><UiLoader class="h-3 w-4" /></template>
+          <template #cell-form><span class="flex gap-1"><UiLoader v-for="i in 5" :key="i" class="h-3 w-3 rounded-pill" /></span></template>
+        </UiDataTable>
       </UiCard>
     </template>
     <template v-else-if="status === 'loaded' && data">

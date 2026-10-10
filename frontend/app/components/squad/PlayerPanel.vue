@@ -33,6 +33,7 @@ const humanize = (s: string) => s.replace(/_/g, ' ').replace(/^\w/, c => c.toUpp
 const money = (units: number) => formatMoneyCompact(units * 100)
 const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
 
+const fullName = computed(() => [props.detail.first_name, props.detail.last_name].filter(Boolean).join(' ') || props.detail.player.name)
 const morale = computed(() => Math.round(props.detail.morale * 100))
 const moodWord = computed(() => moodLabel(morale.value))
 const ovr = computed(() => props.row?.overall)
@@ -114,7 +115,7 @@ const contract = computed(() => {
   <div class="flex h-full min-h-0 flex-col gap-4">
     <UiCard class="flex items-start gap-3">
       <div class="flex min-w-0 flex-1 flex-col gap-1">
-        <span class="text-title font-semibold">{{ detail.player.name }}</span>
+        <span class="text-title font-semibold">{{ fullName }}</span>
         <span class="text-meta text-t2">
           {{ detail.position }}<template v-if="row?.age"> · {{ row.age }}</template><template v-if="row?.nationality"> · {{ row.nationality.name }}</template>
           · <span :class="morale < 45 ? 'text-neg' : 'text-t2'">{{ moodWord }}</span>

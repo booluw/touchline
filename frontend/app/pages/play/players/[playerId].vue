@@ -72,7 +72,11 @@ onMounted(init)
 
 <template>
   <!-- Fills the shell so the panel's header + tabs stay put and its cards scroll. -->
-  <main v-if="own" class="flex h-full flex-col gap-4 pt-5">
+  <main v-if="loading === 'loading'" class="flex h-full flex-col gap-4 pt-5">
+    <NuxtLink to="/play/squad" class="text-meta text-t2 hover:text-t1">&lsaquo; Squad</NuxtLink>
+    <SquadPlayerPanelSkeleton class="min-h-0 flex-1 pb-3.5" tabbed />
+  </main>
+  <main v-else-if="own" class="flex h-full flex-col gap-4 pt-5">
     <NuxtLink to="/play/squad" class="text-meta text-t2 hover:text-t1">&lsaquo; Squad</NuxtLink>
     <SquadPlayerPanel class="min-h-0 flex-1 pb-3.5" :detail="own.detail" :row="own.row" :dynamics="own.dynamics" :busy="busy" tabbed @respond="onRespond" />
   </main>
@@ -82,16 +86,14 @@ onMounted(init)
       <h2 class="page__header">Player</h2>
     </div>
 
-    <OldUiLoader v-if="loading === 'loading'" />
-
-    <p v-else-if="loading === 'error'" class="text-red-400">That player could not be loaded. They may not play in your world.</p>
+    <p v-if="loading === 'error'" class="text-red-400">That player could not be loaded. They may not play in your world.</p>
 
     <template v-else-if="player">
       <section class="grid gap-5 grid-cols-3">
         <div class="p-5 border-brutal border-void-700">
           <div class="flex items-start justify-between border-b-brutal pb-5 border-void-800">
             <div>
-              <h3 class="heading">{{ player.display_name }}</h3>
+              <h3 class="heading">{{ [player.first_name, player.last_name].filter(Boolean).join(' ') || player.display_name }}</h3>
               <p class="heading heading--small text-slate-400">
                 {{ player.position }}<span v-if="player.squad_number"> &middot; #{{ player.squad_number }}</span>
                 <span v-if="age !== null"> &middot; {{ age }} yrs</span>

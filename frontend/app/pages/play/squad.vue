@@ -121,6 +121,9 @@ const mobileSummary = computed(() => rows.value.length
   ? `${rows.value.length} · ${money(rows.value.reduce((a, r) => a + r.wage, 0))}/wk`
   : '')
 
+// Loading placeholders rendered through the real table (header, widths, density).
+const skeletonRows = Array.from({ length: 12 }, (_, i) => ({ id: i }))
+
 function clearFilters() {
   q.value = ''
   group.value = 'All'
@@ -180,7 +183,11 @@ watch([selectedId, clubId, mobile], loadDetail, { immediate: true })
     <section class="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3 py-2.5">
       <UiEmptyState v-if="status === 'error'" title="Squad unavailable" />
       <template v-else-if="status === 'loading'">
-        <UiLoader v-for="i in 8" :key="i" class="h-[60px] w-full" />
+        <div v-for="i in 8" :key="i" class="flex min-h-[60px] items-center gap-3 rounded-card border border-line bg-s1 px-3 py-2.5" aria-hidden="true">
+          <UiLoader class="h-5 w-[26px]" />
+          <div class="flex flex-1 flex-col gap-1.5"><UiLoader class="h-3.5 w-36" /><UiLoader class="h-3 w-48" /></div>
+          <div class="flex flex-col items-end gap-1.5"><UiLoader class="h-3 w-12" /><UiLoader class="h-[3px] w-10" /></div>
+        </div>
       </template>
       <template v-else>
         <button v-for="r in visible" :key="r.id" type="button"
@@ -249,10 +256,22 @@ watch([selectedId, clubId, mobile], loadDetail, { immediate: true })
     </div>
 
     <UiEmptyState v-if="status === 'error'" title="Squad unavailable" />
-    <div v-else-if="status === 'loading'" class="grid gap-5 md:grid-cols-12">
-      <UiCard class="space-y-3 md:col-span-8"><UiLoader v-for="i in 8" :key="i" class="h-6 w-full" /></UiCard>
-      <UiCard class="space-y-3 md:col-span-4"><UiLoader class="h-16 w-full" /><UiLoader class="h-40 w-full" /></UiCard>
-    </div>
+    <section v-else-if="status === 'loading'" class="grid min-h-0 flex-1 gap-5 pb-5 md:grid-cols-12" aria-busy="true">
+      <div class="flex min-h-0 flex-col md:col-span-7 xl:col-span-8">
+        <UiDataTable class="min-h-0 flex-1" :columns="columns" :rows="skeletonRows" :row-key="r => r.id" :density="mode" caption="Loading squad">
+          <template #cell-name><span class="flex items-center gap-2"><UiLoader class="h-3 w-6" /><UiLoader class="h-3.5 w-32" /></span></template>
+          <template #cell-pos><UiLoader class="h-3 w-6" /></template>
+          <template #cell-age><UiLoader class="ml-auto h-3 w-5" /></template>
+          <template #cell-ovr><UiLoader class="ml-auto h-3.5 w-6" /></template>
+          <template #cell-form><span class="flex items-end justify-end gap-1.5"><UiLoader class="h-4 w-7" /><UiLoader class="h-3 w-6" /></span></template>
+          <template #cell-morale><span class="flex items-center gap-2"><UiLoader class="h-1 w-12" /><UiLoader class="h-3 w-12" /></span></template>
+          <template #cell-exp><UiLoader class="ml-auto h-3 w-14" /></template>
+          <template #cell-wage><UiLoader class="ml-auto h-3 w-10" /></template>
+          <template #cell-value><UiLoader class="ml-auto h-3 w-10" /></template>
+        </UiDataTable>
+      </div>
+      <aside class="min-h-0 md:col-span-5 xl:col-span-4"><SquadPlayerPanelSkeleton /></aside>
+    </section>
 
     <section v-else class="grid min-h-0 flex-1 gap-5 pb-5 md:grid-cols-12">
       <div class="flex min-h-0 flex-col gap-2 md:col-span-7 xl:col-span-8">
@@ -298,7 +317,7 @@ watch([selectedId, clubId, mobile], loadDetail, { immediate: true })
       <aside class="min-h-0 md:col-span-5 xl:col-span-4">
         <SquadPlayerPanel v-if="detail && detail.player.id === selectedId" :detail="detail" :row="selectedRow"
           :dynamics="dynamics" :busy="busy" @respond="onRespond" />
-        <UiCard v-else-if="selectedId" class="space-y-3"><UiLoader class="h-16 w-full" /><UiLoader class="h-40 w-full" /></UiCard>
+        <SquadPlayerPanelSkeleton v-else-if="selectedId" />
       </aside>
     </section>
   </main>
