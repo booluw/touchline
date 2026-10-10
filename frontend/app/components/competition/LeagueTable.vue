@@ -10,7 +10,6 @@ const props = withDefaults(defineProps<{
 
 const { getLeagueTable } = useManagerCompetition()
 const clubstore = useClubStore()
-const { $viewport } = useNuxtApp()
 
 const status = ref<LoadingStatus>("loading")
 const data = ref<CompetitionStanding>()
@@ -41,7 +40,7 @@ const columns: TableColumn<TableHeader>[] = [
   { key: "lost", label: "L", width: "30px", advanced: true },
   { key: "goal", label: "GD", width: "30px" },
   { key: "points", label: "Pts", width: "30px" },
-  { key: "form", label: "Form"}
+  { key: "form", label: "Form", width: "76px" }
 ]
 
 const formatter = new Intl.NumberFormat('en-US', { signDisplay: 'always' });
@@ -49,7 +48,8 @@ const formatter = new Intl.NumberFormat('en-US', { signDisplay: 'always' });
 onMounted(() => load())
 </script>
 <template>
-  <section class="space-y-5 ms:space-y-10">
+  <!-- Fills a height-bounded parent: the header stays fixed, the rows scroll. -->
+  <section class="flex h-full min-h-0 flex-col gap-5">
     <template v-if="status === 'loading'">
       <UiCard flush class="overflow-x-auto py-2">
         <div v-for="key in 20" :key class="grid gap-3 grid-cols-10 m-1">
@@ -60,17 +60,15 @@ onMounted(() => load())
       </UiCard>
     </template>
     <template v-else-if="status === 'loaded' && data">
-      <UiCard flush class="overflow-x-auto">
-        <UiDataTable :columns :rows="data.rows" :row-key="r => r.club.id" :density="$viewport.matches('mobile') ? 'simple' : full ? 'standard' : 'simple'"
+      <UiCard flush class="flex max-h-full min-h-0 flex-col overflow-hidden">
+        <UiDataTable class="min-h-0" :columns :rows="data.rows" :row-key="r => r.club.id" :density="full ? undefined : 'simple'"
           :selected-key="clubId">
           <template #cell-position="{ row }">
             <div :class="`absolute border h-8 -translate-x-3 -translate-y-2 hidden`" />
             <span class="num w-8 text-label text-t3">{{ row.position }}</span>
           </template>
           <template #cell-club="{ row }">
-            <div class="flex gap-2">
-              <nuxt-link :to="`/play/clubs/${row.club.id}`" class="hover:underline">{{ row.club.name }}</nuxt-link>
-            </div>
+            <nuxt-link :to="`/play/clubs/${row.club.id}`" class="block truncate hover:underline" :title="row.club.name">{{ row.club.name }}</nuxt-link>
           </template>
           <template #cell-lost="{ row }">
             <span class="num w-8 text-t3">{{ row.lost }}</span>
@@ -91,10 +89,10 @@ onMounted(() => load())
             <span class="num w-8">{{ row.points }}</span>
           </template>
           <template #cell-form="{ row }">
-            <div class="grid grid-cols-5 gap-3">
+            <div class="flex gap-1">
               <div
                 v-for="(form, key) in row.form" :key
-                class="h-4 w-4 rounded-pill inline-flex"
+                class="h-3 w-3 shrink-0 rounded-pill"
                 :class="[{ 'bg-pos' : form === 'W' }, { 'bg-neg': form === 'L' }, { 'bg-neutral': form === 'D'}]"
               />
             </div>

@@ -47,7 +47,7 @@ const rows = computed<Row[]>(() => players.value.map((p) => {
   else if (p.unavailable_reason === 'injured') { flag = 'Injured'; flagTone = 'urgent' }
   else if (expMonths <= 6) { flag = 'Expiring'; flagTone = 'important' }
   return {
-    id: p.player.id, name: p.player.name, pos: p.position ?? '', age: p.age ?? 0, ovr: p.overall ?? 0,
+    id: p.player.id, name: [p.first_name, p.last_name].filter(Boolean).join(' ') || p.player.name, pos: p.position ?? '', age: p.age ?? 0, ovr: p.overall ?? 0,
     form: ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : null, ratings,
     morale, exp: p.contract ? new Date(p.contract.end_date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }) : '—',
     expMonths, wage: p.contract?.weekly_wage ?? 0, value: p.dossier?.bio?.market_value ?? 0, flag, flagTone, src: p,
@@ -105,6 +105,22 @@ const ratingTone = (v: number) => v >= 7 ? 'bg-pos' : v < 6 ? 'bg-neg' : 'bg-t3'
 const selectedId = computed(() => typeof route.query.player === 'string' ? route.query.player : visible.value[0]?.id)
 const selectedRow = computed(() => players.value.find(p => p.player.id === selectedId.value))
 
+// Mobile (design): sort + status + search live in a bottom sheet.
+const sheet = ref(false)
+const sortLabel = computed(() => {
+  const col = columns.find(c => c.key === sort.value?.key)
+  return col ? `${col.label} ${sort.value?.direction === 'asc' ? '↑' : '↓'}` : 'rating'
+})
+const sortOptions = columns.map(c => ({ key: c.key, label: c.label }))
+function setSort(key: Key) {
+  const same = sort.value?.key === key
+  sort.value = { key, direction: same && sort.value?.direction === 'desc' ? 'asc' : 'desc' }
+}
+const moraleText = (m: number) => m < 35 ? 'text-neg' : m < 55 ? 'text-important' : m >= 75 ? 'text-pos' : 'text-t2'
+const mobileSummary = computed(() => rows.value.length
+  ? `${rows.value.length} · ${money(rows.value.reduce((a, r) => a + r.wage, 0))}/wk`
+  : '')
+
 function clearFilters() {
   q.value = ''
   group.value = 'All'
@@ -145,18 +161,87 @@ watch([selectedId, clubId, mobile], loadDetail, { immediate: true })
 </script>
 
 <template>
+  <!-- Mobile (design): fixed header block over a scrolling card list. -->
+  <main v-if="mobile" class="-mx-3.5 flex h-full flex-col">
+    <header class="flex flex-col gap-2.5 border-b border-line bg-s1 px-4 pb-2.5 pt-3.5">
+      <div class="flex items-center justify-between">
+        <h2 class="text-[17px] font-semibold">Squad</h2>
+        <span class="num text-[11px] text-t3">{{ mobileSummary }}</span>
+      </div>
+      <div class="flex gap-1.5 overflow-x-auto">
+        <UiFilterChip v-for="g in groups" :key="g" :label="g" :selected="group === g" class="shrink-0" @update:selected="group = g" />
+      </div>
+      <div class="flex justify-between text-[11.5px] text-t3">
+        <span>Sorted by {{ sortLabel }}<template v-if="statusFilter !== 'All'"> · {{ statusFilter }}</template></span>
+        <button type="button" class="text-info" @click="sheet = true">Sort · Filter</button>
+      </div>
+    </header>
+
+    <section class="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3 py-2.5">
+      <UiEmptyState v-if="status === 'error'" title="Squad unavailable" />
+      <template v-else-if="status === 'loading'">
+        <UiLoader v-for="i in 8" :key="i" class="h-[60px] w-full" />
+      </template>
+      <template v-else>
+        <button v-for="r in visible" :key="r.id" type="button"
+          class="flex min-h-[60px] items-center gap-3 rounded-card border border-line bg-s1 px-3 py-2.5 text-left" @click="open(r)">
+          <span class="num w-[26px] text-[16px] font-semibold">{{ r.ovr }}</span>
+          <div class="flex min-w-0 flex-1 flex-col gap-[3px]">
+            <div class="flex min-w-0 items-center gap-1.5">
+              <span class="truncate font-medium">{{ r.name }}</span>
+              <UiStatusBadge v-if="r.flag" :tone="r.flagTone" class="shrink-0">{{ r.flag }}</UiStatusBadge>
+            </div>
+            <span class="num text-[11.5px] text-t3">{{ r.pos }} · {{ r.age }} · {{ money(r.wage) }}/wk · {{ r.exp }}</span>
+          </div>
+          <div class="flex shrink-0 flex-col items-end gap-1">
+            <span :class="['text-[11.5px]', moraleText(r.morale)]">{{ moodLabel(r.morale) }}</span>
+            <div class="h-[3px] w-10 rounded-sm bg-s3"><div :class="['h-[3px] rounded-sm', moraleTone(r.morale)]" :style="{ width: `${r.morale}%` }" /></div>
+          </div>
+        </button>
+        <UiEmptyState v-if="!visible.length" title="No players match these filters">
+          <UiButton size="sm" variant="secondary" @click="clearFilters">Clear filters</UiButton>
+        </UiEmptyState>
+      </template>
+    </section>
+
+    <UiBottomSheet v-model:open="sheet" title="Sort & filter">
+      <div class="flex flex-col gap-4 py-1">
+        <UiTextField v-model="q" label="Search players" type="search" placeholder="Search players" />
+        <div class="flex flex-col gap-2">
+          <span class="text-label label-caps text-t3">Sort by</span>
+          <div class="flex flex-wrap gap-1.5">
+            <UiFilterChip v-for="o in sortOptions" :key="o.key"
+              :label="sort?.key === o.key ? `${o.label} ${sort.direction === 'asc' ? '↑' : '↓'}` : o.label"
+              :selected="sort?.key === o.key" @update:selected="setSort(o.key)" />
+          </div>
+        </div>
+        <div class="flex flex-col gap-2">
+          <span class="text-label label-caps text-t3">Status</span>
+          <div class="flex flex-wrap gap-1.5">
+            <UiFilterChip v-for="(_, k) in statusFilters" :key="k" :label="k" :count="k === 'All' ? undefined : statusCount(k)"
+              :selected="statusFilter === k" @update:selected="statusFilter = k" />
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <UiButton variant="secondary" @click="clearFilters">Clear</UiButton>
+        <UiButton variant="primary" @click="sheet = false">Show {{ visible.length }} players</UiButton>
+      </template>
+    </UiBottomSheet>
+  </main>
+
   <!-- Desktop: the page fits the shell; table and panel scroll on their own. -->
-  <main :class="mobile ? 'space-y-5' : 'flex h-full flex-col gap-5'">
+  <main v-else class="flex h-full flex-col gap-5">
     <div class="flex flex-wrap items-end justify-between gap-3 pt-5">
       <div class="flex flex-col gap-1">
         <h2 class="text-page">Squad</h2>
         <span class="num text-meta text-t2">{{ summary }}</span>
       </div>
-      <UiSegmentedControl v-if="!mobile" v-model="mode" label="Table density" :options="modes" />
+      <UiSegmentedControl v-model="mode" label="Table density" :options="modes" />
     </div>
 
     <div class="flex flex-wrap items-center gap-2">
-      <UiTextField v-if="!mobile" v-model="q" label="Search players" type="search" placeholder="Search players" class="w-56" />
+      <UiTextField v-model="q" label="Search players" type="search" placeholder="Search players" class="w-56" />
       <UiFilterChip v-for="g in groups" :key="g" :label="g" :selected="group === g" @update:selected="group = g" />
       <span class="mx-1 h-5 w-px bg-line" aria-hidden="true" />
       <UiFilterChip v-for="(_, k) in statusFilters" :key="k" :label="k" :count="k === 'All' ? undefined : statusCount(k)"
@@ -168,26 +253,6 @@ watch([selectedId, clubId, mobile], loadDetail, { immediate: true })
       <UiCard class="space-y-3 md:col-span-8"><UiLoader v-for="i in 8" :key="i" class="h-6 w-full" /></UiCard>
       <UiCard class="space-y-3 md:col-span-4"><UiLoader class="h-16 w-full" /><UiLoader class="h-40 w-full" /></UiCard>
     </div>
-
-    <!-- Mobile: card list; a tap opens the full-screen player view. -->
-    <section v-else-if="mobile" class="flex flex-col gap-2">
-      <button v-for="r in visible" :key="r.id" type="button"
-        class="flex items-center gap-3 rounded-card border border-line bg-s1 p-3 text-left" @click="open(r)">
-        <span class="num w-8 text-[18px] font-semibold">{{ r.ovr }}</span>
-        <div class="flex min-w-0 flex-1 flex-col">
-          <span class="flex items-center gap-1.5 truncate font-medium">{{ r.name }}
-            <UiStatusBadge v-if="r.flag" :tone="r.flagTone">{{ r.flag }}</UiStatusBadge></span>
-          <span class="num text-meta text-t3">{{ r.pos }} · {{ r.age }} · {{ money(r.wage) }}/wk · {{ r.exp }}</span>
-        </div>
-        <div class="flex w-20 flex-col items-end gap-1">
-          <span class="text-meta text-t2">{{ moodLabel(r.morale) }}</span>
-          <div class="h-1 w-full rounded bg-s3"><div :class="['h-1 rounded', moraleTone(r.morale)]" :style="{ width: `${r.morale}%` }" /></div>
-        </div>
-      </button>
-      <UiEmptyState v-if="!visible.length" title="No players match these filters">
-        <UiButton size="sm" variant="secondary" @click="clearFilters">Clear filters</UiButton>
-      </UiEmptyState>
-    </section>
 
     <section v-else class="grid min-h-0 flex-1 gap-5 pb-5 md:grid-cols-12">
       <div class="flex min-h-0 flex-col gap-2 md:col-span-7 xl:col-span-8">
